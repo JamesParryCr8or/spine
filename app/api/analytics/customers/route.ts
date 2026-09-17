@@ -18,22 +18,28 @@ export async function GET() {
   const userId = claims?.claims?.sub;
   if (!userId) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
 
-  const { data: membership } = await supabase.from("organization_members").select("organization_id").eq("user_id", userId).limit(1).single();
+  const { data: membership } = await supabase.from("organization_members").select("organization_id,role").eq("user_id", userId).limit(1).single();
   if (!membership) return NextResponse.json({ error: "No workspace is configured" }, { status: 403 });
   const { data: store } = await supabase.from("stores").select("id,currency").eq("organization_id", membership.organization_id).limit(1).single();
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
-  const { data: rawOrders, error } = await supabase
-    .from("shopify_orders")
-    .select("id,customer_id,processed_at,net_product_sales,shipping_revenue")
-    .eq("store_id", store.id)
-    .eq("test", false)
-    .is("cancelled_at", null)
-    .not("processed_at", "is", null)
-    .order("processed_at", { ascending: true });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  const orders = (rawOrders ?? []) as Order[];
+  const orders: Order[] = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from("shopify_orders")
+      .select("id,customer_id,processed_at,net_product_sales,shipping_revenue")
+      .eq("store_id", store.id)
+      .eq("test", false)
+      .is("cancelled_at", null)
+      .not("processed_at", "is", null)
+      .order("processed_at", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const page = (data ?? []) as Order[];
+    orders.push(...page);
+    if (page.length < pageSize) break;
+  }
   const ordersByCustomer = new Map<string, Order[]>();
   let guestOrders = 0;
   let guestSales = 0;
@@ -106,7 +112,12 @@ export async function GET() {
       averageCustomerValue: customers.length ? (newCustomerSales + repeatCustomerSales) / customers.length : null,
       averageDaysToSecondOrder: timeToSecondOrderDays.length ? timeToSecondOrderDays.reduce((total, days) => total + days, 0) / timeToSecondOrderDays.length : null,
     },
-    customers: recentCustomers.data ?? [],
+    customerDetailsMasked: !["owner", "admin", "analyst"].includes(membership.role),
+    customers: (recentCustomers.data ?? []).map((customer, index) => ({
+      ...customer,
+      display_name: ["owner", "admin", "analyst"].includes(membership.role) ? customer.display_name : `Customer ${index + 1}`,
+      email: null,
+    })),
     months: [...months.values()].sort((left, right) => left.key.localeCompare(right.key)),
   });
 }
