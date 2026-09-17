@@ -19,13 +19,15 @@ export async function GET() {
   const error = connectionResult.error ?? successfulResult.error ?? latestResult.error;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   const completed = successfulResult.data;
+  const latest = latestResult.data;
+  const interrupted = latest?.status === "running" && Date.parse(latest.updated_at) < Date.now() - 6 * 60 * 1000;
   return NextResponse.json({
     connected: connectionResult.data?.status === "connected",
     storeName: store.name ?? null,
     lastSuccessfulSync: completed?.completed_at ?? null,
     recordsProcessed: completed?.records_processed ?? 0,
     warnings: Array.isArray(completed?.warnings) ? completed.warnings.length : 0,
-    latestStatus: latestResult.data?.status ?? null,
-    latestError: latestResult.data?.error_message ?? null,
+    latestStatus: interrupted ? "interrupted" : latest?.status ?? null,
+    latestError: interrupted ? "The historical import paused at its saved checkpoint. Reconnect Shopify to resume it." : latest?.error_message ?? null,
   });
 }
