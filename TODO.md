@@ -90,7 +90,7 @@ The product should answer these questions quickly:
 - [x] Add local Supabase configuration and migration workflow.
 - [x] Pin dependency versions and commit the lockfile.
 - [ ] Create CI checks for type checking, tests, migrations, and production build.
-- [ ] Add a short architecture decision record explaining Supabase, lightweight persistence, and Shopify-first scope.
+- [x] Add a short architecture decision record explaining Supabase, lightweight persistence, and Shopify-first scope.
 
 ## Phase 1 — Auth, organizations, and onboarding shell
 
