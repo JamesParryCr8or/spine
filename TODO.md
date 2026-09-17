@@ -288,7 +288,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [ ] Add monthly, weekly, daily, quarterly, and annual views.
 - [ ] Add previous-period and previous-year comparisons.
 - [ ] Add chart/table toggle and optional comparison overlay.
-- [ ] Show formula explanations and source coverage for each row.
+- [x] Show P&L formula explanations and source coverage for included and unavailable cost inputs.
 - [ ] Add reconciliation status and missing-cost warnings above the table.
 - [ ] Export exactly the visible P&L configuration.
 
