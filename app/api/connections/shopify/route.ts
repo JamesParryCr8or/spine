@@ -69,7 +69,7 @@ export async function GET() {
   if (!claims?.claims?.sub) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
   const [membershipResult, connectionResult] = await Promise.all([
     supabase.from("organization_members").select("organization_id").eq("user_id", claims.claims.sub).limit(1).maybeSingle(),
-    supabase.from("data_connections").select("provider,status,external_account_id,external_account_name,last_verified_at,last_error").eq("provider", "shopify").maybeSingle(),
+    supabase.from("data_connections").select("provider,status,external_account_id,external_account_name,last_verified_at,last_error,granted_scopes").eq("provider", "shopify").maybeSingle(),
   ]);
   if (membershipResult.error) return NextResponse.json({ error: membershipResult.error.message }, { status: 500 });
   if (!membershipResult.data) return NextResponse.json({ error: "No workspace is configured" }, { status: 403 });
@@ -110,6 +110,8 @@ export async function POST(request: Request) {
     if (storeError) throw new Error(storeError.message);
     const { error: connectionError } = await supabase.rpc("save_data_connection", { connection_provider: "shopify", access_token: accessToken, account_id: shopData.shop.id, account_name: shopData.shop.name });
     if (connectionError) throw new Error(connectionError.message);
+    const { error: scopesError } = await supabase.rpc("record_shopify_connection_scopes", { scopes: [...grantedScopes].sort() });
+    if (scopesError) throw new Error(scopesError.message);
 
     const staleBefore = new Date(Date.now() - 6 * 60 * 1000).toISOString();
     const { data: existingRun, error: existingRunError } = await supabase
@@ -235,7 +237,7 @@ export async function POST(request: Request) {
     const recordsProcessed = priorRecordsProcessed + productsProcessed + variantsProcessed + ordersProcessed + orderLinesProcessed + customersProcessed + refundsProcessed + refundLinesProcessed + transactionsProcessed + attributionProcessed;
     const { error: completeError } = await supabase.from("sync_runs").update({ status: "completed", cursor: null, records_processed: recordsProcessed, warnings, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", run.id);
     if (completeError) throw new Error(completeError.message);
-    return NextResponse.json({ connection: { provider: "shopify", status: "connected", external_account_id: shopData.shop.id, external_account_name: shopData.shop.name }, resumed, sync: { products: productsProcessed, variants: variantsProcessed, orders: ordersProcessed, orderLines: orderLinesProcessed, customers: customersProcessed, refunds: refundsProcessed, refundLines: refundLinesProcessed, transactions: transactionsProcessed, attribution: attributionProcessed, warnings: warnings.length } });
+    return NextResponse.json({ connection: { provider: "shopify", status: "connected", external_account_id: shopData.shop.id, external_account_name: shopData.shop.name, granted_scopes: [...grantedScopes].sort() }, resumed, sync: { products: productsProcessed, variants: variantsProcessed, orders: ordersProcessed, orderLines: orderLinesProcessed, customers: customersProcessed, refunds: refundsProcessed, refundLines: refundLinesProcessed, transactions: transactionsProcessed, attribution: attributionProcessed, warnings: warnings.length } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Shopify connection failed";
     if (runId) await supabase.from("sync_runs").update({ status: "failed", error_message: message.slice(0, 500), completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", runId);
