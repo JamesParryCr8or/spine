@@ -88,11 +88,16 @@ export async function GET() {
     .map((cohort) => ({
       key: cohort.key,
       customers: cohort.customerIds.size,
-      periods: Array.from({ length: 7 }, (_, period) => {
-        const current = cohort.periods.get(period);
-        const activeCustomers = current?.customerIds.size ?? 0;
-        return { period, activeCustomers, retentionRate: cohort.customerIds.size ? activeCustomers / cohort.customerIds.size : 0, revenue: current?.revenue ?? 0 };
-      }),
+      periods: (() => {
+        let cumulativeRevenue = 0;
+        return Array.from({ length: 7 }, (_, period) => {
+          const current = cohort.periods.get(period);
+          const activeCustomers = current?.customerIds.size ?? 0;
+          const revenue = current?.revenue ?? 0;
+          cumulativeRevenue += revenue;
+          return { period, activeCustomers, retentionRate: cohort.customerIds.size ? activeCustomers / cohort.customerIds.size : 0, revenue, cumulativeRevenue };
+        });
+      })(),
     }));
   for (const customerOrders of customers) {
     customerOrders.forEach((order, index) => {
