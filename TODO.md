@@ -73,7 +73,7 @@ The product should answer these questions quickly:
 
 - [ ] Rotate the Chargebee credential currently embedded in `Config.gs`.
 - [ ] Remove all live credentials from source files and local history before this code is shared or deployed.
-- [ ] Add `.env.example` with variable names only and ensure real environment files are ignored.
+- [x] Add `.env.example` with variable names only and ensure real environment files are ignored.
 - [ ] Create separate development and production Supabase projects.
 - [ ] Use only a publishable Supabase key in the browser; keep secret/service-role credentials server-side.
 - [ ] Decide how third-party tokens will be encrypted at rest: Supabase Vault or application encryption backed by a managed key.
@@ -84,7 +84,7 @@ The product should answer these questions quickly:
 - [ ] Create the web application in a new directory so the Apps Script prototype remains intact.
 - [ ] Add formatting, linting, type checking, unit testing, and environment validation.
 - [ ] Add local Supabase configuration and migration workflow.
-- [ ] Pin dependency versions and commit the lockfile.
+- [x] Pin dependency versions and commit the lockfile.
 - [ ] Create CI checks for type checking, tests, migrations, and production build.
 - [ ] Add a short architecture decision record explaining Supabase, lightweight persistence, and Shopify-first scope.
 
@@ -133,13 +133,13 @@ Shopify is the primary sales and catalog source. Other sources enrich Shopify ra
 
 ### Shopify source tables
 
-- [ ] Create `shopify_orders` with stable Shopify GraphQL IDs and order-level financial fields.
-- [ ] Create `shopify_order_lines` with product, variant, SKU, quantities, discounts, tax, and line revenue.
-- [ ] Create `shopify_refunds` and `shopify_refund_lines` rather than multiplying rows through nested joins.
-- [ ] Create `shopify_customers` with first-order date and aggregate customer fields.
+- [x] Create `shopify_orders` with stable Shopify GraphQL IDs and order-level financial fields.
+- [x] Create `shopify_order_lines` with product, variant, SKU, quantities, discounts, tax, and line revenue.
+- [x] Create `shopify_refunds` and `shopify_refund_lines` rather than multiplying rows through nested joins.
+- [x] Create `shopify_customers` with first-order date and aggregate customer fields.
 - [x] Create `shopify_products` and `shopify_variants` with SKU, status, price, inventory references, and Shopify unit cost when available.
 - [ ] Create `shopify_transactions` for payment gateway and transaction-fee analysis.
-- [ ] Create `shopify_order_attribution` for landing page, referrer, first/last visit, UTM source, medium, campaign, term, and content without duplicating order revenue.
+- [x] Create `shopify_order_attribution` for landing page, referrer, first/last visit, UTM source, medium, campaign, term, and content without duplicating order revenue.
 - [ ] Create `shopify_fulfillments` only when required for shipping and operational reporting.
 - [ ] Retain source JSON selectively for troubleshooting, with a retention limit and no unnecessary personal data.
 
@@ -150,8 +150,8 @@ Shopify is the primary sales and catalog source. Other sources enrich Shopify ra
 - [ ] Implement incremental sync using updated timestamps and durable cursors.
 - [ ] Re-fetch a rolling recent window to capture refunds, edits, cancellations, and fulfillment changes.
 - [ ] Add Shopify webhooks for important changes after scheduled sync is stable.
-- [ ] Make writes idempotent with source IDs and deterministic upserts.
-- [ ] Expand the implemented `sync_runs` tracking with resumable cursor, duration, warnings, and sanitized failed-run updates.
+- [x] Make writes idempotent with source IDs and deterministic upserts.
+- [x] Expand the implemented `sync_runs` tracking with resumable cursor, duration, warnings, and sanitized failed-run updates.
 - [ ] Add dead-letter or retry handling for individual failed records.
 - [ ] Respect Shopify rate limits and report throttling clearly.
 - [ ] Add a manual “Sync now” action and configurable scheduled refresh.

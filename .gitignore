@@ -44,3 +44,4 @@ next-env.d.ts
 # local workspace artifacts
 /.kilo/
 /legacy-apps-script/
+/supabase/.temp/
