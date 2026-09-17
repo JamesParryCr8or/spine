@@ -526,7 +526,7 @@ type CustomerRow = { id: string; display_name: string | null; number_of_orders: 
 type CustomerData = {
   hasData: boolean;
   currency: string;
-  metrics: { customers: number; repeatCustomers: number; repeatCustomerRate: number | null; newCustomerOrders: number; newCustomerSales: number; repeatCustomerOrders: number; repeatCustomerSales: number; guestOrders: number; guestSales: number; repeatRevenueRate: number | null; averageOrdersPerCustomer: number | null; averageCustomerValue: number | null; averageDaysToSecondOrder: number | null };
+  metrics: { customers: number; repeatCustomers: number; repeatCustomerRate: number | null; newCustomerOrders: number; newCustomerSales: number; repeatCustomerOrders: number; repeatCustomerSales: number; guestOrders: number; guestSales: number; repeatRevenueRate: number | null; newCustomerAverageOrderValue: number | null; repeatCustomerAverageOrderValue: number | null; averageOrdersPerCustomer: number | null; averageCustomerValue: number | null; averageDaysToSecondOrder: number | null };
   customers: CustomerRow[];
   customerDetailsMasked?: boolean;
   months: Array<{ key: string; newCustomerOrders: number; newCustomerSales: number; repeatCustomerOrders: number; repeatCustomerSales: number }>;
@@ -545,8 +545,8 @@ function Customers() {
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: data?.currency || "GBP", maximumFractionDigits: 0 });
   const metrics = data ? [
     ["CUSTOMERS", data.metrics.customers.toLocaleString(), `${data.metrics.repeatCustomers.toLocaleString()} repeat customers`],
-    ["NEW-CUSTOMER SALES", formatter.format(data.metrics.newCustomerSales), `${data.metrics.newCustomerOrders.toLocaleString()} first orders`],
-    ["REPEAT SALES", formatter.format(data.metrics.repeatCustomerSales), data.metrics.repeatRevenueRate === null ? "No repeat sales yet" : `${(data.metrics.repeatRevenueRate * 100).toFixed(1)}% of identified sales`],
+    ["NEW-CUSTOMER SALES", formatter.format(data.metrics.newCustomerSales), `${data.metrics.newCustomerOrders.toLocaleString()} first orders · ${data.metrics.newCustomerAverageOrderValue === null ? "—" : formatter.format(data.metrics.newCustomerAverageOrderValue)} AOV`],
+    ["REPEAT SALES", formatter.format(data.metrics.repeatCustomerSales), data.metrics.repeatRevenueRate === null ? "No repeat sales yet" : `${(data.metrics.repeatRevenueRate * 100).toFixed(1)}% of identified sales · ${data.metrics.repeatCustomerAverageOrderValue === null ? "—" : formatter.format(data.metrics.repeatCustomerAverageOrderValue)} AOV`],
     ["REPEAT CUSTOMER RATE", data.metrics.repeatCustomerRate === null ? "—" : `${(data.metrics.repeatCustomerRate * 100).toFixed(1)}%`, "Customers with more than one order"],
   ] : [];
   const exportCustomers = () => { if (data) downloadCsv("shopify-customers.csv", [["Customer", "Orders", "Lifetime spend", "Last updated"], ...data.customers.map((customer) => [customer.display_name || "Unnamed customer", customer.number_of_orders, Number(customer.amount_spent), customer.updated_at_shopify])]); };
