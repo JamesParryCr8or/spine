@@ -35,6 +35,10 @@ function money(value?: MoneyBag | null) {
   return value?.shopMoney.amount ?? "0";
 }
 
+function dedupeByShopifyId<T extends { shopify_gid: string }>(rows: T[]) {
+  return [...new Map(rows.map((row) => [row.shopify_gid, row])).values()];
+}
+
 function visitRow(visit: Visit | null, model: "first_touch" | "last_touch", shared: Record<string, unknown>, journey: NonNullable<ShopifyOrder["customerJourneySummary"]>) {
   return {
     ...shared, attribution_model: model, visit_gid: visit?.id ?? null, occurred_at: visit?.occurredAt ?? null,
@@ -136,7 +140,7 @@ export async function POST(request: Request) {
         customerJourneySummary{ready daysToConversion customerOrderIndex firstVisit{id occurredAt landingPage referrerUrl source sourceDescription sourceType utmParameters{source medium campaign content term}} lastVisit{id occurredAt landingPage referrerUrl source sourceDescription sourceType utmParameters{source medium campaign content term}}}
       } pageInfo{hasNextPage endCursor} } }`, { cursor: orderCursor });
 
-      const customers = result.orders.nodes.flatMap((order) => order.customer ? [{ organization_id: membership.organization_id, store_id: store.id, shopify_gid: order.customer.id, legacy_resource_id: order.customer.legacyResourceId, display_name: order.customer.displayName, email: order.customer.defaultEmailAddress?.emailAddress ?? null, number_of_orders: order.customer.numberOfOrders, amount_spent: order.customer.amountSpent.amount, currency: order.customer.amountSpent.currencyCode, created_at_shopify: order.customer.createdAt, updated_at_shopify: order.customer.updatedAt, synced_at: new Date().toISOString() }] : []);
+      const customers = dedupeByShopifyId(result.orders.nodes.flatMap((order) => order.customer ? [{ organization_id: membership.organization_id, store_id: store.id, shopify_gid: order.customer.id, legacy_resource_id: order.customer.legacyResourceId, display_name: order.customer.displayName, email: order.customer.defaultEmailAddress?.emailAddress ?? null, number_of_orders: order.customer.numberOfOrders, amount_spent: order.customer.amountSpent.amount, currency: order.customer.amountSpent.currencyCode, created_at_shopify: order.customer.createdAt, updated_at_shopify: order.customer.updatedAt, synced_at: new Date().toISOString() }] : []));
       if (customers.length) { const { error } = await supabase.from("shopify_customers").upsert(customers, { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
       customersProcessed += customers.length;
       const customerGids = customers.map((customer) => customer.shopify_gid);
