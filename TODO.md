@@ -232,7 +232,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [x] Returns and refunds.
 - [x] Net product sales.
 - [x] Shipping revenue.
-- [ ] Taxes and duties.
+- [x] Taxes and duties are shown separately and excluded from the current profit calculation.
 - [ ] Total sales, with a documented formula.
 - [x] Product COGS using the effective product cost on the order date, with Shopify unit-cost fallback.
 - [x] Gross profit and gross margin percentage, with missing-cost coverage warnings.
