@@ -387,7 +387,7 @@ Normalize every ad source into shared daily dimensions while retaining source-sp
 ### Saved report specifications
 
 - [x] Create `saved_reports` with owner, organization, store scope, report type, name, description, and access settings.
-- [ ] Store relative date presets separately from resolved run dates.
+- [x] Store relative date presets separately from resolved run dates.
 - [x] Support private and organization-shared reports.
 - [x] Add favourite actions; add duplicate, rename, and archive actions.
 - [ ] Record report version and last successful run.
