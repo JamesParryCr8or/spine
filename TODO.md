@@ -120,7 +120,7 @@ The product should answer these questions quickly:
 - [ ] Add a global date range, comparison period, and daily/weekly/monthly granularity control.
 - [ ] Persist active organization, store, date range, comparison, and timezone preferences.
 - [ ] Add loading, empty, partial-data, stale-data, and connector-error states.
-- [ ] Display last successful sync and data freshness on every report.
+- [x] Display last successful Shopify sync and data freshness in the application shell.
 
 ## Phase 2 — Shopify connection and data ingestion
 
