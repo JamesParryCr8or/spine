@@ -1,25 +1,12 @@
 import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
+import { costKey, monetary, resolveEffectiveCost, type EffectiveCost } from "@/lib/analytics/effective-cost";
 
 type Order = { id: string; processed_at: string | null; gross_sales: string; discounts: string; net_product_sales: string; shipping_revenue: string; tax: string; duties: string; total_sales: string };
 type Line = { order_id: string; variant_gid: string | null; sku: string | null; current_quantity: number };
 type Variant = { id: string; shopify_gid: string; sku: string | null; shopify_unit_cost: string | null };
-type Cost = { variant_id: string | null; sku: string | null; amount: string; effective_from: string; effective_to: string | null; source: string };
 type Refund = { total_refunded: string };
-
-const sourcePriority: Record<string, number> = { manual: 4, csv: 3, google_sheets: 2, shopify: 1 };
-
-function monetary(value: string | number | null | undefined) {
-  return Number(value) || 0;
-}
-
-function resolveCost(costs: Cost[], orderDate: string, fallback: number | null) {
-  const applicable = costs
-    .filter((cost) => cost.effective_from <= orderDate && (!cost.effective_to || cost.effective_to >= orderDate))
-    .sort((left, right) => right.effective_from.localeCompare(left.effective_from) || (sourcePriority[right.source] ?? 0) - (sourcePriority[left.source] ?? 0));
-  return applicable.length ? monetary(applicable[0].amount) : fallback;
-}
 
 /**
  * P&L v1 intentionally contains only reconciled Shopify sales and COGS. Ad,
@@ -59,9 +46,9 @@ export async function GET() {
 
   const variantsByGid = new Map(((variantResult.data ?? []) as Variant[]).map((variant) => [variant.shopify_gid, variant]));
   const variantsBySku = new Map(((variantResult.data ?? []) as Variant[]).filter((variant) => variant.sku).map((variant) => [variant.sku!.trim().toLowerCase(), variant]));
-  const costsByKey = new Map<string, Cost[]>();
-  for (const cost of (costResult.data ?? []) as Cost[]) {
-    const key = cost.variant_id ? `variant:${cost.variant_id}` : cost.sku ? `sku:${cost.sku.trim().toLowerCase()}` : null;
+  const costsByKey = new Map<string, EffectiveCost[]>();
+  for (const cost of (costResult.data ?? []) as EffectiveCost[]) {
+    const key = costKey(cost);
     if (key) costsByKey.set(key, [...(costsByKey.get(key) ?? []), cost]);
   }
   const ordersById = new Map(includedOrders.map((order) => [order.id, order]));
@@ -73,7 +60,7 @@ export async function GET() {
     if (!order?.processed_at) continue;
     const variant = line.variant_gid ? variantsByGid.get(line.variant_gid) : line.sku ? variantsBySku.get(line.sku.trim().toLowerCase()) : undefined;
     const costs = variant ? costsByKey.get(`variant:${variant.id}`) ?? costsByKey.get(`sku:${variant.sku?.trim().toLowerCase()}`) ?? [] : costsByKey.get(`sku:${line.sku?.trim().toLowerCase()}`) ?? [];
-    const unitCost = resolveCost(costs, order.processed_at.slice(0, 10), variant?.shopify_unit_cost === null || variant?.shopify_unit_cost === undefined ? null : monetary(variant.shopify_unit_cost));
+    const unitCost = resolveEffectiveCost(costs, order.processed_at.slice(0, 10), variant?.shopify_unit_cost === null || variant?.shopify_unit_cost === undefined ? null : monetary(variant.shopify_unit_cost));
     if (unitCost === null) missingCostLines += 1;
     else cogs += unitCost * Math.max(line.current_quantity, 0);
   }
