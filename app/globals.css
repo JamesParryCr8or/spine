@@ -53,3 +53,9 @@ button { cursor:pointer; }
 .order-drawer{width:min(860px,calc(100vw - 32px))}.order-detail-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:18px 0}.order-detail-grid>div{border:1px solid #e8ebf2;border-radius:10px;padding:12px;background:#fafbfe}.order-detail-grid span{display:block;font-size:9px;text-transform:uppercase;letter-spacing:.8px;color:#8993a5;margin-bottom:7px}.order-detail-grid strong{font-size:15px;color:#202839}@media(max-width:680px){.order-detail-grid{grid-template-columns:repeat(2,1fr)}}
 
 .favourite-report{border:0;background:transparent;color:#a7afbd;font-size:20px;line-height:1;cursor:pointer;padding:3px}.favourite-report.active{color:#f4ae2b}
+
+.audit-history{margin-top:18px;padding:14px;border:1px solid #e8eaf1;border-radius:10px;background:#fafbfe}
+.audit-history>p{margin:8px 0 0;color:#7f899a;font-size:10px}
+.audit-history ul{list-style:none;margin:9px 0 0;padding:0;display:grid;gap:8px}
+.audit-history li{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:10px}
+.audit-history li strong{color:#293244}.audit-history li span{color:#7f899a;text-align:right}
