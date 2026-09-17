@@ -13,6 +13,10 @@
 - [x] Confirmed lint and the Next.js production build complete successfully.
 - [x] Apply `supabase/setup.sql` to the development Supabase project and verify the RLS/Vault functions.
 - [x] Replace dashboard mock figures with the first normalized Shopify data slice (live sales, discounts, shipping, order count, AOV, and monthly trend after Shopify sync).
+- [x] Added live Shopify sales orders, product profitability, and last-touch UTM source/medium/campaign reporting.
+- [x] Added reconciled Shopify P&L metrics, effective-dated COGS, fixed operating costs, and CSV export.
+- [x] Added owner/admin-managed recurring operating expenses with tenant-protected storage.
+- [x] Added a production GitHub Actions verification workflow for linting and the Next.js build.
 
 ### Active build order
 
