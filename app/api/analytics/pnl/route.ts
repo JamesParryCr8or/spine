@@ -87,10 +87,12 @@ export async function GET() {
   const orderDates = includedOrders.flatMap((order) => order.processed_at ? [order.processed_at.slice(0, 10)] : []);
   const rangeStart = orderDates.length ? orderDates.reduce((first, date) => date < first ? date : first) : null;
   const rangeEnd = orderDates.length ? orderDates.reduce((last, date) => date > last ? date : last) : null;
-  let operatingExpenses = 0;
+  let fixedOperatingExpenses = 0;
+  let variableOperatingExpenses = 0;
   let unallocatedOperatingCosts = 0;
+  const lines = (lineResult.data ?? []) as Line[];
   for (const cost of (operatingCostResult.data ?? []) as CustomCost[]) {
-    if (!rangeStart || !rangeEnd || cost.currency !== store.currency || cost.allocation_basis !== "fixed") {
+    if (!rangeStart || !rangeEnd || cost.currency !== store.currency) {
       unallocatedOperatingCosts += 1;
       continue;
     }
@@ -98,21 +100,36 @@ export async function GET() {
     const to = earlierDate(cost.effective_to ?? rangeEnd, rangeEnd);
     if (from > to) continue;
     const amount = monetary(cost.amount);
-    if (cost.cadence === "one_off") {
-      if (cost.effective_from >= rangeStart && cost.effective_from <= rangeEnd) operatingExpenses += amount;
+    if (cost.allocation_basis === "fixed") {
+      if (cost.cadence === "one_off") {
+        if (cost.effective_from >= rangeStart && cost.effective_from <= rangeEnd) fixedOperatingExpenses += amount;
+        continue;
+      }
+      const days = dayCountInclusive(from, to);
+      const dailyRate = cost.cadence === "daily" ? amount : cost.cadence === "weekly" ? amount / 7 : cost.cadence === "monthly" ? amount / 30.4375 : amount / 365.25;
+      fixedOperatingExpenses += dailyRate * days;
       continue;
     }
-    const days = dayCountInclusive(from, to);
-    const dailyRate = cost.cadence === "daily" ? amount : cost.cadence === "weekly" ? amount / 7 : cost.cadence === "monthly" ? amount / 30.4375 : amount / 365.25;
-    operatingExpenses += dailyRate * days;
+    const variableFrom = cost.cadence === "one_off" ? cost.effective_from : from;
+    const variableTo = cost.cadence === "one_off" ? cost.effective_from : to;
+    const scopedOrders = includedOrders.filter((order) => order.processed_at && order.processed_at.slice(0, 10) >= variableFrom && order.processed_at.slice(0, 10) <= variableTo);
+    if (cost.allocation_basis === "orders") {
+      variableOperatingExpenses += amount * scopedOrders.length;
+    } else if (cost.allocation_basis === "units") {
+      const scopedOrderIds = new Set(scopedOrders.map((order) => order.id));
+      variableOperatingExpenses += amount * lines.filter((line) => scopedOrderIds.has(line.order_id)).reduce((total, line) => total + Math.max(line.current_quantity, 0), 0);
+    } else {
+      variableOperatingExpenses += amount / 100 * scopedOrders.reduce((total, order) => total + monetary(order.net_product_sales), 0);
+    }
   }
-  const profitAfterFixedOperatingCosts = grossProfit - operatingExpenses;
+  const operatingExpenses = fixedOperatingExpenses + variableOperatingExpenses;
+  const profitAfterOperatingCosts = grossProfit - operatingExpenses;
 
   return NextResponse.json({
     hasData: includedOrders.length > 0,
     currency: store.currency,
     calculatedAt: new Date().toISOString(),
-    metrics: { ...totals, refunds, cogs, grossProfit, grossMargin: totals.netProductSales - refunds ? grossProfit / (totals.netProductSales - refunds) : null, operatingExpenses, profitAfterFixedOperatingCosts, orders: includedOrders.length, missingCostLines, unallocatedOperatingCosts },
+    metrics: { ...totals, refunds, cogs, grossProfit, grossMargin: totals.netProductSales - refunds ? grossProfit / (totals.netProductSales - refunds) : null, fixedOperatingExpenses, variableOperatingExpenses, operatingExpenses, profitAfterOperatingCosts, orders: includedOrders.length, missingCostLines, unallocatedOperatingCosts },
     period: rangeStart && rangeEnd ? { start: rangeStart, end: rangeEnd } : null,
     availability: { marketingSpend: false, transactionFees: false, shippingCosts: false, operatingExpenses: true, netProfit: false },
   });
