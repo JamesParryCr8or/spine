@@ -61,7 +61,7 @@ export async function GET(request: Request) {
   const [{ data: variants, error: variantError }, { data: costs, error: costError }] = await Promise.all([
     supabase
       .from("shopify_variants")
-      .select("id,product_id,title,sku,price,shopify_unit_cost,currency")
+      .select("id,product_id,shopify_gid,title,sku,price,shopify_unit_cost,currency")
       .eq("store_id", store.id)
       .order("sku"),
     supabase
@@ -93,7 +93,7 @@ export async function GET(request: Request) {
     if ((data ?? []).length < 1000) break;
   }
   const orderDates = new Map(orderRows.filter((order) => order.processed_at_shopify).map((order) => [order.id, order.processed_at_shopify!.slice(0, 10)]));
-  const variantsByGid = new Map((variants ?? []).map((variant) => [variant.id, variant]));
+  const variantsByGid = new Map((variants ?? []).map((variant) => [variant.shopify_gid, variant]));
   const costsByKey = new Map<string, Array<{ effective_from: string; effective_to: string | null }>>();
   for (const cost of costs ?? []) {
     const key = cost.variant_id ? `variant:${cost.variant_id}` : cost.sku ? `sku:${cost.sku.trim().toLowerCase()}` : null;
