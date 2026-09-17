@@ -90,17 +90,28 @@ async function importMetaInsights({ supabase, userId, account, accessToken, look
 }
 
 export async function GET() {
-  const { supabase, response } = await requireUser();
-  if (response) return response;
+  const { supabase, userId, response } = await requireUser();
+  if (response || !userId) return response!;
 
   const { data, error } = await supabase
     .from("data_connections")
     .select("provider,status,external_account_id,external_account_name,last_verified_at,last_error")
     .eq("provider", "meta")
     .maybeSingle();
-
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ connection: data });
+
+  let sync = null;
+  if (data) {
+    const { data: membership } = await supabase.from("organization_members").select("organization_id").eq("user_id", userId).limit(1).maybeSingle();
+    if (membership) {
+      const { data: store } = await supabase.from("stores").select("id").eq("organization_id", membership.organization_id).limit(1).maybeSingle();
+      if (store) {
+        const { data: latest, count } = await supabase.from("meta_ad_insights_daily").select("date_start,synced_at", { count: "exact" }).eq("store_id", store.id).order("date_start", { ascending: false }).limit(1);
+        sync = { importedDays: count ?? 0, latestDate: latest?.[0]?.date_start ?? null, syncedAt: latest?.[0]?.synced_at ?? null };
+      }
+    }
+  }
+  return NextResponse.json({ connection: data, sync });
 }
 
 export async function POST(request: Request) {
