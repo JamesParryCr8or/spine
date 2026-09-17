@@ -7,6 +7,7 @@ type Order = { id: string; processed_at: string | null; gross_sales: string; dis
 type Line = { order_id: string; variant_gid: string | null; sku: string | null; current_quantity: number };
 type Variant = { id: string; shopify_gid: string; sku: string | null; shopify_unit_cost: string | null };
 type Refund = { total_refunded: string };
+type Transaction = { fee_amount: string; fee_tax: string; currency: string; status: string };
 type CustomCost = { name: string; amount: string; currency: string; cadence: "one_off" | "daily" | "weekly" | "monthly" | "annual"; allocation_basis: "fixed" | "orders" | "units" | "revenue"; effective_from: string; effective_to: string | null };
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -14,11 +15,12 @@ const utcDay = (date: string) => Date.parse(`${date.slice(0, 10)}T00:00:00.000Z`
 const dayCountInclusive = (from: string, to: string) => Math.floor((utcDay(to) - utcDay(from)) / dayMs) + 1;
 const laterDate = (left: string, right: string) => left > right ? left : right;
 const earlierDate = (left: string, right: string) => left < right ? left : right;
+const chunks = <T,>(items: T[], size: number) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, index * size + size));
 
 /**
- * P&L contains reconciled Shopify sales, COGS and fixed operating costs. Ad,
- * transaction, fulfilment and usage-based costs remain separately identified
- * until a trusted source or allocation rule is connected.
+ * P&L contains every imported valid Shopify order. Fees are only included
+ * when Shopify supplied actual transaction-fee records; unconnected cost
+ * sources remain visible as unavailable rather than being estimated.
  */
 export async function GET() {
   const supabase = await createClient();
@@ -31,26 +33,40 @@ export async function GET() {
   const { data: store } = await supabase.from("stores").select("id,currency").eq("organization_id", membership.organization_id).limit(1).single();
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
-  const { data: orders, error: ordersError } = await supabase
-    .from("shopify_orders")
-    .select("id,processed_at,gross_sales,discounts,net_product_sales,shipping_revenue,tax,duties,total_sales")
-    .eq("store_id", store.id)
-    .is("cancelled_at", null)
-    .eq("test", false)
-    .not("processed_at", "is", null);
-  if (ordersError) return NextResponse.json({ error: ordersError.message }, { status: 500 });
-  const includedOrders = (orders ?? []) as Order[];
+  const includedOrders: Order[] = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from("shopify_orders")
+      .select("id,processed_at,gross_sales,discounts,net_product_sales,shipping_revenue,tax,duties,total_sales")
+      .eq("store_id", store.id)
+      .is("cancelled_at", null)
+      .eq("test", false)
+      .not("processed_at", "is", null)
+      .order("processed_at", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const page = (data ?? []) as Order[];
+    includedOrders.push(...page);
+    if (page.length < pageSize) break;
+  }
   const orderIds = includedOrders.map((order) => order.id);
+  const orderChunks = chunks(orderIds, 500);
 
-  const [lineResult, variantResult, costResult, refundResult, operatingCostResult] = await Promise.all([
-    orderIds.length ? supabase.from("shopify_order_lines").select("order_id,variant_gid,sku,current_quantity").in("order_id", orderIds) : Promise.resolve({ data: [], error: null }),
+  const [lineResults, refundResults, transactionResults, variantResult, costResult, operatingCostResult] = await Promise.all([
+    Promise.all(orderChunks.map((ids) => supabase.from("shopify_order_lines").select("order_id,variant_gid,sku,current_quantity").in("order_id", ids))),
+    Promise.all(orderChunks.map((ids) => supabase.from("shopify_refunds").select("total_refunded").in("order_id", ids))),
+    Promise.all(orderChunks.map((ids) => supabase.from("shopify_transactions").select("fee_amount,fee_tax,currency,status").in("order_id", ids))),
     supabase.from("shopify_variants").select("id,shopify_gid,sku,shopify_unit_cost").eq("store_id", store.id),
     supabase.from("product_costs").select("variant_id,sku,amount,effective_from,effective_to,source").eq("store_id", store.id),
-    orderIds.length ? supabase.from("shopify_refunds").select("total_refunded").in("order_id", orderIds) : Promise.resolve({ data: [], error: null }),
     supabase.from("custom_costs").select("name,amount,currency,cadence,allocation_basis,effective_from,effective_to").eq("store_id", store.id),
   ]);
-  const fetchError = lineResult.error ?? variantResult.error ?? costResult.error ?? refundResult.error ?? operatingCostResult.error;
+  const allResults = [...lineResults, ...refundResults, ...transactionResults, variantResult, costResult, operatingCostResult];
+  const fetchError = allResults.find((result) => result.error)?.error;
   if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 });
+  const lines = lineResults.flatMap((result) => result.data ?? []) as Line[];
+  const refundsRows = refundResults.flatMap((result) => result.data ?? []) as Refund[];
+  const transactions = transactionResults.flatMap((result) => result.data ?? []) as Transaction[];
 
   const variantsByGid = new Map(((variantResult.data ?? []) as Variant[]).map((variant) => [variant.shopify_gid, variant]));
   const variantsBySku = new Map(((variantResult.data ?? []) as Variant[]).filter((variant) => variant.sku).map((variant) => [variant.sku!.trim().toLowerCase(), variant]));
@@ -63,7 +79,7 @@ export async function GET() {
 
   let cogs = 0;
   let missingCostLines = 0;
-  for (const line of (lineResult.data ?? []) as Line[]) {
+  for (const line of lines) {
     const order = ordersById.get(line.order_id);
     if (!order?.processed_at) continue;
     const variant = line.variant_gid ? variantsByGid.get(line.variant_gid) : line.sku ? variantsBySku.get(line.sku.trim().toLowerCase()) : undefined;
@@ -82,7 +98,11 @@ export async function GET() {
     duties: total.duties + monetary(order.duties),
     totalSales: total.totalSales + monetary(order.total_sales),
   }), { grossSales: 0, discounts: 0, netProductSales: 0, shippingRevenue: 0, tax: 0, duties: 0, totalSales: 0 });
-  const refunds = ((refundResult.data ?? []) as Refund[]).reduce((total, refund) => total + monetary(refund.total_refunded), 0);
+  const refunds = refundsRows.reduce((total, refund) => total + monetary(refund.total_refunded), 0);
+  const transactionFees = transactions
+    .filter((transaction) => transaction.status === "SUCCESS" && transaction.currency === store.currency)
+    .reduce((total, transaction) => total + monetary(transaction.fee_amount) + monetary(transaction.fee_tax), 0);
+  const transactionFeesAvailable = transactions.length > 0;
   const grossProfit = totals.netProductSales - refunds - cogs;
   const orderDates = includedOrders.flatMap((order) => order.processed_at ? [order.processed_at.slice(0, 10)] : []);
   const rangeStart = orderDates.length ? orderDates.reduce((first, date) => date < first ? date : first) : null;
@@ -90,7 +110,6 @@ export async function GET() {
   let fixedOperatingExpenses = 0;
   let variableOperatingExpenses = 0;
   let unallocatedOperatingCosts = 0;
-  const lines = (lineResult.data ?? []) as Line[];
   for (const cost of (operatingCostResult.data ?? []) as CustomCost[]) {
     if (!rangeStart || !rangeEnd || cost.currency !== store.currency) {
       unallocatedOperatingCosts += 1;
@@ -124,13 +143,14 @@ export async function GET() {
   }
   const operatingExpenses = fixedOperatingExpenses + variableOperatingExpenses;
   const profitAfterOperatingCosts = grossProfit - operatingExpenses;
+  const profitAfterKnownCosts = profitAfterOperatingCosts - transactionFees;
 
   return NextResponse.json({
     hasData: includedOrders.length > 0,
     currency: store.currency,
     calculatedAt: new Date().toISOString(),
-    metrics: { ...totals, refunds, cogs, grossProfit, grossMargin: totals.netProductSales - refunds ? grossProfit / (totals.netProductSales - refunds) : null, fixedOperatingExpenses, variableOperatingExpenses, operatingExpenses, profitAfterOperatingCosts, orders: includedOrders.length, missingCostLines, unallocatedOperatingCosts },
+    metrics: { ...totals, refunds, cogs, grossProfit, grossMargin: totals.netProductSales - refunds ? grossProfit / (totals.netProductSales - refunds) : null, transactionFees, fixedOperatingExpenses, variableOperatingExpenses, operatingExpenses, profitAfterOperatingCosts, profitAfterKnownCosts, orders: includedOrders.length, missingCostLines, unallocatedOperatingCosts },
     period: rangeStart && rangeEnd ? { start: rangeStart, end: rangeEnd } : null,
-    availability: { marketingSpend: false, transactionFees: false, shippingCosts: false, operatingExpenses: true, netProfit: false },
+    availability: { marketingSpend: false, transactionFees: transactionFeesAvailable, shippingCosts: false, operatingExpenses: true, netProfit: false },
   });
 }
