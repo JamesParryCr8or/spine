@@ -7,11 +7,18 @@ type Order = { id: string; processed_at: string | null; gross_sales: string; dis
 type Line = { order_id: string; variant_gid: string | null; sku: string | null; current_quantity: number };
 type Variant = { id: string; shopify_gid: string; sku: string | null; shopify_unit_cost: string | null };
 type Refund = { total_refunded: string };
+type CustomCost = { name: string; amount: string; currency: string; cadence: "one_off" | "daily" | "weekly" | "monthly" | "annual"; allocation_basis: "fixed" | "orders" | "units" | "revenue"; effective_from: string; effective_to: string | null };
+
+const dayMs = 24 * 60 * 60 * 1000;
+const utcDay = (date: string) => Date.parse(`${date.slice(0, 10)}T00:00:00.000Z`);
+const dayCountInclusive = (from: string, to: string) => Math.floor((utcDay(to) - utcDay(from)) / dayMs) + 1;
+const laterDate = (left: string, right: string) => left > right ? left : right;
+const earlierDate = (left: string, right: string) => left < right ? left : right;
 
 /**
- * P&L v1 intentionally contains only reconciled Shopify sales and COGS. Ad,
- * transaction, fulfilment and operating costs are shown as unavailable until a
- * trusted source is connected, rather than being guessed in the browser.
+ * P&L contains reconciled Shopify sales, COGS and fixed operating costs. Ad,
+ * transaction, fulfilment and usage-based costs remain separately identified
+ * until a trusted source or allocation rule is connected.
  */
 export async function GET() {
   const supabase = await createClient();
@@ -35,13 +42,14 @@ export async function GET() {
   const includedOrders = (orders ?? []) as Order[];
   const orderIds = includedOrders.map((order) => order.id);
 
-  const [lineResult, variantResult, costResult, refundResult] = await Promise.all([
+  const [lineResult, variantResult, costResult, refundResult, operatingCostResult] = await Promise.all([
     orderIds.length ? supabase.from("shopify_order_lines").select("order_id,variant_gid,sku,current_quantity").in("order_id", orderIds) : Promise.resolve({ data: [], error: null }),
     supabase.from("shopify_variants").select("id,shopify_gid,sku,shopify_unit_cost").eq("store_id", store.id),
     supabase.from("product_costs").select("variant_id,sku,amount,effective_from,effective_to,source").eq("store_id", store.id),
     orderIds.length ? supabase.from("shopify_refunds").select("total_refunded").in("order_id", orderIds) : Promise.resolve({ data: [], error: null }),
+    supabase.from("custom_costs").select("name,amount,currency,cadence,allocation_basis,effective_from,effective_to").eq("store_id", store.id),
   ]);
-  const fetchError = lineResult.error ?? variantResult.error ?? costResult.error ?? refundResult.error;
+  const fetchError = lineResult.error ?? variantResult.error ?? costResult.error ?? refundResult.error ?? operatingCostResult.error;
   if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 });
 
   const variantsByGid = new Map(((variantResult.data ?? []) as Variant[]).map((variant) => [variant.shopify_gid, variant]));
@@ -76,12 +84,36 @@ export async function GET() {
   }), { grossSales: 0, discounts: 0, netProductSales: 0, shippingRevenue: 0, tax: 0, duties: 0, totalSales: 0 });
   const refunds = ((refundResult.data ?? []) as Refund[]).reduce((total, refund) => total + monetary(refund.total_refunded), 0);
   const grossProfit = totals.netProductSales - refunds - cogs;
+  const orderDates = includedOrders.flatMap((order) => order.processed_at ? [order.processed_at.slice(0, 10)] : []);
+  const rangeStart = orderDates.length ? orderDates.reduce((first, date) => date < first ? date : first) : null;
+  const rangeEnd = orderDates.length ? orderDates.reduce((last, date) => date > last ? date : last) : null;
+  let operatingExpenses = 0;
+  let unallocatedOperatingCosts = 0;
+  for (const cost of (operatingCostResult.data ?? []) as CustomCost[]) {
+    if (!rangeStart || !rangeEnd || cost.currency !== store.currency || cost.allocation_basis !== "fixed") {
+      unallocatedOperatingCosts += 1;
+      continue;
+    }
+    const from = laterDate(cost.effective_from, rangeStart);
+    const to = earlierDate(cost.effective_to ?? rangeEnd, rangeEnd);
+    if (from > to) continue;
+    const amount = monetary(cost.amount);
+    if (cost.cadence === "one_off") {
+      if (cost.effective_from >= rangeStart && cost.effective_from <= rangeEnd) operatingExpenses += amount;
+      continue;
+    }
+    const days = dayCountInclusive(from, to);
+    const dailyRate = cost.cadence === "daily" ? amount : cost.cadence === "weekly" ? amount / 7 : cost.cadence === "monthly" ? amount / 30.4375 : amount / 365.25;
+    operatingExpenses += dailyRate * days;
+  }
+  const profitAfterFixedOperatingCosts = grossProfit - operatingExpenses;
 
   return NextResponse.json({
     hasData: includedOrders.length > 0,
     currency: store.currency,
     calculatedAt: new Date().toISOString(),
-    metrics: { ...totals, refunds, cogs, grossProfit, grossMargin: totals.netProductSales - refunds ? grossProfit / (totals.netProductSales - refunds) : null, orders: includedOrders.length, missingCostLines },
-    availability: { marketingSpend: false, transactionFees: false, shippingCosts: false, operatingExpenses: false, netProfit: false },
+    metrics: { ...totals, refunds, cogs, grossProfit, grossMargin: totals.netProductSales - refunds ? grossProfit / (totals.netProductSales - refunds) : null, operatingExpenses, profitAfterFixedOperatingCosts, orders: includedOrders.length, missingCostLines, unallocatedOperatingCosts },
+    period: rangeStart && rangeEnd ? { start: rangeStart, end: rangeEnd } : null,
+    availability: { marketingSpend: false, transactionFees: false, shippingCosts: false, operatingExpenses: true, netProfit: false },
   });
 }
