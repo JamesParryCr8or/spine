@@ -111,9 +111,27 @@ export async function POST(request: Request) {
     const { error: connectionError } = await supabase.rpc("save_data_connection", { connection_provider: "shopify", access_token: accessToken, account_id: shopData.shop.id, account_name: shopData.shop.name });
     if (connectionError) throw new Error(connectionError.message);
 
-    const { data: run, error: runError } = await supabase.from("sync_runs").insert({ organization_id: membership.organization_id, store_id: store.id, source: "shopify", resource: "catalog_orders", status: "running", created_by: userId }).select("id").single();
+    const staleBefore = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+    const { data: existingRun, error: existingRunError } = await supabase
+      .from("sync_runs")
+      .select("id,cursor,records_processed,updated_at")
+      .eq("store_id", store.id)
+      .eq("source", "shopify")
+      .eq("status", "running")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existingRunError) throw new Error(existingRunError.message);
+    if (existingRun && existingRun.updated_at >= staleBefore) {
+      return NextResponse.json({ error: "A Shopify import is already running. Leave this page open and refresh the dashboard in a few minutes." }, { status: 409 });
+    }
+    const resumed = Boolean(existingRun?.cursor);
+    const { data: run, error: runError } = existingRun
+      ? { data: existingRun, error: null }
+      : await supabase.from("sync_runs").insert({ organization_id: membership.organization_id, store_id: store.id, source: "shopify", resource: "catalog_orders", status: "running", created_by: userId }).select("id,cursor,records_processed,updated_at").single();
     if (runError || !run) throw new Error(runError?.message ?? "Could not create sync run");
     runId = run.id;
+    const priorRecordsProcessed = run.records_processed ?? 0;
 
     let productCursor: string | null = null;
     let productsProcessed = 0;
@@ -121,7 +139,7 @@ export async function POST(request: Request) {
       const result: { products: { nodes: Array<{ id: string; legacyResourceId: string; title: string; handle: string; status: string; vendor: string; productType: string; createdAt: string; updatedAt: string; featuredMedia?: { preview?: { image?: { url?: string } } } }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await shopifyGraph(shopDomain, accessToken, `query Products($cursor:String){ products(first:100,after:$cursor,sortKey:ID){ nodes{id legacyResourceId title handle status vendor productType createdAt updatedAt featuredMedia{preview{image{url}}}} pageInfo{hasNextPage endCursor} } }`, { cursor: productCursor });
       const rows = result.products.nodes.map((product) => ({ organization_id: membership.organization_id, store_id: store.id, shopify_gid: product.id, legacy_resource_id: product.legacyResourceId, title: product.title, handle: product.handle, status: product.status, vendor: product.vendor || null, product_type: product.productType || null, featured_image_url: product.featuredMedia?.preview?.image?.url ?? null, created_at_shopify: product.createdAt, updated_at_shopify: product.updatedAt, synced_at: new Date().toISOString() }));
       if (rows.length) { const { error } = await supabase.from("shopify_products").upsert(dedupeByShopifyId(rows), { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
-      productsProcessed += rows.length;
+      productsProcessed += resumed ? 0 : rows.length;
       productCursor = result.products.pageInfo.hasNextPage ? result.products.pageInfo.endCursor : null;
     } while (productCursor);
 
@@ -134,11 +152,11 @@ export async function POST(request: Request) {
       const result: { productVariants: { nodes: Array<{ id: string; legacyResourceId: string; title: string; sku: string | null; barcode: string | null; price: string; compareAtPrice: string | null; inventoryQuantity: number | null; createdAt: string; updatedAt: string; product: { id: string }; inventoryItem: { id: string; unitCost?: { amount: string; currencyCode: string } | null } }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await shopifyGraph(shopDomain, accessToken, `query Variants($cursor:String){ productVariants(first:100,after:$cursor,sortKey:ID){ nodes{id legacyResourceId title sku barcode price compareAtPrice inventoryQuantity createdAt updatedAt product{id} inventoryItem{id unitCost{amount currencyCode}}} pageInfo{hasNextPage endCursor} } }`, { cursor: variantCursor });
       const rows = result.productVariants.nodes.flatMap((variant) => { const productId = productMap.get(variant.product.id); return productId ? [{ organization_id: membership.organization_id, store_id: store.id, product_id: productId, shopify_gid: variant.id, legacy_resource_id: variant.legacyResourceId, title: variant.title, sku: variant.sku, barcode: variant.barcode, price: variant.price, compare_at_price: variant.compareAtPrice, inventory_quantity: variant.inventoryQuantity, inventory_item_gid: variant.inventoryItem.id, shopify_unit_cost: variant.inventoryItem.unitCost?.amount ?? null, currency: variant.inventoryItem.unitCost?.currencyCode ?? shopData.shop.currencyCode, created_at_shopify: variant.createdAt, updated_at_shopify: variant.updatedAt, synced_at: new Date().toISOString() }] : []; });
       if (rows.length) { const { error } = await supabase.from("shopify_variants").upsert(rows, { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
-      variantsProcessed += rows.length;
+      variantsProcessed += resumed ? 0 : rows.length;
       variantCursor = result.productVariants.pageInfo.hasNextPage ? result.productVariants.pageInfo.endCursor : null;
     } while (variantCursor);
 
-    let orderCursor: string | null = null;
+    let orderCursor: string | null = run.cursor ?? null;
     let ordersProcessed = 0, orderLinesProcessed = 0, customersProcessed = 0, refundsProcessed = 0, refundLinesProcessed = 0, transactionsProcessed = 0, attributionProcessed = 0;
     const warnings: string[] = [];
     do {
@@ -209,15 +227,15 @@ export async function POST(request: Request) {
       attributionProcessed += attributionRows.length;
 
       orderCursor = result.orders.pageInfo.hasNextPage ? result.orders.pageInfo.endCursor : null;
-      const recordsProcessed = productsProcessed + variantsProcessed + ordersProcessed + orderLinesProcessed + customersProcessed + refundsProcessed + refundLinesProcessed + transactionsProcessed + attributionProcessed;
+      const recordsProcessed = priorRecordsProcessed + productsProcessed + variantsProcessed + ordersProcessed + orderLinesProcessed + customersProcessed + refundsProcessed + refundLinesProcessed + transactionsProcessed + attributionProcessed;
       const { error: progressError } = await supabase.from("sync_runs").update({ cursor: orderCursor, records_processed: recordsProcessed, warnings, updated_at: new Date().toISOString() }).eq("id", run.id);
       if (progressError) throw new Error(progressError.message);
     } while (orderCursor);
 
-    const recordsProcessed = productsProcessed + variantsProcessed + ordersProcessed + orderLinesProcessed + customersProcessed + refundsProcessed + refundLinesProcessed + transactionsProcessed + attributionProcessed;
+    const recordsProcessed = priorRecordsProcessed + productsProcessed + variantsProcessed + ordersProcessed + orderLinesProcessed + customersProcessed + refundsProcessed + refundLinesProcessed + transactionsProcessed + attributionProcessed;
     const { error: completeError } = await supabase.from("sync_runs").update({ status: "completed", cursor: null, records_processed: recordsProcessed, warnings, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", run.id);
     if (completeError) throw new Error(completeError.message);
-    return NextResponse.json({ connection: { provider: "shopify", status: "connected", external_account_id: shopData.shop.id, external_account_name: shopData.shop.name }, sync: { products: productsProcessed, variants: variantsProcessed, orders: ordersProcessed, orderLines: orderLinesProcessed, customers: customersProcessed, refunds: refundsProcessed, refundLines: refundLinesProcessed, transactions: transactionsProcessed, attribution: attributionProcessed, warnings: warnings.length } });
+    return NextResponse.json({ connection: { provider: "shopify", status: "connected", external_account_id: shopData.shop.id, external_account_name: shopData.shop.name }, resumed, sync: { products: productsProcessed, variants: variantsProcessed, orders: ordersProcessed, orderLines: orderLinesProcessed, customers: customersProcessed, refunds: refundsProcessed, refundLines: refundLinesProcessed, transactions: transactionsProcessed, attribution: attributionProcessed, warnings: warnings.length } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Shopify connection failed";
     if (runId) await supabase.from("sync_runs").update({ status: "failed", error_message: message.slice(0, 500), completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", runId);
