@@ -142,7 +142,7 @@ Shopify is the primary sales and catalog source. Other sources enrich Shopify ra
 - [x] Create `shopify_refunds` and `shopify_refund_lines` rather than multiplying rows through nested joins.
 - [x] Create `shopify_customers` with first-order date and aggregate customer fields.
 - [x] Create `shopify_products` and `shopify_variants` with SKU, status, price, inventory references, and Shopify unit cost when available.
-- [ ] Create `shopify_transactions` for payment gateway and transaction-fee analysis.
+- [x] Create `shopify_transactions` for payment gateway and transaction-fee analysis.
 - [x] Create `shopify_order_attribution` for landing page, referrer, first/last visit, UTM source, medium, campaign, term, and content without duplicating order revenue.
 - [ ] Create `shopify_fulfillments` only when required for shipping and operational reporting.
 - [ ] Retain source JSON selectively for troubleshooting, with a retention limit and no unnecessary personal data.
@@ -329,7 +329,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [x] Add new versus repeat customer metrics and sales.
 - [ ] Add cohort retention and cumulative revenue/profit tables.
 - [x] Add current customer value, order frequency, time-to-second-order, and repeat purchase rate.
-- [ ] Mask or restrict personal customer data according to role.
+- [x] Mask or restrict personal customer data according to role.
 
 ## Phase 6 — Marketing data sources
 
