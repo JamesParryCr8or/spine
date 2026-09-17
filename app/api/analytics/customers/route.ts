@@ -60,6 +60,40 @@ export async function GET() {
   const months = new Map<string, { key: string; newCustomerOrders: number; newCustomerSales: number; repeatCustomerOrders: number; repeatCustomerSales: number }>();
   const monthFor = (date: string | null) => date ? date.slice(0, 7) : null;
   const customers = [...ordersByCustomer.values()];
+  const cohortRows = new Map<string, { key: string; customerIds: Set<string>; periods: Map<number, { customerIds: Set<string>; revenue: number }> }>();
+  const monthNumber = (key: string) => {
+    const [year, month] = key.split("-").map(Number);
+    return year * 12 + month - 1;
+  };
+  for (const [customerId, customerOrders] of ordersByCustomer) {
+    const cohortKey = monthFor(customerOrders[0]?.processed_at);
+    if (!cohortKey) continue;
+    const cohort = cohortRows.get(cohortKey) ?? { key: cohortKey, customerIds: new Set<string>(), periods: new Map<number, { customerIds: Set<string>; revenue: number }>() };
+    cohort.customerIds.add(customerId);
+    for (const order of customerOrders) {
+      const orderKey = monthFor(order.processed_at);
+      if (!orderKey) continue;
+      const period = monthNumber(orderKey) - monthNumber(cohortKey);
+      if (period < 0 || period > 11) continue;
+      const current = cohort.periods.get(period) ?? { customerIds: new Set<string>(), revenue: 0 };
+      current.customerIds.add(customerId);
+      current.revenue += money(order.net_product_sales) + money(order.shipping_revenue);
+      cohort.periods.set(period, current);
+    }
+    cohortRows.set(cohortKey, cohort);
+  }
+  const cohorts = [...cohortRows.values()]
+    .sort((left, right) => right.key.localeCompare(left.key))
+    .slice(0, 12)
+    .map((cohort) => ({
+      key: cohort.key,
+      customers: cohort.customerIds.size,
+      periods: Array.from({ length: 7 }, (_, period) => {
+        const current = cohort.periods.get(period);
+        const activeCustomers = current?.customerIds.size ?? 0;
+        return { period, activeCustomers, retentionRate: cohort.customerIds.size ? activeCustomers / cohort.customerIds.size : 0, revenue: current?.revenue ?? 0 };
+      }),
+    }));
   for (const customerOrders of customers) {
     customerOrders.forEach((order, index) => {
       const sales = money(order.net_product_sales) + money(order.shipping_revenue);
@@ -122,5 +156,6 @@ export async function GET() {
       email: null,
     })),
     months: [...months.values()].sort((left, right) => left.key.localeCompare(right.key)),
+    cohorts,
   });
 }
