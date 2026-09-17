@@ -320,7 +320,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 ### Product profitability
 
 - [ ] Add product and variant tables with revenue, units, discounts, refunds, COGS, ad allocation, contribution margin, and margin percentage.
-- [ ] Add missing-cost and low-margin filters.
+- [x] Add missing-cost and low-margin filters.
 - [ ] Add product trend and period comparison views.
 - [ ] Allow direct navigation from a product to its cost history.
 
