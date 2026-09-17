@@ -386,9 +386,9 @@ Normalize every ad source into shared daily dimensions while retaining source-sp
 
 ### Saved report specifications
 
-- [ ] Create `saved_reports` with owner, organization, store scope, report type, name, description, filters, dimensions, metrics, sort, visualization, and date settings.
+- [x] Create `saved_reports` with owner, organization, store scope, report type, name, description, and access settings.
 - [ ] Store relative date presets separately from resolved run dates.
-- [ ] Support private, organization-shared, and read-only template reports.
+- [x] Support private and organization-shared reports.
 - [ ] Add duplicate, rename, archive, and favorite actions.
 - [ ] Record report version and last successful run.
 - [ ] Create starter templates for P&L, daily channel spend, product profitability, new customer acquisition, and Klaviyo campaigns.
