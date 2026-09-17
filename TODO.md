@@ -322,7 +322,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [ ] Add product and variant tables with revenue, units, discounts, refunds, COGS, ad allocation, contribution margin, and margin percentage.
 - [x] Add missing-cost and low-margin filters.
 - [ ] Add product trend and period comparison views.
-- [ ] Allow direct navigation from a product to its cost history.
+- [x] Allow direct navigation from a product to its cost history.
 
 ### Customer analytics
 
