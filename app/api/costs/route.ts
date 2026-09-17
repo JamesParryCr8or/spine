@@ -40,10 +40,23 @@ async function context() {
   return { supabase, userId, membership, store };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const result = await context();
   if (result.error) return result.error;
   const { supabase, membership, store } = result;
+  const historyFor = new URL(request.url).searchParams.get("historyFor")?.trim();
+
+  if (historyFor) {
+    const { data: events, error } = await supabase
+      .from("product_cost_audit_events")
+      .select("id,action,previous_value,next_value,created_at")
+      .eq("store_id", store.id)
+      .eq("product_cost_id", historyFor)
+      .order("created_at", { ascending: false })
+      .limit(20);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ events: events ?? [] });
+  }
 
   const [{ data: variants, error: variantError }, { data: costs, error: costError }] = await Promise.all([
     supabase
