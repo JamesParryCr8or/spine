@@ -306,7 +306,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [ ] Add KPI cards for attributed orders, net sales, new-customer sales, gross profit, contribution margin, AOV, and revenue per customer.
 - [ ] Add trend charts for sales, orders, customers, and profit with period comparison.
 - [ ] Add a hierarchical drilldown table for source → medium → campaign → content → term.
-- [ ] Let users switch between available first-touch and last-touch attribution views and explain the selected model.
+- [x] Let users switch between available first-touch and last-touch attribution views and explain the selected model.
 - [ ] Preserve raw UTM values while creating normalized values for case, whitespace, aliases, and missing parameters.
 - [ ] Group missing attribution clearly as Direct, Organic/Referral, or Unknown according to documented rules.
 - [ ] Add filters for date, comparison period, source, medium, campaign, landing page, country, product, and new/repeat customer.
