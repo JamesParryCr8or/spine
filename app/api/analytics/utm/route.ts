@@ -21,18 +21,26 @@ export async function GET() {
   const { data: store } = await supabase.from("stores").select("id,currency").eq("organization_id", membership.organization_id).limit(1).single();
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
-  const { data: orders, error: ordersError } = await supabase.from("shopify_orders").select("id,net_product_sales").eq("store_id", store.id).is("cancelled_at", null).eq("test", false);
-  if (ordersError) return NextResponse.json({ error: ordersError.message }, { status: 500 });
-  const orderRows = (orders ?? []) as Order[];
+  const orderRows: Order[] = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase.from("shopify_orders").select("id,net_product_sales").eq("store_id", store.id).is("cancelled_at", null).eq("test", false).range(from, from + pageSize - 1);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const page = (data ?? []) as Order[];
+    orderRows.push(...page);
+    if (page.length < pageSize) break;
+  }
+  const attributions: Attribution[] = [];
   const orderIds = orderRows.map((order) => order.id);
-  const { data: attributions, error: attributionError } = orderIds.length
-    ? await supabase.from("shopify_order_attribution").select("order_id,source,utm_source,utm_medium,utm_campaign,customer_order_index").eq("attribution_model", "last_touch").in("order_id", orderIds)
-    : { data: [], error: null };
-  if (attributionError) return NextResponse.json({ error: attributionError.message }, { status: 500 });
+  for (let index = 0; index < orderIds.length; index += 500) {
+    const { data, error } = await supabase.from("shopify_order_attribution").select("order_id,source,utm_source,utm_medium,utm_campaign,customer_order_index").eq("attribution_model", "last_touch").in("order_id", orderIds.slice(index, index + 500));
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    attributions.push(...((data ?? []) as Attribution[]));
+  }
 
   const orderById = new Map(orderRows.map((order) => [order.id, order]));
   const groups = new Map<string, { source: string; medium: string; campaign: string; sales: number; orders: number; newCustomerSales: number }>();
-  for (const attribution of (attributions ?? []) as Attribution[]) {
+  for (const attribution of attributions) {
     const order = orderById.get(attribution.order_id);
     if (!order) continue;
     const source = valueOrDirect(attribution.utm_source ?? attribution.source, "(direct)");
