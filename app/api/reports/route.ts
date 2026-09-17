@@ -66,10 +66,8 @@ export async function PATCH(request: Request) {
   if (!input?.id) return NextResponse.json({ error: "Report id is required" }, { status: 400 });
 
   const { supabase, userId, membership, store } = result;
-  const scoped = () => supabase.from("saved_reports").eq("id", input.id).eq("organization_id", membership.organization_id);
-
   if (input.action === "duplicate") {
-    const { data: original, error: findError } = await scoped().select("name,description,report_type,visibility").is("archived_at", null).maybeSingle();
+    const { data: original, error: findError } = await supabase.from("saved_reports").select("name,description,report_type,visibility").eq("id", input.id).eq("organization_id", membership.organization_id).is("archived_at", null).maybeSingle();
     if (findError) return NextResponse.json({ error: findError.message }, { status: 500 });
     if (!original) return NextResponse.json({ error: "Report not found" }, { status: 404 });
     const name = `${original.name} copy`.slice(0, 120);
@@ -95,7 +93,7 @@ export async function PATCH(request: Request) {
   } else if (typeof input.isFavorite === "boolean") update.is_favorite = input.isFavorite;
   else return NextResponse.json({ error: "Choose a report update" }, { status: 400 });
 
-  const { data, error } = await scoped().update(update).select(reportFields).maybeSingle();
+  const { data, error } = await supabase.from("saved_reports").update(update).eq("id", input.id).eq("organization_id", membership.organization_id).select(reportFields).maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!data) return NextResponse.json({ error: "Report not found or cannot be updated" }, { status: 404 });
   return NextResponse.json({ report: data });
