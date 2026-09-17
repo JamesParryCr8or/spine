@@ -9,6 +9,7 @@ type Variant = { id: string; shopify_gid: string; sku: string | null; shopify_un
 type Refund = { total_refunded: string };
 type Transaction = { fee_amount: string; fee_tax: string; currency: string; status: string };
 type CustomCost = { name: string; amount: string; currency: string; cadence: "one_off" | "daily" | "weekly" | "monthly" | "annual"; allocation_basis: "fixed" | "orders" | "units" | "revenue"; effective_from: string; effective_to: string | null };
+type MetaInsight = { spend: string };
 
 const dayMs = 24 * 60 * 60 * 1000;
 const utcDay = (date: string) => Date.parse(`${date.slice(0, 10)}T00:00:00.000Z`);
@@ -115,6 +116,27 @@ export async function GET(request: Request) {
   const orderDates = includedOrders.flatMap((order) => order.processed_at ? [order.processed_at.slice(0, 10)] : []);
   const rangeStart = orderDates.length ? orderDates.reduce((first, date) => date < first ? date : first) : null;
   const rangeEnd = orderDates.length ? orderDates.reduce((last, date) => date > last ? date : last) : null;
+  const metaInsights: MetaInsight[] = [];
+  if (rangeStart && rangeEnd) {
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await supabase
+        .from("meta_ad_insights_daily")
+        .select("spend")
+        .eq("store_id", store.id)
+        .eq("currency", store.currency)
+        .gte("date_start", rangeStart)
+        .lte("date_start", rangeEnd)
+        .order("date_start", { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      const page = (data ?? []) as MetaInsight[];
+      metaInsights.push(...page);
+      if (page.length < pageSize) break;
+    }
+  }
+  const marketingSpend = metaInsights.reduce((total, insight) => total + monetary(insight.spend), 0);
+  const marketingSpendAvailable = metaInsights.length > 0;
+
   let fixedOperatingExpenses = 0;
   let variableOperatingExpenses = 0;
   let unallocatedOperatingCosts = 0;
@@ -152,13 +174,14 @@ export async function GET(request: Request) {
   const operatingExpenses = fixedOperatingExpenses + variableOperatingExpenses;
   const profitAfterOperatingCosts = grossProfit - operatingExpenses;
   const profitAfterKnownCosts = profitAfterOperatingCosts - transactionFees;
+  const profitAfterMarketingSpend = profitAfterKnownCosts - marketingSpend;
 
   return NextResponse.json({
     hasData: includedOrders.length > 0,
     currency: store.currency,
     calculatedAt: new Date().toISOString(),
-    metrics: { ...totals, refunds, cogs, grossProfit, grossMargin: totals.netProductSales - refunds ? grossProfit / (totals.netProductSales - refunds) : null, transactionFees, fixedOperatingExpenses, variableOperatingExpenses, operatingExpenses, profitAfterOperatingCosts, profitAfterKnownCosts, orders: includedOrders.length, missingCostLines, unallocatedOperatingCosts },
+    metrics: { ...totals, refunds, cogs, grossProfit, grossMargin: totals.netProductSales - refunds ? grossProfit / (totals.netProductSales - refunds) : null, marketingSpend, transactionFees, fixedOperatingExpenses, variableOperatingExpenses, operatingExpenses, profitAfterOperatingCosts, profitAfterKnownCosts, profitAfterMarketingSpend, orders: includedOrders.length, missingCostLines, unallocatedOperatingCosts },
     period: rangeStart && rangeEnd ? { start: rangeStart, end: rangeEnd } : null,
-    availability: { marketingSpend: false, transactionFees: transactionFeesAvailable, shippingCosts: false, operatingExpenses: true, netProfit: false },
+    availability: { marketingSpend: marketingSpendAvailable, transactionFees: transactionFeesAvailable, shippingCosts: false, operatingExpenses: true, netProfit: false },
   });
 }
