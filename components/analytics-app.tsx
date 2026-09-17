@@ -444,6 +444,7 @@ function Connections() {
   const [showToken, setShowToken] = useState(false);
   const [token, setToken] = useState("");
   const [accountId, setAccountId] = useState("");
+  const [metaLookbackMonths, setMetaLookbackMonths] = useState("36");
   const [metaConnected, setMetaConnected] = useState(false);
   const [metaAccountName, setMetaAccountName] = useState("");
   const [metaSyncResult, setMetaSyncResult] = useState("");
@@ -489,7 +490,7 @@ function Connections() {
     const response = await fetch("/api/connections/meta", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accessToken: token.trim(), accountId: accountId.trim() }),
+      body: JSON.stringify({ accessToken: token.trim(), accountId: accountId.trim(), lookbackMonths: Number(metaLookbackMonths) }),
     });
     const payload = await response.json();
     setSavingConnection(false);
@@ -559,11 +560,12 @@ function Connections() {
     {showMetaSetup && <div className="modal-backdrop" onMouseDown={()=>setShowMetaSetup(false)}><section className="connection-modal" onMouseDown={(event)=>event.stopPropagation()}>
       <button className="modal-close" onClick={()=>setShowMetaSetup(false)}><X/></button>
       <div className="modal-brand"><div className="source-logo m">M</div><div><span className="eyebrow">DATA CONNECTION</span><h2>Connect Meta Ads</h2></div></div>
-      <p className="modal-intro">Paste a Meta access token from the Graph API Explorer. We&apos;ll verify it against Meta, discover the ad account, securely save the connection, and import available daily ad spend into your P&amp;L.</p>
+      <p className="modal-intro">Paste a Meta access token from the Graph API Explorer. We&apos;ll verify it against Meta, discover the ad account, securely save the connection, and import daily ad spend for the rolling period you choose. Meta allows a maximum 37-month lookback.</p>
       {metaConnected && metaAccountName && <div className="connected-account"><span/><div><small>CURRENT ACCOUNT</small><strong>{metaAccountName}</strong></div></div>}
       <div className="help-card"><Info/><div><strong>Where do I find my token?</strong><ol><li>Open Meta&apos;s Graph API Explorer.</li><li>Select your Meta app and user.</li><li>Add <code>ads_read</code> and <code>read_insights</code> permissions.</li><li>Click Generate Access Token, then paste it below.</li></ol><a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noreferrer">Open Graph API Explorer <ExternalLink/></a></div></div>
       <label className="form-field"><span>Access token <b className="tooltip-trigger">?<em>Generate this in Meta Graph API Explorer with ads_read and read_insights permissions.</em></b></span><div className="secret-input"><KeyRound/><input value={token} onChange={(event)=>setToken(event.target.value)} type={showToken?"text":"password"} placeholder="EAAB..." autoComplete="off"/><button onClick={()=>setShowToken(!showToken)}>{showToken?<EyeOff/>:<Eye/>}</button></div></label>
       <label className="form-field"><span>Ad account ID <small>Optional</small></span><input value={accountId} onChange={(event)=>setAccountId(event.target.value)} placeholder="act_123456789"/></label>
+      <label className="form-field"><span>Spend history to import</span><select value={metaLookbackMonths} onChange={(event)=>setMetaLookbackMonths(event.target.value)}><option value="3">Last 3 months</option><option value="6">Last 6 months</option><option value="12">Last 12 months</option><option value="24">Last 24 months</option><option value="36">Last 36 months</option></select><small>Meta supports up to 37 months; 36 months is the safe maximum.</small></label>
       <div className="permission-note"><KeyRound/><span><strong>Required permissions:</strong> ads_read, read_insights</span></div>
       {metaSyncResult && <div className="connected-account"><span/><div><small>SPEND IMPORT COMPLETE</small><strong>{metaSyncResult}</strong></div></div>}{connectionError && <div className="connection-error">{connectionError}</div>}
       <div className="modal-actions">{metaConnected&&<button className="danger-button" disabled={savingConnection} onClick={disconnectMeta}>Disconnect</button>}<button onClick={()=>setShowMetaSetup(false)}>Cancel</button><button className="primary" disabled={!token.trim() || savingConnection} onClick={saveMeta}>{savingConnection?"Importing…":metaConnected?"Reconnect & import":"Verify, save & import"}</button></div>
