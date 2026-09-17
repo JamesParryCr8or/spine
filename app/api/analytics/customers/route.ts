@@ -51,17 +51,24 @@ export async function GET() {
   let newCustomerSales = 0;
   let repeatCustomerOrders = 0;
   let repeatCustomerSales = 0;
+  const months = new Map<string, { key: string; newCustomerOrders: number; newCustomerSales: number; repeatCustomerOrders: number; repeatCustomerSales: number }>();
+  const monthFor = (date: string | null) => date ? date.slice(0, 7) : null;
   const customers = [...ordersByCustomer.values()];
   for (const customerOrders of customers) {
     customerOrders.forEach((order, index) => {
       const sales = money(order.net_product_sales) + money(order.shipping_revenue);
+      const key = monthFor(order.processed_at);
+      const month = key ? months.get(key) ?? { key, newCustomerOrders: 0, newCustomerSales: 0, repeatCustomerOrders: 0, repeatCustomerSales: 0 } : null;
       if (index === 0) {
         newCustomerOrders += 1;
         newCustomerSales += sales;
+        if (month) { month.newCustomerOrders += 1; month.newCustomerSales += sales; }
       } else {
         repeatCustomerOrders += 1;
         repeatCustomerSales += sales;
+        if (month) { month.repeatCustomerOrders += 1; month.repeatCustomerSales += sales; }
       }
+      if (month && key) months.set(key, month);
     });
   }
 
@@ -91,5 +98,6 @@ export async function GET() {
       repeatRevenueRate: totalSales ? repeatCustomerSales / totalSales : null,
     },
     customers: recentCustomers.data ?? [],
+    months: [...months.values()].sort((left, right) => left.key.localeCompare(right.key)),
   });
 }
