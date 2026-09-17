@@ -24,6 +24,7 @@ type ShopifyOrder = {
   customer: { id: string; legacyResourceId: string; displayName: string; defaultEmailAddress: { emailAddress: string } | null; numberOfOrders: string; amountSpent: Money; createdAt: string; updatedAt: string } | null;
   lineItems: { nodes: Array<{ id: string; title: string; variantTitle: string | null; sku: string | null; vendor: string | null; quantity: number; currentQuantity: number; product: { id: string } | null; variant: { id: string } | null; originalUnitPriceSet: MoneyBag; originalTotalSet: MoneyBag; totalDiscountSet: MoneyBag; discountedTotalSet: MoneyBag }>; pageInfo: { hasNextPage: boolean } };
   refunds: Array<{ id: string; legacyResourceId: string; note: string | null; createdAt: string | null; processedAt: string; updatedAt: string; totalRefundedSet: MoneyBag; refundLineItems: { nodes: Array<{ id: string; quantity: number; restockType: string; subtotalSet: MoneyBag; lineItem: { id: string } }>; pageInfo: { hasNextPage: boolean } } }>;
+  transactions: { nodes: Array<{ id: string; kind: string; status: string; gateway: string | null; formattedGateway: string | null; amountSet: MoneyBag; fees: Array<{ amount: Money; taxAmount: Money }>; createdAt: string; processedAt: string | null }>; pageInfo: { hasNextPage: boolean } };
   customerJourneySummary: { ready: boolean; daysToConversion: number | null; customerOrderIndex: number | null; firstVisit: Visit | null; lastVisit: Visit | null } | null;
 };
 
@@ -138,7 +139,7 @@ export async function POST(request: Request) {
     } while (variantCursor);
 
     let orderCursor: string | null = null;
-    let ordersProcessed = 0, orderLinesProcessed = 0, customersProcessed = 0, refundsProcessed = 0, refundLinesProcessed = 0, attributionProcessed = 0;
+    let ordersProcessed = 0, orderLinesProcessed = 0, customersProcessed = 0, refundsProcessed = 0, refundLinesProcessed = 0, transactionsProcessed = 0, attributionProcessed = 0;
     const warnings: string[] = [];
     do {
       const result: { orders: { nodes: ShopifyOrder[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await shopifyGraph(shopDomain, accessToken, `query Orders($cursor:String){ orders(first:25,after:$cursor,sortKey:UPDATED_AT){ nodes{
@@ -147,6 +148,7 @@ export async function POST(request: Request) {
         customer{id legacyResourceId displayName defaultEmailAddress{emailAddress} numberOfOrders amountSpent{amount currencyCode} createdAt updatedAt}
         lineItems(first:100){nodes{id title variantTitle sku vendor quantity currentQuantity product{id} variant{id} originalUnitPriceSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} originalTotalSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} totalDiscountSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} discountedTotalSet(withCodeDiscounts:true){shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}}} pageInfo{hasNextPage}}
         refunds(first:50){id legacyResourceId note createdAt processedAt updatedAt totalRefundedSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} refundLineItems(first:100){nodes{id quantity restockType subtotalSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} lineItem{id}} pageInfo{hasNextPage}}}
+        transactions(first:100){nodes{id kind status gateway formattedGateway amountSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} fees{amount{amount currencyCode} taxAmount{amount currencyCode}} createdAt processedAt} pageInfo{hasNextPage}}
         customerJourneySummary{ready daysToConversion customerOrderIndex firstVisit{id occurredAt landingPage referrerUrl source sourceDescription sourceType utmParameters{source medium campaign content term}} lastVisit{id occurredAt landingPage referrerUrl source sourceDescription sourceType utmParameters{source medium campaign content term}}}
       } pageInfo{hasNextPage endCursor} } }`, { cursor: orderCursor });
 
@@ -165,6 +167,22 @@ export async function POST(request: Request) {
       const orderResult = orderGids.length ? await supabase.from("shopify_orders").select("id,shopify_gid").eq("store_id", store.id).in("shopify_gid", orderGids) : { data: [], error: null };
       if (orderResult.error) throw new Error(orderResult.error.message);
       const orderMap = new Map((orderResult.data ?? []).map((order) => [order.shopify_gid, order.id]));
+
+      const transactionRows = result.orders.nodes.flatMap((order) => {
+        const orderId = orderMap.get(order.id);
+        if (!orderId) return [];
+        if (order.transactions.pageInfo.hasNextPage) warnings.push(`${order.name} has more than 100 transactions; import is partial`);
+        return order.transactions.nodes.map((transaction) => ({
+          organization_id: membership.organization_id, store_id: store.id, order_id: orderId, shopify_gid: transaction.id,
+          kind: transaction.kind, status: transaction.status, gateway: transaction.gateway, formatted_gateway: transaction.formattedGateway,
+          amount: money(transaction.amountSet), currency: transaction.amountSet.shopMoney.currencyCode,
+          fee_amount: transaction.fees.reduce((total, fee) => total + Number(fee.amount.amount), 0).toFixed(4),
+          fee_tax: transaction.fees.reduce((total, fee) => total + Number(fee.taxAmount.amount), 0).toFixed(4),
+          created_at_shopify: transaction.createdAt, processed_at_shopify: transaction.processedAt, synced_at: new Date().toISOString(),
+        }));
+      });
+      if (transactionRows.length) { const { error } = await supabase.from("shopify_transactions").upsert(dedupeByShopifyId(transactionRows), { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
+      transactionsProcessed += transactionRows.length;
 
       const lineRows = result.orders.nodes.flatMap((order) => { const orderId = orderMap.get(order.id); if (!orderId) return []; if (order.lineItems.pageInfo.hasNextPage) warnings.push(`${order.name} has more than 100 line items; import is partial`); return order.lineItems.nodes.map((line) => ({ organization_id: membership.organization_id, store_id: store.id, order_id: orderId, shopify_gid: line.id, product_gid: line.product?.id ?? null, variant_gid: line.variant?.id ?? null, title: line.title, variant_title: line.variantTitle, sku: line.sku, vendor: line.vendor, quantity: line.quantity, current_quantity: line.currentQuantity, unit_price: money(line.originalUnitPriceSet), original_total: money(line.originalTotalSet), discounts: money(line.totalDiscountSet), net_sales: money(line.discountedTotalSet), currency: line.originalTotalSet.shopMoney.currencyCode, synced_at: new Date().toISOString() })); });
       if (lineRows.length) { const { error } = await supabase.from("shopify_order_lines").upsert(dedupeByShopifyId(lineRows), { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
@@ -191,15 +209,15 @@ export async function POST(request: Request) {
       attributionProcessed += attributionRows.length;
 
       orderCursor = result.orders.pageInfo.hasNextPage ? result.orders.pageInfo.endCursor : null;
-      const recordsProcessed = productsProcessed + variantsProcessed + ordersProcessed + orderLinesProcessed + customersProcessed + refundsProcessed + refundLinesProcessed + attributionProcessed;
+      const recordsProcessed = productsProcessed + variantsProcessed + ordersProcessed + orderLinesProcessed + customersProcessed + refundsProcessed + refundLinesProcessed + transactionsProcessed + attributionProcessed;
       const { error: progressError } = await supabase.from("sync_runs").update({ cursor: orderCursor, records_processed: recordsProcessed, warnings, updated_at: new Date().toISOString() }).eq("id", run.id);
       if (progressError) throw new Error(progressError.message);
     } while (orderCursor);
 
-    const recordsProcessed = productsProcessed + variantsProcessed + ordersProcessed + orderLinesProcessed + customersProcessed + refundsProcessed + refundLinesProcessed + attributionProcessed;
+    const recordsProcessed = productsProcessed + variantsProcessed + ordersProcessed + orderLinesProcessed + customersProcessed + refundsProcessed + refundLinesProcessed + transactionsProcessed + attributionProcessed;
     const { error: completeError } = await supabase.from("sync_runs").update({ status: "completed", cursor: null, records_processed: recordsProcessed, warnings, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", run.id);
     if (completeError) throw new Error(completeError.message);
-    return NextResponse.json({ connection: { provider: "shopify", status: "connected", external_account_id: shopData.shop.id, external_account_name: shopData.shop.name }, sync: { products: productsProcessed, variants: variantsProcessed, orders: ordersProcessed, orderLines: orderLinesProcessed, customers: customersProcessed, refunds: refundsProcessed, refundLines: refundLinesProcessed, attribution: attributionProcessed, warnings: warnings.length } });
+    return NextResponse.json({ connection: { provider: "shopify", status: "connected", external_account_id: shopData.shop.id, external_account_name: shopData.shop.name }, sync: { products: productsProcessed, variants: variantsProcessed, orders: ordersProcessed, orderLines: orderLinesProcessed, customers: customersProcessed, refunds: refundsProcessed, refundLines: refundLinesProcessed, transactions: transactionsProcessed, attribution: attributionProcessed, warnings: warnings.length } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Shopify connection failed";
     if (runId) await supabase.from("sync_runs").update({ status: "failed", error_message: message.slice(0, 500), completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", runId);
