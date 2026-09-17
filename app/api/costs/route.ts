@@ -78,9 +78,42 @@ export async function GET(request: Request) {
     : { data: [], error: null };
   if (productError) return NextResponse.json({ error: productError.message }, { status: 500 });
   const productNames = new Map((products ?? []).map((product) => [product.id, product.title]));
+  const orderRows: Array<{ id: string; processed_at_shopify: string | null }> = [];
+  const lineRows: Array<{ order_id: string; variant_gid: string | null; sku: string | null; current_quantity: number; net_sales: string }> = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from("shopify_orders").select("id,processed_at_shopify").eq("store_id", store.id).neq("test", true).is("cancelled_at", null).range(from, from + 999);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    orderRows.push(...(data ?? []));
+    if ((data ?? []).length < 1000) break;
+  }
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from("shopify_order_lines").select("order_id,variant_gid,sku,current_quantity,net_sales").eq("store_id", store.id).range(from, from + 999);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    lineRows.push(...(data ?? []));
+    if ((data ?? []).length < 1000) break;
+  }
+  const orderDates = new Map(orderRows.filter((order) => order.processed_at_shopify).map((order) => [order.id, order.processed_at_shopify!.slice(0, 10)]));
+  const variantsByGid = new Map((variants ?? []).map((variant) => [variant.id, variant]));
+  const costsByKey = new Map<string, Array<{ effective_from: string; effective_to: string | null }>>();
+  for (const cost of costs ?? []) {
+    const key = cost.variant_id ? `variant:${cost.variant_id}` : cost.sku ? `sku:${cost.sku.trim().toLowerCase()}` : null;
+    if (key) costsByKey.set(key, [...(costsByKey.get(key) ?? []), cost]);
+  }
+  const missingOrders = new Set<string>();
+  let missingRevenue = 0, missingUnits = 0;
+  for (const line of lineRows) {
+    const date = orderDates.get(line.order_id);
+    if (!date) continue;
+    const variant = line.variant_gid ? variantsByGid.get(line.variant_gid) : undefined;
+    const key = variant ? `variant:${variant.id}` : line.sku ? `sku:${line.sku.trim().toLowerCase()}` : null;
+    const hasManualCost = key ? (costsByKey.get(key) ?? []).some((cost) => cost.effective_from <= date && (!cost.effective_to || cost.effective_to >= date)) : false;
+    if (hasManualCost || variant?.shopify_unit_cost !== null && variant?.shopify_unit_cost !== undefined) continue;
+    missingOrders.add(line.order_id); missingUnits += Math.max(line.current_quantity, 0); missingRevenue += Number(line.net_sales) || 0;
+  }
 
   return NextResponse.json({
     currency: store.currency,
+    missingCostImpact: { orders: missingOrders.size, units: missingUnits, revenue: missingRevenue },
     canEdit: ["owner", "admin"].includes(membership.role),
     variants: (variants ?? []).map((variant) => ({ ...variant, productTitle: productNames.get(variant.product_id) ?? "Unknown product" })),
     costs: costs ?? [],
