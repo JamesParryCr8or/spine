@@ -55,6 +55,17 @@ function Trend({ positive = true, children }: { positive?: boolean; children: Re
   return <span className={positive ? "trend up" : "trend down"}><Icon />{children}</span>;
 }
 
+function downloadCsv(filename: string, rows: Array<Array<string | number>>) {
+  const escape = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
+  const csv = rows.map((row) => row.map(escape).join(",")).join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 type OverviewData = {
   hasData: boolean;
   currency: string;
@@ -159,7 +170,12 @@ function ProfitLoss() {
   ] : [["NET SALES", "£236,582", "+11.2%"], ["GROSS PROFIT", "£143,487", "+9.4%"], ["MARKETING", "£27,911", "+4.1%"], ["NET PROFIT", "£92,917", "+18.2%"]];
   const totalRows = hasLiveData ? new Set([3, 6, 9]) : new Set([3, 5, 8]);
 
-  return <>{loading ? <div className="data-loading">Calculating your income statement…</div> : !hasLiveData && pnl ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to build your income statement</strong><span>The preview will be replaced with reconciled sales and cost data after your first sync.</span></div></div> : null}{hasLiveData && pnl!.metrics.missingCostLines > 0 ? <div className="connection-notice"><Info/><div><strong>{pnl!.metrics.missingCostLines} order lines are missing a product cost</strong><span>Gross profit is provisional until you add an effective-dated product cost for these variants.</span></div></div> : null}<section className="panel report-panel"><div className="report-summary">{summary.map(([label, value, hint])=><div key={label}><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>)}</div><div className="table-scroll"><table className="data-table pnl-table"><thead><tr><th>Income statement</th><th>{hasLiveData ? "All imported data" : "Apr 2026"}</th>{!hasLiveData&&months.slice(1).map(month=><th key={month}>{month} 2026</th>)}</tr></thead><tbody>{liveRows.map((row,index)=><tr className={totalRows.has(index)?"total":""} key={row[0]}>{row.map((cell,i)=><td key={`${cell}-${i}`}>{i===0 && !totalRows.has(index)?<span className="indent">{cell}</span>:cell}</td>)}</tr>)}</tbody></table></div></section></>;
+  const exportPnl = () => {
+    if (!pnl) return;
+    downloadCsv("profit-and-loss.csv", [["Metric", "Amount"], ...liveRows.map(([label, value]) => [label, value])]);
+  };
+
+  return <>{loading ? <div className="data-loading">Calculating your income statement…</div> : !hasLiveData && pnl ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to build your income statement</strong><span>The preview will be replaced with reconciled sales and cost data after your first sync.</span></div></div> : null}{hasLiveData && pnl!.metrics.missingCostLines > 0 ? <div className="connection-notice"><Info/><div><strong>{pnl!.metrics.missingCostLines} order lines are missing a product cost</strong><span>Gross profit is provisional until you add an effective-dated product cost for these variants.</span></div></div> : null}{hasLiveData ? <div className="report-export"><button className="export-button" onClick={exportPnl}><Download/> Export P&L CSV</button></div> : null}<section className="panel report-panel"><div className="report-summary">{summary.map(([label, value, hint])=><div key={label}><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>)}</div><div className="table-scroll"><table className="data-table pnl-table"><thead><tr><th>Income statement</th><th>{hasLiveData ? "All imported data" : "Apr 2026"}</th>{!hasLiveData&&months.slice(1).map(month=><th key={month}>{month} 2026</th>)}</tr></thead><tbody>{liveRows.map((row,index)=><tr className={totalRows.has(index)?"total":""} key={row[0]}>{row.map((cell,i)=><td key={`${cell}-${i}`}>{i===0 && !totalRows.has(index)?<span className="indent">{cell}</span>:cell}</td>)}</tr>)}</tbody></table></div></section></>;
 }
 
 type UtmRow = { source: string; medium: string; campaign: string; sales: number; orders: number; newCustomerSales: number; averageOrderValue: number };
