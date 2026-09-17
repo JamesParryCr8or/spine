@@ -59,3 +59,10 @@ button { cursor:pointer; }
 .audit-history ul{list-style:none;margin:9px 0 0;padding:0;display:grid;gap:8px}
 .audit-history li{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:10px}
 .audit-history li strong{color:#293244}.audit-history li span{color:#7f899a;text-align:right}
+
+.metric-dictionary{margin:0 0 14px;border:1px solid #e5e8f0;border-radius:10px;background:#fff}
+.metric-dictionary summary{cursor:pointer;padding:13px 15px;color:#344055;font-size:11px;font-weight:800}
+.metric-dictionary[open] summary{border-bottom:1px solid #edf0f5}
+.metric-dictionary dl{margin:0;padding:4px 15px 12px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 24px}
+.metric-dictionary dl div{padding-top:8px}.metric-dictionary dt{font-size:10px;font-weight:800;color:#293246}.metric-dictionary dd{margin:4px 0 0;font-size:9px;line-height:1.55;color:#7c8698}
+@media(max-width:700px){.metric-dictionary dl{grid-template-columns:1fr}}
