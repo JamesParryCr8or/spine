@@ -21,5 +21,11 @@ export async function GET() {
     .order("processed_at", { ascending: false })
     .limit(250);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ hasData: (orders ?? []).length > 0, currency: store.currency, orders: orders ?? [] });
+  const orderRows = orders ?? [];
+  const orderIds = orderRows.map((order) => order.id);
+  const { data: refunds, error: refundsError } = orderIds.length ? await supabase.from("shopify_refunds").select("order_id,total_refunded").in("order_id", orderIds) : { data: [], error: null };
+  if (refundsError) return NextResponse.json({ error: refundsError.message }, { status: 500 });
+  const refundsByOrder = new Map<string, number>();
+  for (const refund of refunds ?? []) refundsByOrder.set(refund.order_id, (refundsByOrder.get(refund.order_id) ?? 0) + Number(refund.total_refunded));
+  return NextResponse.json({ hasData: orderRows.length > 0, currency: store.currency, orders: orderRows.map((order) => ({ ...order, refunded: refundsByOrder.get(order.id) ?? 0 })) });
 }
