@@ -322,7 +322,7 @@ function Costs({ focusSku }: { focusSku?: string | null }) {
     setVariants(payload.variants ?? []); setCosts(payload.costs ?? []); setMissingCostImpact(payload.missingCostImpact ?? { orders: 0, units: 0, revenue: 0 }); setCurrency(payload.currency ?? "GBP"); setCanEdit(Boolean(payload.canEdit));
   }).catch((reason) => setError(reason instanceof Error ? reason.message : "Could not load costs"));
 
-  useEffect(() => { load(); }, [showArchived]);
+  useEffect(() => { load(); }, []);
   useEffect(() => { if (focusSku) setCostSearch(focusSku); }, [focusSku]);
 
   const saveItems = async (items: Array<Record<string, string | null>>, source: "manual" | "csv", filename?: string) => {
@@ -668,7 +668,7 @@ function Reports({ openReport }: { openReport: (view: View, preset?: "all_import
   const [editing, setEditing] = useState<SavedReport | null>(null);
   const [editForm, setEditForm] = useState({ name: "", description: "", visibility: "private" });
   const load = () => fetch(`/api/reports${showArchived ? "?archived=true" : ""}`).then(async (response) => { const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Could not load reports"); setReports(payload.reports ?? []); }).catch((reason) => setError(reason instanceof Error ? reason.message : "Could not load reports")).finally(() => setLoading(false));
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [showArchived]);
   const save = async () => {
     setSaving(true); setError("");
     try {
