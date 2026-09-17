@@ -134,7 +134,7 @@ function Overview() {
 type PnlData = {
   hasData: boolean;
   currency: string;
-  metrics: { grossSales: number; discounts: number; refunds: number; netProductSales: number; shippingRevenue: number; tax: number; duties: number; totalSales: number; cogs: number; grossProfit: number; grossMargin: number | null; operatingExpenses: number; profitAfterFixedOperatingCosts: number; orders: number; missingCostLines: number; unallocatedOperatingCosts: number };
+  metrics: { grossSales: number; discounts: number; refunds: number; netProductSales: number; shippingRevenue: number; tax: number; duties: number; totalSales: number; cogs: number; grossProfit: number; grossMargin: number | null; fixedOperatingExpenses: number; variableOperatingExpenses: number; operatingExpenses: number; profitAfterOperatingCosts: number; orders: number; missingCostLines: number; unallocatedOperatingCosts: number };
   availability: { marketingSpend: boolean; transactionFees: boolean; shippingCosts: boolean; operatingExpenses: boolean; netProfit: boolean };
 };
 
@@ -161,8 +161,10 @@ function ProfitLoss() {
     ["Shipping revenue", signed(pnl.metrics.shippingRevenue)],
     ["Product COGS", signed(-pnl.metrics.cogs)],
     ["Gross profit", signed(pnl.metrics.grossProfit)],
-    ["Fixed operating costs", signed(-pnl.metrics.operatingExpenses)],
-    ["Profit after fixed operating costs", signed(pnl.metrics.profitAfterFixedOperatingCosts)],
+    ["Fixed operating costs", signed(-pnl.metrics.fixedOperatingExpenses)],
+    ["Variable operating costs", signed(-pnl.metrics.variableOperatingExpenses)],
+    ["Operating expenses", signed(-pnl.metrics.operatingExpenses)],
+    ["Profit after operating costs", signed(pnl.metrics.profitAfterOperatingCosts)],
     ["Marketing spend", "Not connected"],
     ["Transaction and fulfilment costs", "Not connected"],
     ["Net profit", "Add connected costs to calculate"],
@@ -170,18 +172,18 @@ function ProfitLoss() {
   const summary = pnl ? [
     ["NET PRODUCT SALES", formatter.format(pnl.metrics.netProductSales - pnl.metrics.refunds), `${pnl.metrics.orders.toLocaleString()} orders`],
     ["GROSS PROFIT", formatter.format(pnl.metrics.grossProfit), pnl.metrics.grossMargin === null ? "Cost coverage needed" : `${(pnl.metrics.grossMargin * 100).toFixed(1)}% margin`],
-    ["FIXED OPERATING COSTS", formatter.format(pnl.metrics.operatingExpenses), pnl.metrics.unallocatedOperatingCosts ? `${pnl.metrics.unallocatedOperatingCosts} usage-based costs pending allocation` : "Included for this sales period"],
+    ["OPERATING EXPENSES", formatter.format(pnl.metrics.operatingExpenses), pnl.metrics.unallocatedOperatingCosts ? `${pnl.metrics.unallocatedOperatingCosts} costs need attention` : `${formatter.format(pnl.metrics.fixedOperatingExpenses)} fixed · ${formatter.format(pnl.metrics.variableOperatingExpenses)} variable`],
     ["MISSING COST LINES", pnl.metrics.missingCostLines.toLocaleString(), pnl.metrics.missingCostLines ? "Add costs to improve profit" : "All order lines costed"],
     ["NET PROFIT", "—", "Connect remaining cost sources"],
   ] : [["NET SALES", "£236,582", "+11.2%"], ["GROSS PROFIT", "£143,487", "+9.4%"], ["MARKETING", "£27,911", "+4.1%"], ["NET PROFIT", "£92,917", "+18.2%"]];
-  const totalRows = hasLiveData ? new Set([3, 6, 8]) : new Set([3, 5, 8]);
+  const totalRows = hasLiveData ? new Set([3, 6, 9, 10]) : new Set([3, 5, 8]);
 
   const exportPnl = () => {
     if (!pnl) return;
     downloadCsv("profit-and-loss.csv", [["Metric", "Amount"], ...liveRows.map(([label, value]) => [label, value])]);
   };
 
-  return <>{loading ? <div className="data-loading">Calculating your income statement…</div> : !hasLiveData && pnl ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to build your income statement</strong><span>The preview will be replaced with reconciled sales and cost data after your first sync.</span></div></div> : null}{hasLiveData && pnl!.metrics.missingCostLines > 0 ? <div className="connection-notice"><Info/><div><strong>{pnl!.metrics.missingCostLines} order lines are missing a product cost</strong><span>Gross profit is provisional until you add an effective-dated product cost for these variants.</span></div></div> : null}{hasLiveData && pnl!.metrics.unallocatedOperatingCosts > 0 ? <div className="connection-notice"><Info/><div><strong>{pnl!.metrics.unallocatedOperatingCosts} operating costs still need an allocation rule</strong><span>Only fixed costs are included in the current P&L; order, unit and revenue-based costs will be added once their allocation is configured.</span></div></div> : null}{hasLiveData ? <div className="report-export"><button className="export-button" onClick={exportPnl}><Download/> Export P&L CSV</button></div> : null}<section className="panel report-panel"><div className="report-summary">{summary.map(([label, value, hint])=><div key={label}><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>)}</div><div className="table-scroll"><table className="data-table pnl-table"><thead><tr><th>Income statement</th><th>{hasLiveData ? "All imported data" : "Apr 2026"}</th>{!hasLiveData&&months.slice(1).map(month=><th key={month}>{month} 2026</th>)}</tr></thead><tbody>{liveRows.map((row,index)=><tr className={totalRows.has(index)?"total":""} key={row[0]}>{row.map((cell,i)=><td key={`${cell}-${i}`}>{i===0 && !totalRows.has(index)?<span className="indent">{cell}</span>:cell}</td>)}</tr>)}</tbody></table></div></section></>;
+  return <>{loading ? <div className="data-loading">Calculating your income statement…</div> : !hasLiveData && pnl ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to build your income statement</strong><span>The preview will be replaced with reconciled sales and cost data after your first sync.</span></div></div> : null}{hasLiveData && pnl!.metrics.missingCostLines > 0 ? <div className="connection-notice"><Info/><div><strong>{pnl!.metrics.missingCostLines} order lines are missing a product cost</strong><span>Gross profit is provisional until you add an effective-dated product cost for these variants.</span></div></div> : null}{hasLiveData && pnl!.metrics.unallocatedOperatingCosts > 0 ? <div className="connection-notice"><Info/><div><strong>{pnl!.metrics.unallocatedOperatingCosts} operating costs still need an allocation rule</strong><span>The P&L excludes these costs because their currency or effective dates need attention.</span></div></div> : null}{hasLiveData ? <div className="report-export"><button className="export-button" onClick={exportPnl}><Download/> Export P&L CSV</button></div> : null}<section className="panel report-panel"><div className="report-summary">{summary.map(([label, value, hint])=><div key={label}><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>)}</div><div className="table-scroll"><table className="data-table pnl-table"><thead><tr><th>Income statement</th><th>{hasLiveData ? "All imported data" : "Apr 2026"}</th>{!hasLiveData&&months.slice(1).map(month=><th key={month}>{month} 2026</th>)}</tr></thead><tbody>{liveRows.map((row,index)=><tr className={totalRows.has(index)?"total":""} key={row[0]}>{row.map((cell,i)=><td key={`${cell}-${i}`}>{i===0 && !totalRows.has(index)?<span className="indent">{cell}</span>:cell}</td>)}</tr>)}</tbody></table></div></section></>;
 }
 
 type UtmRow = { source: string; medium: string; campaign: string; sales: number; orders: number; newCustomerSales: number; averageOrderValue: number };
