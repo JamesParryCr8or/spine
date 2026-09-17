@@ -7,6 +7,7 @@
 - [x] Added Overview, Profit & Loss, UTM, Costs, Reports, and Connections screens.
 - [x] Added the first Meta Ads connection flow with Graph API Explorer guidance and token validation.
 - [x] Added a server-only Meta connection API; connector tokens are never returned to the browser.
+- [x] Import daily Meta Ads account spend on connection and deduct matching-currency spend from the P&L for the selected period.
 - [x] Added a reviewed Supabase setup script for organizations, memberships, stores, RLS, and Vault-backed connector secrets.
 - [x] Added a Shopify development-token connection flow using Admin GraphQL API `2026-07`.
 - [x] Added cursor-paginated product and variant import with tenant RLS and sync-run history.
@@ -236,7 +237,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [x] Total sales, with a documented formula.
 - [x] Product COGS using the effective product cost on the order date, with Shopify unit-cost fallback.
 - [x] Gross profit and gross margin percentage, with missing-cost coverage warnings.
-- [ ] Marketing spend.
+- [x] Marketing spend from imported Meta Ads daily account insights, scoped to the P&L date range and source currency.
 - [ ] Payment transaction fees.
 - [ ] Shipping and fulfilment costs.
 - [ ] Handling costs.
@@ -346,7 +347,7 @@ Normalize every ad source into shared daily dimensions while retaining source-sp
 
 ### Meta Ads
 
-- [ ] Port account discovery and insights concepts from `Meta.gs` into a typed server connector.
+- [x] Port account discovery and daily account-insights concepts from `Meta.gs` into a typed server connector.
 - [ ] Use OAuth or a secure system-user connection flow appropriate to the deployment model.
 - [ ] Import daily account, campaign, ad set, and ad metrics.
 - [ ] Support selectable attribution windows later; record the window with imported metrics.
