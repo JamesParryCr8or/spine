@@ -502,7 +502,6 @@ function Connections() {
     setAccountId(payload.connection?.external_account_id ?? accountId);
     setMetaSyncResult(`${payload.sync?.importedDays ?? 0} daily Meta spend records imported (${payload.sync?.range?.since ?? "selected"} to ${payload.sync?.range?.until ?? "today"})`);
     setToken("");
-    setShowMetaSetup(false);
   };
 
   const disconnectMeta = async () => {
@@ -560,7 +559,7 @@ function Connections() {
     {showMetaSetup && <div className="modal-backdrop" onMouseDown={()=>setShowMetaSetup(false)}><section className="connection-modal" onMouseDown={(event)=>event.stopPropagation()}>
       <button className="modal-close" onClick={()=>setShowMetaSetup(false)}><X/></button>
       <div className="modal-brand"><div className="source-logo m">M</div><div><span className="eyebrow">DATA CONNECTION</span><h2>Connect Meta Ads</h2></div></div>
-      <p className="modal-intro">Paste a Meta access token from the Graph API Explorer. We&apos;ll verify it against Meta, discover the ad account, securely save the connection, and import up to three years of daily ad spend into your P&amp;L.</p>
+      <p className="modal-intro">Paste a Meta access token from the Graph API Explorer. We&apos;ll verify it against Meta, discover the ad account, securely save the connection, and import available daily ad spend into your P&amp;L.</p>
       {metaConnected && metaAccountName && <div className="connected-account"><span/><div><small>CURRENT ACCOUNT</small><strong>{metaAccountName}</strong></div></div>}
       <div className="help-card"><Info/><div><strong>Where do I find my token?</strong><ol><li>Open Meta&apos;s Graph API Explorer.</li><li>Select your Meta app and user.</li><li>Add <code>ads_read</code> and <code>read_insights</code> permissions.</li><li>Click Generate Access Token, then paste it below.</li></ol><a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noreferrer">Open Graph API Explorer <ExternalLink/></a></div></div>
       <label className="form-field"><span>Access token <b className="tooltip-trigger">?<em>Generate this in Meta Graph API Explorer with ads_read and read_insights permissions.</em></b></span><div className="secret-input"><KeyRound/><input value={token} onChange={(event)=>setToken(event.target.value)} type={showToken?"text":"password"} placeholder="EAAB..." autoComplete="off"/><button onClick={()=>setShowToken(!showToken)}>{showToken?<EyeOff/>:<Eye/>}</button></div></label>
