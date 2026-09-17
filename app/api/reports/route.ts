@@ -18,15 +18,17 @@ async function context() {
   return { supabase, userId, membership, store };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const result = await context();
   if (result.error) return result.error;
   const { supabase, membership } = result;
-  const { data, error } = await supabase
+  const archived = new URL(request.url).searchParams.get("archived") === "true";
+  let query = supabase
     .from("saved_reports")
     .select(reportFields)
-    .eq("organization_id", membership.organization_id)
-    .is("archived_at", null)
+    .eq("organization_id", membership.organization_id);
+  query = archived ? query.not("archived_at", "is", null) : query.is("archived_at", null);
+  const { data, error } = await query
     .order("is_favorite", { ascending: false })
     .order("updated_at", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
