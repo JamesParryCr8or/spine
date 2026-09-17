@@ -22,7 +22,14 @@ const chunks = <T,>(items: T[], size: number) => Array.from({ length: Math.ceil(
  * when Shopify supplied actual transaction-fee records; unconnected cost
  * sources remain visible as unavailable rather than being estimated.
  */
-export async function GET() {
+export async function GET(request: Request) {
+  const params = new URL(request.url).searchParams;
+  const fromDate = params.get("from") ?? "";
+  const toDate = params.get("to") ?? "";
+  const isDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+  if ((fromDate && !isDate(fromDate)) || (toDate && !isDate(toDate)) || (fromDate && toDate && fromDate > toDate)) {
+    return NextResponse.json({ error: "Use a valid start and end date" }, { status: 400 });
+  }
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
   const userId = claims?.claims?.sub;
@@ -36,15 +43,16 @@ export async function GET() {
   const includedOrders: Order[] = [];
   const pageSize = 1000;
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("shopify_orders")
       .select("id,processed_at,gross_sales,discounts,net_product_sales,shipping_revenue,tax,duties,total_sales")
       .eq("store_id", store.id)
       .is("cancelled_at", null)
       .eq("test", false)
-      .not("processed_at", "is", null)
-      .order("processed_at", { ascending: true })
-      .range(from, from + pageSize - 1);
+      .not("processed_at", "is", null);
+    if (fromDate) query = query.gte("processed_at", `${fromDate}T00:00:00.000Z`);
+    if (toDate) query = query.lte("processed_at", `${toDate}T23:59:59.999Z`);
+    const { data, error } = await query.order("processed_at", { ascending: true }).range(from, from + pageSize - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const page = (data ?? []) as Order[];
     includedOrders.push(...page);
