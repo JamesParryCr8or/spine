@@ -37,7 +37,7 @@ async function requireUser() {
   return { supabase, userId: data.claims.sub, response: null };
 }
 
-async function importMetaInsights({ supabase, userId, account, accessToken }: { supabase: Awaited<ReturnType<typeof createClient>>; userId: string; account: MetaAccount; accessToken: string }) {
+async function importMetaInsights({ supabase, userId, account, accessToken, lookbackMonths }: { supabase: Awaited<ReturnType<typeof createClient>>; userId: string; account: MetaAccount; accessToken: string; lookbackMonths: number }) {
   const { data: membership, error: membershipError } = await supabase
     .from("organization_members").select("organization_id").eq("user_id", userId).limit(1).single();
   if (membershipError || !membership) throw new Error("No workspace is configured");
@@ -47,7 +47,7 @@ async function importMetaInsights({ supabase, userId, account, accessToken }: { 
 
   const until = new Date();
   const since = new Date(until);
-  since.setUTCDate(since.getUTCDate() - 3651);
+  since.setUTCMonth(since.getUTCMonth() - lookbackMonths);
   const range = { since: since.toISOString().slice(0, 10), until: until.toISOString().slice(0, 10) };
   const params = new URLSearchParams({
     level: "account",
@@ -107,7 +107,9 @@ export async function POST(request: Request) {
   const { supabase, userId, response } = await requireUser();
   if (response || !userId) return response!;
 
-  const body = await request.json().catch(() => null) as { accessToken?: string; accountId?: string } | null;
+  const body = await request.json().catch(() => null) as { accessToken?: string; accountId?: string; lookbackMonths?: number } | null;
+  const requestedLookback = Number(body?.lookbackMonths);
+  const lookbackMonths = Number.isInteger(requestedLookback) && requestedLookback >= 1 && requestedLookback <= 36 ? requestedLookback : 36;
   const accessToken = body?.accessToken?.trim();
   if (!accessToken) return NextResponse.json({ error: "Access token is required to import Meta spend" }, { status: 400 });
 
@@ -132,7 +134,7 @@ export async function POST(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   try {
-    const sync = await importMetaInsights({ supabase, userId, account, accessToken });
+    const sync = await importMetaInsights({ supabase, userId, account, accessToken, lookbackMonths });
     const saved = Array.isArray(data) ? data[0] : data;
     return NextResponse.json({
       connection: { provider: saved?.provider ?? "meta", status: saved?.status ?? "connected", external_account_id: account.id, external_account_name: account.name ?? account.id, last_verified_at: saved?.last_verified_at ?? new Date().toISOString() },
