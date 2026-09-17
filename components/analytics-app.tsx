@@ -102,9 +102,25 @@ function Overview() {
   const chartProfit = hasLiveData ? liveData!.months.map((month) => month.grossSales) : profit;
   const chartSpend = hasLiveData ? liveData!.months.map((month) => month.shippingRevenue) : spend;
   const chartMaximum = Math.max(...chartRevenue, ...chartProfit, ...chartSpend, 1);
+  const exportOverview = () => {
+    if (!liveData?.hasData) return;
+    downloadCsv("shopify-overview.csv", [
+      ["Metric", "Value"],
+      ["Net sales", liveData.metrics.netSales],
+      ["Gross sales", liveData.metrics.grossSales],
+      ["Discounts", liveData.metrics.discounts],
+      ["Shipping revenue", liveData.metrics.shippingRevenue],
+      ["Orders", liveData.metrics.orders],
+      ["Average order value", liveData.metrics.averageOrderValue],
+      [],
+      ["Month", "Net sales", "Gross sales", "Discounts", "Shipping revenue", "Orders"],
+      ...liveData.months.map((month) => [month.label, month.netSales, month.grossSales, month.discounts, month.shippingRevenue, month.orders]),
+    ]);
+  };
 
   return <>
     {loading ? <div className="data-loading">Loading your Shopify summary…</div> : !hasLiveData && liveData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to start your live dashboard</strong><span>The figures below are a preview. Your own sales and orders will appear after the first sync.</span></div></div> : null}
+    {hasLiveData ? <div className="report-export"><button className="export-button" onClick={exportOverview}><Download/> Export overview CSV</button></div> : null}
     <section className="metric-grid">{liveMetrics.map((metric) => <article className="metric-card" key={metric.label}>
       <div className="metric-head"><span>{metric.label}</span><CircleDollarSign /></div>
       <strong>{metric.value}</strong>
