@@ -150,3 +150,31 @@ export async function POST(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ imported: data.length, batchId });
 }
+
+
+export async function PATCH(request: Request) {
+  const result = await context();
+  if (result.error) return result.error;
+  const { supabase, membership, store } = result;
+  if (!["owner", "admin"].includes(membership.role)) return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
+
+  const input = await request.json().catch(() => null) as { id?: string; amount?: string | number; effectiveTo?: string | null; notes?: string | null } | null;
+  const id = input?.id?.trim();
+  const amount = String(input?.amount ?? "").trim();
+  const effectiveTo = input?.effectiveTo?.trim() || null;
+  if (!id) return NextResponse.json({ error: "Choose a cost record to edit" }, { status: 400 });
+  if (!moneyPattern.test(amount)) return NextResponse.json({ error: "Amount must be a positive number with up to 4 decimal places" }, { status: 400 });
+  if (effectiveTo && !datePattern.test(effectiveTo)) return NextResponse.json({ error: "Use YYYY-MM-DD for the effective-to date" }, { status: 400 });
+
+  const { data: current, error: currentError } = await supabase.from("product_costs").select("effective_from").eq("id", id).eq("store_id", store.id).maybeSingle();
+  if (currentError) return NextResponse.json({ error: currentError.message }, { status: 500 });
+  if (!current) return NextResponse.json({ error: "Cost record not found" }, { status: 404 });
+  if (effectiveTo && effectiveTo < current.effective_from) return NextResponse.json({ error: "Effective-to cannot precede effective-from" }, { status: 400 });
+
+  const { data, error } = await supabase.from("product_costs").update({
+    amount, effective_to: effectiveTo, notes: input?.notes?.trim() || null, updated_at: new Date().toISOString(),
+  }).eq("id", id).eq("store_id", store.id).select("id").maybeSingle();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!data) return NextResponse.json({ error: "Cost record not found" }, { status: 404 });
+  return NextResponse.json({ cost: data });
+}
