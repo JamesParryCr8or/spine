@@ -108,6 +108,7 @@ export async function GET() {
       guestOrders,
       guestSales,
       repeatRevenueRate: totalSales ? repeatCustomerSales / totalSales : null,
+      repeatOrderRate: identifiedOrders ? repeatCustomerOrders / identifiedOrders : null,
       newCustomerAverageOrderValue: newCustomerOrders ? newCustomerSales / newCustomerOrders : null,
       repeatCustomerAverageOrderValue: repeatCustomerOrders ? repeatCustomerSales / repeatCustomerOrders : null,
       averageOrdersPerCustomer: customers.length ? identifiedOrders / customers.length : null,
