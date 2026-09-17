@@ -250,7 +250,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [x] Average order value.
 - [ ] New customers and repeat customers.
 - [x] New-customer sales and repeat-customer sales.
-- [ ] New-customer AOV and repeat-customer AOV.
+- [x] New-customer AOV and repeat-customer AOV.
 - [ ] Blended CAC.
 - [ ] Blended MER/ROAS.
 - [ ] New-customer ROAS using an explicitly documented attribution basis.
