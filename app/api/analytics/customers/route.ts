@@ -74,6 +74,12 @@ export async function GET() {
 
   const totalSales = newCustomerSales + repeatCustomerSales + guestSales;
   const repeatCustomers = customers.filter((customerOrders) => customerOrders.length > 1).length;
+  const timeToSecondOrderDays = customers.flatMap((customerOrders) => {
+    const first = customerOrders[0]?.processed_at;
+    const second = customerOrders[1]?.processed_at;
+    return first && second ? [(Date.parse(second) - Date.parse(first)) / (24 * 60 * 60 * 1000)] : [];
+  });
+  const identifiedOrders = newCustomerOrders + repeatCustomerOrders;
   const recentCustomers = await supabase
     .from("shopify_customers")
     .select("id,display_name,email,number_of_orders,amount_spent,currency,updated_at_shopify")
@@ -96,6 +102,9 @@ export async function GET() {
       guestOrders,
       guestSales,
       repeatRevenueRate: totalSales ? repeatCustomerSales / totalSales : null,
+      averageOrdersPerCustomer: customers.length ? identifiedOrders / customers.length : null,
+      averageCustomerValue: customers.length ? (newCustomerSales + repeatCustomerSales) / customers.length : null,
+      averageDaysToSecondOrder: timeToSecondOrderDays.length ? timeToSecondOrderDays.reduce((total, days) => total + days, 0) / timeToSecondOrderDays.length : null,
     },
     customers: recentCustomers.data ?? [],
     months: [...months.values()].sort((left, right) => left.key.localeCompare(right.key)),
