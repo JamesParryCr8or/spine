@@ -66,9 +66,13 @@ export async function GET() {
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
   if (!claims?.claims?.sub) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
-  const { data, error } = await supabase.from("data_connections").select("provider,status,external_account_id,external_account_name,last_verified_at,last_error").eq("provider", "shopify").maybeSingle();
+  const [connectionResult, syncResult] = await Promise.all([
+    supabase.from("data_connections").select("provider,status,external_account_id,external_account_name,last_verified_at,last_error").eq("provider", "shopify").maybeSingle(),
+    supabase.from("sync_runs").select("status,records_processed,warnings,error_message,completed_at,updated_at").eq("source", "shopify").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  const error = connectionResult.error ?? syncResult.error;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ connection: data });
+  return NextResponse.json({ connection: connectionResult.data, sync: syncResult.data });
 }
 
 export async function POST(request: Request) {
