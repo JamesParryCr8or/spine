@@ -9,8 +9,8 @@ const defaultUrl = process.env.VERCEL_URL
 
 export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
-  title: "Cr8or Data",
-  description: "Shopify-first ecommerce analytics and profitability reporting.",
+  title: "Spine — The backbone of your business",
+  description: "Spine is the backbone of your business: Shopify analytics and profitability reporting.",
 };
 
 const geistSans = Geist({
