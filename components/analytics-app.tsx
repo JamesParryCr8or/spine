@@ -117,9 +117,49 @@ function Overview() {
   </>;
 }
 
+type PnlData = {
+  hasData: boolean;
+  currency: string;
+  metrics: { grossSales: number; discounts: number; refunds: number; netProductSales: number; shippingRevenue: number; tax: number; duties: number; totalSales: number; cogs: number; grossProfit: number; grossMargin: number | null; orders: number; missingCostLines: number };
+  availability: { marketingSpend: boolean; transactionFees: boolean; shippingCosts: boolean; operatingExpenses: boolean; netProfit: boolean };
+};
+
 function ProfitLoss() {
-  const rows = [["Gross sales","£279,402","£264,128","£251,930","£287,690","£416,007","£258,592"],["Discounts","-£18,204","-£16,770","-£15,204","-£17,620","-£24,341","-£14,740"],["Returns","-£7,812","-£9,133","-£8,390","-£9,218","-£12,451","-£7,270"],["Net sales","£253,386","£238,225","£228,336","£260,852","£379,215","£236,582"],["COGS","-£106,680","-£102,498","-£99,852","-£97,781","-£151,909","-£93,095"],["Gross profit","£146,706","£135,727","£128,484","£163,071","£227,306","£143,487"],["Marketing","-£23,658","-£27,062","-£30,174","-£34,655","-£39,826","-£27,911"],["Transaction & shipping","-£18,405","-£17,909","-£18,175","-£21,104","-£30,676","-£22,659"],["Net profit","£104,643","£90,756","£80,135","£107,312","£156,804","£92,917"]];
-  return <section className="panel report-panel"><div className="report-summary"><div><span>NET SALES</span><strong>£236,582</strong><Trend>+11.2%</Trend></div><div><span>GROSS PROFIT</span><strong>£143,487</strong><Trend>+9.4%</Trend></div><div><span>MARKETING</span><strong>£27,911</strong><Trend positive={false}>+4.1%</Trend></div><div><span>NET PROFIT</span><strong>£92,917</strong><Trend>+18.2%</Trend></div></div><div className="table-scroll"><table className="data-table pnl-table"><thead><tr><th>Income statement</th>{months.map(month=><th key={month}>{month} 2026</th>)}</tr></thead><tbody>{rows.map((row,index)=><tr className={[3,5,8].includes(index)?"total":""} key={row[0]}>{row.map((cell,i)=><td key={cell}>{i===0 && ![3,5,8].includes(index)?<span className="indent">{cell}</span>:cell}</td>)}</tr>)}</tbody></table></div></section>;
+  const [pnl, setPnl] = useState<PnlData | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    fetch("/api/analytics/pnl")
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((payload: PnlData | null) => setPnl(payload))
+      .catch(() => setPnl(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const hasLiveData = Boolean(pnl?.hasData);
+  const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: pnl?.currency || "GBP", maximumFractionDigits: 0 });
+  const signed = (amount: number) => amount < 0 ? `-${formatter.format(Math.abs(amount))}` : formatter.format(amount);
+  const demoRows = [["Gross sales","£279,402","£264,128","£251,930","£287,690","£416,007","£258,592"],["Discounts","-£18,204","-£16,770","-£15,204","-£17,620","-£24,341","-£14,740"],["Returns","-£7,812","-£9,133","-£8,390","-£9,218","-£12,451","-£7,270"],["Net sales","£253,386","£238,225","£228,336","£260,852","£379,215","£236,582"],["COGS","-£106,680","-£102,498","-£99,852","-£97,781","-£151,909","-£93,095"],["Gross profit","£146,706","£135,727","£128,484","£163,071","£227,306","£143,487"],["Marketing","-£23,658","-£27,062","-£30,174","-£34,655","-£39,826","-£27,911"],["Transaction & shipping","-£18,405","-£17,909","-£18,175","-£21,104","-£30,676","-£22,659"],["Net profit","£104,643","£90,756","£80,135","£107,312","£156,804","£92,917"]];
+  const liveRows = pnl ? [
+    ["Gross sales", signed(pnl.metrics.grossSales)],
+    ["Discounts", signed(-pnl.metrics.discounts)],
+    ["Returns and refunds", signed(-pnl.metrics.refunds)],
+    ["Net product sales", signed(pnl.metrics.netProductSales - pnl.metrics.refunds)],
+    ["Shipping revenue", signed(pnl.metrics.shippingRevenue)],
+    ["Product COGS", signed(-pnl.metrics.cogs)],
+    ["Gross profit", signed(pnl.metrics.grossProfit)],
+    ["Marketing spend", "Not connected"],
+    ["Transaction and fulfilment costs", "Not connected"],
+    ["Net profit", "Add connected costs to calculate"],
+  ] : demoRows;
+  const summary = pnl ? [
+    ["NET PRODUCT SALES", formatter.format(pnl.metrics.netProductSales - pnl.metrics.refunds), `${pnl.metrics.orders.toLocaleString()} orders`],
+    ["GROSS PROFIT", formatter.format(pnl.metrics.grossProfit), pnl.metrics.grossMargin === null ? "Cost coverage needed" : `${(pnl.metrics.grossMargin * 100).toFixed(1)}% margin`],
+    ["MISSING COST LINES", pnl.metrics.missingCostLines.toLocaleString(), pnl.metrics.missingCostLines ? "Add costs to improve profit" : "All order lines costed"],
+    ["NET PROFIT", "—", "Connect remaining cost sources"],
+  ] : [["NET SALES", "£236,582", "+11.2%"], ["GROSS PROFIT", "£143,487", "+9.4%"], ["MARKETING", "£27,911", "+4.1%"], ["NET PROFIT", "£92,917", "+18.2%"]];
+  const totalRows = hasLiveData ? new Set([3, 6, 9]) : new Set([3, 5, 8]);
+
+  return <>{loading ? <div className="data-loading">Calculating your income statement…</div> : !hasLiveData && pnl ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to build your income statement</strong><span>The preview will be replaced with reconciled sales and cost data after your first sync.</span></div></div> : null}{hasLiveData && pnl!.metrics.missingCostLines > 0 ? <div className="connection-notice"><Info/><div><strong>{pnl!.metrics.missingCostLines} order lines are missing a product cost</strong><span>Gross profit is provisional until you add an effective-dated product cost for these variants.</span></div></div> : null}<section className="panel report-panel"><div className="report-summary">{summary.map(([label, value, hint])=><div key={label}><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>)}</div><div className="table-scroll"><table className="data-table pnl-table"><thead><tr><th>Income statement</th><th>{hasLiveData ? "All imported data" : "Apr 2026"}</th>{!hasLiveData&&months.slice(1).map(month=><th key={month}>{month} 2026</th>)}</tr></thead><tbody>{liveRows.map((row,index)=><tr className={totalRows.has(index)?"total":""} key={row[0]}>{row.map((cell,i)=><td key={`${cell}-${i}`}>{i===0 && !totalRows.has(index)?<span className="indent">{cell}</span>:cell}</td>)}</tr>)}</tbody></table></div></section></>;
 }
 
 function UTMAnalysis() {

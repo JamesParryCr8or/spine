@@ -223,15 +223,15 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 
 ### Canonical metrics
 
-- [ ] Gross sales.
-- [ ] Discounts.
-- [ ] Returns and refunds.
-- [ ] Net product sales.
-- [ ] Shipping revenue.
+- [x] Gross sales.
+- [x] Discounts.
+- [x] Returns and refunds.
+- [x] Net product sales.
+- [x] Shipping revenue.
 - [ ] Taxes and duties.
 - [ ] Total sales, with a documented formula.
-- [ ] Product COGS.
-- [ ] Gross profit and gross margin percentage.
+- [x] Product COGS using the effective product cost on the order date, with Shopify unit-cost fallback.
+- [x] Gross profit and gross margin percentage, with missing-cost coverage warnings.
 - [ ] Marketing spend.
 - [ ] Payment transaction fees.
 - [ ] Shipping and fulfilment costs.
@@ -243,7 +243,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 ### Acquisition and customer metrics
 
 - [ ] Orders and units sold.
-- [ ] Average order value.
+- [x] Average order value.
 - [ ] New customers and repeat customers.
 - [ ] New-customer sales and repeat-customer sales.
 - [ ] New-customer AOV and repeat-customer AOV.
@@ -278,7 +278,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 
 ### Income statement / P&L
 
-- [ ] Build the income statement layout inspired by the supplied reference.
+- [x] Build the income statement layout inspired by the supplied reference, backed by imported Shopify sales and COGS data.
 - [ ] Add collapsible sections for sales, COGS, marketing, transaction costs, shipping/handling, custom expenses, contribution margin, and net profit.
 - [ ] Display periods as columns and financial lines as rows.
 - [ ] Add monthly, weekly, daily, quarterly, and annual views.
