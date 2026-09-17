@@ -255,7 +255,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [ ] Blended MER/ROAS.
 - [ ] New-customer ROAS using an explicitly documented attribution basis.
 - [ ] Profit per new customer.
-- [ ] Repeat order and repeat revenue percentages.
+- [x] Repeat order and repeat revenue percentages.
 - [ ] Customer lifetime value cohorts after the core P&L is reconciled.
 
 ### Analytics tables and views
