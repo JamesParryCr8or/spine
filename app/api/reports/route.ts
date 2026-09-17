@@ -54,6 +54,20 @@ export async function POST(request: Request) {
   return NextResponse.json({ report: data }, { status: 201 });
 }
 
+export async function PATCH(request: Request) {
+  const result = await context();
+  if (result.error) return result.error;
+  const input = await request.json().catch(() => null) as { id?: string; isFavorite?: boolean } | null;
+  if (!input?.id || typeof input.isFavorite !== "boolean") return NextResponse.json({ error: "Report id and favourite state are required" }, { status: 400 });
+  const { data, error } = await result.supabase.from("saved_reports")
+    .update({ is_favorite: input.isFavorite, updated_at: new Date().toISOString() })
+    .eq("id", input.id).eq("organization_id", result.membership.organization_id)
+    .select("id,is_favorite").maybeSingle();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!data) return NextResponse.json({ error: "Report not found or cannot be updated" }, { status: 404 });
+  return NextResponse.json({ report: data });
+}
+
 export async function DELETE(request: Request) {
   const result = await context();
   if (result.error) return result.error;
