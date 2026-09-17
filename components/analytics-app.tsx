@@ -463,6 +463,34 @@ function Products() {
   return <>{loading ? <div className="data-loading">Calculating product profitability…</div> : data && !data.hasData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to see product profitability</strong><span>Revenue, COGS, gross profit and margin become available after your first order sync.</span></div></div> : null}<section className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">PRODUCT PERFORMANCE</span><h2>Product profitability</h2></div><span className="report-note">Effective-dated product costs are applied on each order date.</span></div>{data?.hasData ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Product / variant</th><th>SKU</th><th>Units</th><th>Revenue</th><th>COGS</th><th>Gross profit</th><th>Margin</th></tr></thead><tbody>{data.products.map((product) => <tr key={product.key}><td><strong>{product.product}</strong><small>{product.variant}</small></td><td>{product.sku || "—"}</td><td>{product.units.toLocaleString()}</td><td><strong>{formatter.format(product.revenue)}</strong></td><td>{product.missingCostUnits ? <span className="cost-warning">{product.missingCostUnits.toLocaleString()} units missing cost</span> : formatter.format(product.cogs)}</td><td>{product.missingCostUnits ? "—" : <strong>{formatter.format(product.grossProfit)}</strong>}</td><td>{product.margin === null ? "—" : `${(product.margin * 100).toFixed(1)}%`}</td></tr>)}</tbody></table></div> : <div className="cost-empty"><Package/><strong>Product report ready</strong><span>Connect Shopify and run your first order sync to populate this report.</span></div>}</section></>;
 }
 
+type CustomerRow = { id: string; display_name: string | null; number_of_orders: number; amount_spent: string; currency: string; updated_at_shopify: string };
+type CustomerData = {
+  hasData: boolean;
+  currency: string;
+  metrics: { customers: number; repeatCustomers: number; repeatCustomerRate: number | null; newCustomerOrders: number; newCustomerSales: number; repeatCustomerOrders: number; repeatCustomerSales: number; guestOrders: number; guestSales: number; repeatRevenueRate: number | null };
+  customers: CustomerRow[];
+};
+
+function Customers() {
+  const [data, setData] = useState<CustomerData | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    fetch("/api/analytics/customers")
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((payload: CustomerData | null) => setData(payload))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, []);
+  const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: data?.currency || "GBP", maximumFractionDigits: 0 });
+  const metrics = data ? [
+    ["CUSTOMERS", data.metrics.customers.toLocaleString(), `${data.metrics.repeatCustomers.toLocaleString()} repeat customers`],
+    ["NEW-CUSTOMER SALES", formatter.format(data.metrics.newCustomerSales), `${data.metrics.newCustomerOrders.toLocaleString()} first orders`],
+    ["REPEAT SALES", formatter.format(data.metrics.repeatCustomerSales), data.metrics.repeatRevenueRate === null ? "No repeat sales yet" : `${(data.metrics.repeatRevenueRate * 100).toFixed(1)}% of identified sales`],
+    ["REPEAT CUSTOMER RATE", data.metrics.repeatCustomerRate === null ? "—" : `${(data.metrics.repeatCustomerRate * 100).toFixed(1)}%`, "Customers with more than one order"],
+  ] : [];
+  return <>{loading ? <div className="data-loading">Calculating customer metrics…</div> : !data?.hasData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to analyse your customer base</strong><span>Customer metrics appear after orders have been imported.</span></div></div> : <><section className="metric-grid">{metrics.map(([label, value, hint]) => <article className="metric-card" key={label}><div className="metric-head"><span>{label}</span><Users/></div><strong>{value}</strong><div className="metric-foot"><span>{hint}</span></div></article>)}</section>{data.metrics.guestOrders > 0 ? <div className="connection-notice"><Info/><div><strong>{data.metrics.guestOrders.toLocaleString()} guest orders are separate from customer cohorts</strong><span>{formatter.format(data.metrics.guestSales)} is excluded from new-versus-repeat classification because Shopify has no customer record for these orders.</span></div></div> : null}<section className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">CUSTOMER VALUE</span><h2>Top Shopify customers</h2></div></div><div className="table-scroll"><table className="data-table"><thead><tr><th>Customer</th><th>Orders</th><th>Lifetime spend</th><th>Last updated</th></tr></thead><tbody>{data.customers.map((customer) => <tr key={customer.id}><td>{customer.display_name || "Unnamed customer"}</td><td>{customer.number_of_orders.toLocaleString()}</td><td>{formatter.format(Number(customer.amount_spent))}</td><td>{new Date(customer.updated_at_shopify).toLocaleDateString("en-GB")}</td></tr>)}</tbody></table></div></section></>}</>;
+}
+
 function Generic({ view }: { view: View }) { return <section className="panel empty-feature"><div className="feature-icon"><BarChart3/></div><span className="eyebrow">COMING INTO FOCUS</span><h2>{view}</h2><p>The product shell is ready. This report will use the same trusted Shopify financial model, filters and export workflow.</p><button className="primary"><Plus/> Create report</button></section>; }
 
 export function AnalyticsApp() {
@@ -476,7 +504,7 @@ export function AnalyticsApp() {
     <aside className={mobileOpen?"sidebar open":"sidebar"}><div className="brand"><span className="brand-mark"><BarChart3/></span><span>Cr8or <b>Data</b></span><button className="mobile-close" onClick={()=>setMobileOpen(false)}><X/></button></div><button className="store-switcher"><span className="store-icon"><ShoppingBag/></span><span><small>STORE</small><b>HairMax UK</b></span><ChevronDown/></button><nav>{nav.map((item)=><div key={item.label}>{item.section&&<span className="nav-section">{item.section}</span>}<button className={view===item.label?"nav-item active":"nav-item"} onClick={()=>{setView(item.label);setMobileOpen(false)}}><item.icon/><span>{item.label}</span>{item.label==="Costs"&&<em>14</em>}</button></div>)}</nav><div className="sidebar-bottom"><button className="nav-item"><Settings/><span>Settings</span></button><button className="nav-item" onClick={logout}><LogOut/><span>Sign out</span></button><div className="user-card"><div>JC</div><span><b>James</b><small>james@cr8or.co.uk</small></span></div></div></aside>
     <main className="main"><header className="topbar"><button className="menu-button" onClick={()=>setMobileOpen(true)}><Menu/></button><div className="breadcrumb"><span>HairMax UK</span><b>/</b><strong>{view}</strong></div><div className="top-actions"><button className="date-button"><CalendarDays/><span>1 Sep – 16 Sep 2026</span><ChevronDown/></button><button className="icon-button" onClick={sync} title="Sync data"><RefreshCw className={syncing?"spin":""}/></button><button className="export-button"><Download/> Export</button></div></header>
       <div className="content"><div className="page-heading"><div><span className="eyebrow">ECOMMERCE INTELLIGENCE</span><h1>{view}</h1><p>{view==="Overview"?"A clear view of what your store earned—not just what it sold.":view==="UTM Analysis"?"Understand which traffic sources create profitable customers.":view==="Profit & Loss"?"Your complete ecommerce income statement, reconciled by month.":`Manage and analyse your ${view.toLowerCase()}.`}</p></div><div className="freshness"><span className={syncing?"sync-dot syncing":"sync-dot"}/><div><small>{syncing?"SYNCING NOW":"DATA FRESH"}</small><b>{syncing?"Updating Shopify…":"Shopify synced 2m ago"}</b></div></div></div>
-        {view==="Overview"?<Overview/>:view==="Profit & Loss"?<ProfitLoss/>:view==="Sales"?<Sales/>:view==="UTM Analysis"?<UTMAnalysis/>:view==="Products"?<Products/>:view==="Costs"?<Costs/>:view==="Expenses"?<Expenses/>:view==="Connections"?<Connections/>:<Generic view={view}/>}</div>
+        {view==="Overview"?<Overview/>:view==="Profit & Loss"?<ProfitLoss/>:view==="Sales"?<Sales/>:view==="UTM Analysis"?<UTMAnalysis/>:view==="Products"?<Products/>:view==="Customers"?<Customers/>:view==="Costs"?<Costs/>:view==="Expenses"?<Expenses/>:view==="Connections"?<Connections/>:<Generic view={view}/>}</div>
     </main>
   </div>;
 }
