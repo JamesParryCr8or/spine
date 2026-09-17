@@ -10,7 +10,7 @@ import {
   ShoppingBag, Sparkles, Table2, TrendingUp, Upload, Users, WalletCards, X,
 } from "lucide-react";
 
-type View = "Overview" | "Profit & Loss" | "Sales" | "UTM Analysis" | "Products" | "Customers" | "Costs" | "Reports" | "Connections";
+type View = "Overview" | "Profit & Loss" | "Sales" | "UTM Analysis" | "Products" | "Customers" | "Costs" | "Expenses" | "Reports" | "Connections";
 
 const nav: { label: View; icon: typeof LayoutDashboard; section?: string }[] = [
   { label: "Overview", icon: LayoutDashboard },
@@ -20,6 +20,7 @@ const nav: { label: View; icon: typeof LayoutDashboard; section?: string }[] = [
   { label: "Products", icon: Package },
   { label: "Customers", icon: Users },
   { label: "Costs", icon: WalletCards, section: "DATA" },
+  { label: "Expenses", icon: WalletCards },
   { label: "Reports", icon: Table2 },
   { label: "Connections", icon: Database },
 ];
@@ -293,6 +294,30 @@ function Costs() {
   </>;
 }
 
+type OperatingCost = { id: string; name: string; category: string; amount: string; currency: string; cadence: string; allocation_basis: string; effective_from: string; effective_to: string | null; notes: string | null };
+function Expenses() {
+  const [costs, setCosts] = useState<OperatingCost[]>([]);
+  const [currency, setCurrency] = useState("GBP");
+  const [canEdit, setCanEdit] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [form, setForm] = useState({ name: "", category: "software", amount: "", cadence: "monthly", allocationBasis: "fixed", effectiveFrom: new Date().toISOString().slice(0, 10), effectiveTo: "", notes: "" });
+  const load = () => fetch("/api/costs/operating").then(async (response) => { const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Could not load operating costs"); setCosts(payload.costs ?? []); setCurrency(payload.currency ?? "GBP"); setCanEdit(Boolean(payload.canEdit)); }).catch((reason) => setError(reason instanceof Error ? reason.message : "Could not load operating costs"));
+  useEffect(() => { load(); }, []);
+  const save = async () => {
+    setSaving(true); setError("");
+    try {
+      const response = await fetch("/api/costs/operating", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, effectiveTo: form.effectiveTo || null }) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Could not save operating cost");
+      setShowAdd(false); setForm({ ...form, name: "", amount: "", effectiveTo: "", notes: "" }); await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save operating cost"); } finally { setSaving(false); }
+  };
+  const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency, minimumFractionDigits: 2 });
+  return <><section className="cost-toolbar"><div><span className="eyebrow">OPERATING COSTS</span><h2>Expenses and allocations</h2><p>Use effective dates and a cadence so the P&L can allocate each cost to the right period.</p></div><div className="feature-actions"><button className="primary" disabled={!canEdit} onClick={() => setShowAdd(true)}><Plus/> Add expense</button></div></section>{error && <div className="connection-error cost-error">{error}</div>}<section className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">COST SCHEDULE</span><h2>Operating expenses</h2></div></div>{costs.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Name</th><th>Category</th><th>Amount</th><th>Cadence</th><th>Allocation</th><th>Effective from</th><th>Effective to</th></tr></thead><tbody>{costs.map((cost) => <tr key={cost.id}><td><strong>{cost.name}</strong>{cost.notes && <small>{cost.notes}</small>}</td><td>{cost.category}</td><td><strong>{formatter.format(Number(cost.amount))}</strong></td><td>{cost.cadence.replace("_", " ")}</td><td>{cost.allocation_basis}</td><td>{cost.effective_from}</td><td>{cost.effective_to || "Ongoing"}</td></tr>)}</tbody></table></div> : <div className="cost-empty"><WalletCards/><strong>No operating costs yet</strong><span>Add a recurring or one-off cost to include it in future net-profit calculations.</span></div>}</section>{showAdd && <div className="modal-backdrop"><section className="connection-modal"><button className="modal-close" onClick={() => setShowAdd(false)}><X/></button><div className="modal-brand"><span className="source-logo c"><WalletCards/></span><div><span className="eyebrow">OPERATING COST</span><h2>Add expense</h2></div></div><label className="form-field"><span>Name</span><input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Shopify subscription"/></label><div className="cost-form-grid"><label className="form-field"><span>Category</span><select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>{["software", "agency", "payroll", "warehouse", "rent", "creative", "fulfilment", "duties", "other"].map((category) => <option key={category} value={category}>{category}</option>)}</select></label><label className="form-field"><span>Amount</span><input inputMode="decimal" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder="0.00"/></label><label className="form-field"><span>Cadence</span><select value={form.cadence} onChange={(event) => setForm({ ...form, cadence: event.target.value })}>{["one_off", "daily", "weekly", "monthly", "annual"].map((cadence) => <option key={cadence} value={cadence}>{cadence.replace("_", " ")}</option>)}</select></label><label className="form-field"><span>Allocation</span><select value={form.allocationBasis} onChange={(event) => setForm({ ...form, allocationBasis: event.target.value })}>{["fixed", "orders", "units", "revenue"].map((basis) => <option key={basis} value={basis}>{basis}</option>)}</select></label><label className="form-field"><span>Effective from</span><input type="date" value={form.effectiveFrom} onChange={(event) => setForm({ ...form, effectiveFrom: event.target.value })}/></label><label className="form-field"><span>Effective to <small>Optional</small></span><input type="date" value={form.effectiveTo} onChange={(event) => setForm({ ...form, effectiveTo: event.target.value })}/></label></div><label className="form-field"><span>Notes <small>Optional</small></span><input value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="What this cost covers"/></label><div className="modal-actions"><button onClick={() => setShowAdd(false)}>Cancel</button><button className="primary" disabled={!form.name || !form.amount || saving} onClick={save}>{saving ? "Saving…" : "Save expense"}</button></div></section></div>}</>;
+}
+
 function Connections() {
   const [showMetaSetup, setShowMetaSetup] = useState(false);
   const [showShopifySetup, setShowShopifySetup] = useState(false);
@@ -448,7 +473,7 @@ export function AnalyticsApp() {
     <aside className={mobileOpen?"sidebar open":"sidebar"}><div className="brand"><span className="brand-mark"><BarChart3/></span><span>Cr8or <b>Data</b></span><button className="mobile-close" onClick={()=>setMobileOpen(false)}><X/></button></div><button className="store-switcher"><span className="store-icon"><ShoppingBag/></span><span><small>STORE</small><b>HairMax UK</b></span><ChevronDown/></button><nav>{nav.map((item)=><div key={item.label}>{item.section&&<span className="nav-section">{item.section}</span>}<button className={view===item.label?"nav-item active":"nav-item"} onClick={()=>{setView(item.label);setMobileOpen(false)}}><item.icon/><span>{item.label}</span>{item.label==="Costs"&&<em>14</em>}</button></div>)}</nav><div className="sidebar-bottom"><button className="nav-item"><Settings/><span>Settings</span></button><button className="nav-item" onClick={logout}><LogOut/><span>Sign out</span></button><div className="user-card"><div>JC</div><span><b>James</b><small>james@cr8or.co.uk</small></span></div></div></aside>
     <main className="main"><header className="topbar"><button className="menu-button" onClick={()=>setMobileOpen(true)}><Menu/></button><div className="breadcrumb"><span>HairMax UK</span><b>/</b><strong>{view}</strong></div><div className="top-actions"><button className="date-button"><CalendarDays/><span>1 Sep – 16 Sep 2026</span><ChevronDown/></button><button className="icon-button" onClick={sync} title="Sync data"><RefreshCw className={syncing?"spin":""}/></button><button className="export-button"><Download/> Export</button></div></header>
       <div className="content"><div className="page-heading"><div><span className="eyebrow">ECOMMERCE INTELLIGENCE</span><h1>{view}</h1><p>{view==="Overview"?"A clear view of what your store earned—not just what it sold.":view==="UTM Analysis"?"Understand which traffic sources create profitable customers.":view==="Profit & Loss"?"Your complete ecommerce income statement, reconciled by month.":`Manage and analyse your ${view.toLowerCase()}.`}</p></div><div className="freshness"><span className={syncing?"sync-dot syncing":"sync-dot"}/><div><small>{syncing?"SYNCING NOW":"DATA FRESH"}</small><b>{syncing?"Updating Shopify…":"Shopify synced 2m ago"}</b></div></div></div>
-        {view==="Overview"?<Overview/>:view==="Profit & Loss"?<ProfitLoss/>:view==="Sales"?<Sales/>:view==="UTM Analysis"?<UTMAnalysis/>:view==="Products"?<Products/>:view==="Costs"?<Costs/>:view==="Connections"?<Connections/>:<Generic view={view}/>}</div>
+        {view==="Overview"?<Overview/>:view==="Profit & Loss"?<ProfitLoss/>:view==="Sales"?<Sales/>:view==="UTM Analysis"?<UTMAnalysis/>:view==="Products"?<Products/>:view==="Costs"?<Costs/>:view==="Expenses"?<Expenses/>:view==="Connections"?<Connections/>:<Generic view={view}/>}</div>
     </main>
   </div>;
 }
