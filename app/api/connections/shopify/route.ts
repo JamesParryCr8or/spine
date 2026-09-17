@@ -109,7 +109,7 @@ export async function POST(request: Request) {
     do {
       const result: { products: { nodes: Array<{ id: string; legacyResourceId: string; title: string; handle: string; status: string; vendor: string; productType: string; createdAt: string; updatedAt: string; featuredMedia?: { preview?: { image?: { url?: string } } } }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await shopifyGraph(shopDomain, accessToken, `query Products($cursor:String){ products(first:100,after:$cursor,sortKey:ID){ nodes{id legacyResourceId title handle status vendor productType createdAt updatedAt featuredMedia{preview{image{url}}}} pageInfo{hasNextPage endCursor} } }`, { cursor: productCursor });
       const rows = result.products.nodes.map((product) => ({ organization_id: membership.organization_id, store_id: store.id, shopify_gid: product.id, legacy_resource_id: product.legacyResourceId, title: product.title, handle: product.handle, status: product.status, vendor: product.vendor || null, product_type: product.productType || null, featured_image_url: product.featuredMedia?.preview?.image?.url ?? null, created_at_shopify: product.createdAt, updated_at_shopify: product.updatedAt, synced_at: new Date().toISOString() }));
-      if (rows.length) { const { error } = await supabase.from("shopify_products").upsert(rows, { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
+      if (rows.length) { const { error } = await supabase.from("shopify_products").upsert(dedupeByShopifyId(rows), { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
       productsProcessed += rows.length;
       productCursor = result.products.pageInfo.hasNextPage ? result.products.pageInfo.endCursor : null;
     } while (productCursor);
@@ -141,7 +141,7 @@ export async function POST(request: Request) {
       } pageInfo{hasNextPage endCursor} } }`, { cursor: orderCursor });
 
       const customers = dedupeByShopifyId(result.orders.nodes.flatMap((order) => order.customer ? [{ organization_id: membership.organization_id, store_id: store.id, shopify_gid: order.customer.id, legacy_resource_id: order.customer.legacyResourceId, display_name: order.customer.displayName, email: order.customer.defaultEmailAddress?.emailAddress ?? null, number_of_orders: order.customer.numberOfOrders, amount_spent: order.customer.amountSpent.amount, currency: order.customer.amountSpent.currencyCode, created_at_shopify: order.customer.createdAt, updated_at_shopify: order.customer.updatedAt, synced_at: new Date().toISOString() }] : []));
-      if (customers.length) { const { error } = await supabase.from("shopify_customers").upsert(customers, { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
+      if (customers.length) { const { error } = await supabase.from("shopify_customers").upsert(dedupeByShopifyId(customers), { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
       customersProcessed += customers.length;
       const customerGids = customers.map((customer) => customer.shopify_gid);
       const customerResult = customerGids.length ? await supabase.from("shopify_customers").select("id,shopify_gid").eq("store_id", store.id).in("shopify_gid", customerGids) : { data: [], error: null };
@@ -149,7 +149,7 @@ export async function POST(request: Request) {
       const customerMap = new Map((customerResult.data ?? []).map((customer) => [customer.shopify_gid, customer.id]));
 
       const orderRows = result.orders.nodes.map((order) => ({ organization_id: membership.organization_id, store_id: store.id, customer_id: order.customer ? customerMap.get(order.customer.id) ?? null : null, shopify_gid: order.id, legacy_resource_id: order.legacyResourceId, order_name: order.name, financial_status: order.displayFinancialStatus, fulfillment_status: order.displayFulfillmentStatus, source_name: order.sourceName, test: order.test, cancelled_at: order.cancelledAt, processed_at: order.processedAt, created_at_shopify: order.createdAt, updated_at_shopify: order.updatedAt, currency: order.currencyCode, presentment_currency: order.currentTotalPriceSet.presentmentMoney.currencyCode, gross_sales: order.lineItems.nodes.reduce((sum, line) => sum + Number(money(line.originalTotalSet)), 0).toFixed(4), discounts: money(order.currentTotalDiscountsSet), net_product_sales: money(order.currentSubtotalPriceSet), shipping_revenue: money(order.currentShippingPriceSet), tax: money(order.currentTotalTaxSet), duties: money(order.currentTotalDutiesSet), total_sales: money(order.currentTotalPriceSet), synced_at: new Date().toISOString() }));
-      if (orderRows.length) { const { error } = await supabase.from("shopify_orders").upsert(orderRows, { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
+      if (orderRows.length) { const { error } = await supabase.from("shopify_orders").upsert(dedupeByShopifyId(orderRows), { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
       ordersProcessed += orderRows.length;
       const orderGids = orderRows.map((order) => order.shopify_gid);
       const orderResult = orderGids.length ? await supabase.from("shopify_orders").select("id,shopify_gid").eq("store_id", store.id).in("shopify_gid", orderGids) : { data: [], error: null };
@@ -157,7 +157,7 @@ export async function POST(request: Request) {
       const orderMap = new Map((orderResult.data ?? []).map((order) => [order.shopify_gid, order.id]));
 
       const lineRows = result.orders.nodes.flatMap((order) => { const orderId = orderMap.get(order.id); if (!orderId) return []; if (order.lineItems.pageInfo.hasNextPage) warnings.push(`${order.name} has more than 100 line items; import is partial`); return order.lineItems.nodes.map((line) => ({ organization_id: membership.organization_id, store_id: store.id, order_id: orderId, shopify_gid: line.id, product_gid: line.product?.id ?? null, variant_gid: line.variant?.id ?? null, title: line.title, variant_title: line.variantTitle, sku: line.sku, vendor: line.vendor, quantity: line.quantity, current_quantity: line.currentQuantity, unit_price: money(line.originalUnitPriceSet), original_total: money(line.originalTotalSet), discounts: money(line.totalDiscountSet), net_sales: money(line.discountedTotalSet), currency: line.originalTotalSet.shopMoney.currencyCode, synced_at: new Date().toISOString() })); });
-      if (lineRows.length) { const { error } = await supabase.from("shopify_order_lines").upsert(lineRows, { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
+      if (lineRows.length) { const { error } = await supabase.from("shopify_order_lines").upsert(dedupeByShopifyId(lineRows), { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
       orderLinesProcessed += lineRows.length;
       const lineGids = lineRows.map((line) => line.shopify_gid);
       const lineResult = lineGids.length ? await supabase.from("shopify_order_lines").select("id,shopify_gid").eq("store_id", store.id).in("shopify_gid", lineGids) : { data: [], error: null };
@@ -165,7 +165,7 @@ export async function POST(request: Request) {
       const lineMap = new Map((lineResult.data ?? []).map((line) => [line.shopify_gid, line.id]));
 
       const refundRows = result.orders.nodes.flatMap((order) => { const orderId = orderMap.get(order.id); if (!orderId) return []; if (order.refunds.length === 50) warnings.push(`${order.name} has at least 50 refunds; import may be partial`); return order.refunds.map((refund) => ({ organization_id: membership.organization_id, store_id: store.id, order_id: orderId, shopify_gid: refund.id, legacy_resource_id: refund.legacyResourceId, note: refund.note, total_refunded: money(refund.totalRefundedSet), currency: refund.totalRefundedSet.shopMoney.currencyCode, created_at_shopify: refund.createdAt, processed_at_shopify: refund.processedAt, updated_at_shopify: refund.updatedAt, synced_at: new Date().toISOString() })); });
-      if (refundRows.length) { const { error } = await supabase.from("shopify_refunds").upsert(refundRows, { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
+      if (refundRows.length) { const { error } = await supabase.from("shopify_refunds").upsert(dedupeByShopifyId(refundRows), { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
       refundsProcessed += refundRows.length;
       const refundGids = refundRows.map((refund) => refund.shopify_gid);
       const refundResult = refundGids.length ? await supabase.from("shopify_refunds").select("id,shopify_gid").eq("store_id", store.id).in("shopify_gid", refundGids) : { data: [], error: null };
@@ -173,7 +173,7 @@ export async function POST(request: Request) {
       const refundMap = new Map((refundResult.data ?? []).map((refund) => [refund.shopify_gid, refund.id]));
 
       const refundLineRows = result.orders.nodes.flatMap((order) => order.refunds.flatMap((refund) => { const refundId = refundMap.get(refund.id); if (!refundId) return []; if (refund.refundLineItems.pageInfo.hasNextPage) warnings.push(`${order.name} refund ${refund.legacyResourceId} has more than 100 lines; import is partial`); return refund.refundLineItems.nodes.map((line) => ({ organization_id: membership.organization_id, store_id: store.id, refund_id: refundId, order_line_id: lineMap.get(line.lineItem.id) ?? null, shopify_gid: line.id, line_item_gid: line.lineItem.id, quantity: line.quantity, subtotal: money(line.subtotalSet), currency: line.subtotalSet.shopMoney.currencyCode, restock_type: line.restockType, synced_at: new Date().toISOString() })); }));
-      if (refundLineRows.length) { const { error } = await supabase.from("shopify_refund_lines").upsert(refundLineRows, { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
+      if (refundLineRows.length) { const { error } = await supabase.from("shopify_refund_lines").upsert(dedupeByShopifyId(refundLineRows), { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
       refundLinesProcessed += refundLineRows.length;
 
       const attributionRows = result.orders.nodes.flatMap((order) => { const orderId = orderMap.get(order.id); const journey = order.customerJourneySummary; if (!orderId || !journey) return []; const shared = { organization_id: membership.organization_id, store_id: store.id, order_id: orderId }; return [visitRow(journey.firstVisit, "first_touch", shared, journey), visitRow(journey.lastVisit, "last_touch", shared, journey)]; });
