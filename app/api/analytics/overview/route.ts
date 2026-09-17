@@ -98,7 +98,9 @@ export async function GET() {
     }
   }
 
+  const { data: metaRows } = await supabase.from("meta_ad_insights_daily").select("date_start").eq("store_id", store.id).order("date_start", { ascending: true });
   const orderCount = orders.length;
+  const metaDates = (metaRows ?? []).map((row) => row.date_start);
   return NextResponse.json({
     hasData: orderCount > 0,
     currency: store.currency,
@@ -112,5 +114,6 @@ export async function GET() {
       averageOrderValue: orderCount ? netSales / orderCount : 0,
     },
     months,
+    meta: { importedDays: metaDates.length, start: metaDates[0] ?? null, end: metaDates.at(-1) ?? null },
   });
 }
