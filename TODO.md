@@ -67,7 +67,7 @@ The product should answer these questions quickly:
 - [ ] Preserve source currency and normalized reporting currency separately.
 - [ ] Use effective-dated cost records so changing a product cost does not rewrite historical profit.
 - [ ] Define whether every headline metric includes or excludes tax, shipping revenue, duties, tips, gift cards, and refunds.
-- [ ] Make metric definitions visible in the UI with tooltips or a metric dictionary.
+- [x] Make metric definitions visible in the UI with tooltips or a metric dictionary.
 - [ ] Reconcile dashboard totals back to Shopify for a selected period before releasing the MVP.
 - [ ] Record calculation version on materialized analytics results so formula changes are auditable.
 
@@ -290,7 +290,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [ ] Add chart/table toggle and optional comparison overlay.
 - [x] Show P&L formula explanations and source coverage for included and unavailable cost inputs.
 - [ ] Add reconciliation status and missing-cost warnings above the table.
-- [ ] Export exactly the visible P&L configuration.
+- [x] Export exactly the visible P&L configuration.
 
 ### Sales and orders
 
