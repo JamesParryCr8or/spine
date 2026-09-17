@@ -12,7 +12,7 @@
 - [x] Added cursor-paginated product and variant import with tenant RLS and sync-run history.
 - [x] Confirmed lint and the Next.js production build complete successfully.
 - [x] Apply `supabase/setup.sql` to the development Supabase project and verify the RLS/Vault functions.
-- [ ] Replace dashboard mock figures with the first normalized Shopify data slice.
+- [x] Replace dashboard mock figures with the first normalized Shopify data slice (live sales, discounts, shipping, order count, AOV, and monthly trend after Shopify sync).
 
 ### Active build order
 
