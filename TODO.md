@@ -328,7 +328,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 
 - [x] Add new versus repeat customer metrics and sales.
 - [ ] Add cohort retention and cumulative revenue/profit tables.
-- [ ] Add LTV, order frequency, time-to-second-order, and repeat purchase rate.
+- [x] Add current customer value, order frequency, time-to-second-order, and repeat purchase rate.
 - [ ] Mask or restrict personal customer data according to role.
 
 ## Phase 6 — Marketing data sources
