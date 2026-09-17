@@ -178,7 +178,7 @@ function ProfitLoss() {
     ["MISSING COST LINES", pnl.metrics.missingCostLines.toLocaleString(), pnl.metrics.missingCostLines ? "Add costs to improve profit" : "All order lines costed"],
     ["NET PROFIT", "—", "Connect remaining cost sources"],
   ] : [["NET SALES", "£236,582", "+11.2%"], ["GROSS PROFIT", "£143,487", "+9.4%"], ["MARKETING", "£27,911", "+4.1%"], ["NET PROFIT", "£92,917", "+18.2%"]];
-  const totalRows = hasLiveData ? new Set([3, 6, 9, 10]) : new Set([3, 5, 8]);
+  const totalRows = hasLiveData ? new Set([3, 8, 11, 12]) : new Set([3, 5, 8]);
 
   const exportPnl = () => {
     if (!pnl) return;
