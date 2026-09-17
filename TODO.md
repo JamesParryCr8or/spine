@@ -328,7 +328,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 ### Customer analytics
 
 - [x] Add new versus repeat customer metrics and sales.
-- [x] Add cohort retention table for the latest twelve first-order cohorts with Month 0–6 active-customer retention. Cumulative revenue/profit remains a follow-up.
+- [x] Add cohort retention and cumulative revenue tables for the latest twelve first-order cohorts with Month 0–6 coverage. Cumulative profit remains a follow-up.
 - [x] Add current customer value, order frequency, time-to-second-order, and repeat purchase rate.
 - [x] Mask or restrict personal customer data according to role.
 
