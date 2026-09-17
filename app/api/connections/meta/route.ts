@@ -47,7 +47,7 @@ async function importMetaInsights({ supabase, userId, account, accessToken }: { 
 
   const until = new Date();
   const since = new Date(until);
-  since.setUTCDate(since.getUTCDate() - 1094);
+  since.setUTCDate(since.getUTCDate() - 3651);
   const range = { since: since.toISOString().slice(0, 10), until: until.toISOString().slice(0, 10) };
   const params = new URLSearchParams({
     level: "account",
@@ -58,14 +58,14 @@ async function importMetaInsights({ supabase, userId, account, accessToken }: { 
   });
   let next: string | undefined = `https://graph.facebook.com/v22.0/${encodeURIComponent(account.id)}/insights?${params}`;
   const insights: MetaInsight[] = [];
-  for (let page = 0; next && page < 8; page += 1) {
+  for (let page = 0; next && page < 12; page += 1) {
     const response = await fetch(next, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" });
     const payload = await response.json().catch(() => ({})) as MetaPage;
     if (!response.ok) throw new Error(payload.error?.message ?? "Meta could not import ad-account insights");
     insights.push(...(payload.data ?? []));
     next = payload.paging?.next;
   }
-  if (next) throw new Error("Meta returned more reporting pages than Spine can safely import in one run. Please narrow the account history and try again.");
+  if (next) throw new Error("Meta returned more reporting pages than Spine can safely import in one run. Please reconnect with a token limited to the reporting period you need.");
 
   const rows = insights
     .filter((insight) => insight.date_start && insight.date_stop)
