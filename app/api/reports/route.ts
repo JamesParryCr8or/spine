@@ -4,7 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 
 const reportTypes = new Set(["overview", "pnl", "sales", "products", "customers", "utm"]);
 const visibilities = new Set(["private", "organization"]);
-const reportFields = "id,name,description,report_type,visibility,is_favorite,updated_at,created_at,archived_at";
+const reportFields = "id,name,description,report_type,visibility,is_favorite,configuration,updated_at,created_at,archived_at";
+const datePresets = new Set(["all_imported", "latest_30_days", "latest_90_days"]);
 
 async function context() {
   const supabase = await createClient();
@@ -36,13 +37,14 @@ export async function POST(request: Request) {
   const result = await context();
   if (result.error) return result.error;
   const { supabase, userId, membership, store } = result;
-  const input = await request.json().catch(() => null) as { name?: string; description?: string; reportType?: string; visibility?: string } | null;
+  const input = await request.json().catch(() => null) as { name?: string; description?: string; reportType?: string; visibility?: string; datePreset?: string } | null;
   const name = input?.name?.trim() ?? "";
   const description = input?.description?.trim() || null;
   const reportType = input?.reportType?.trim() ?? "";
   const visibility = input?.visibility?.trim() ?? "private";
+  const datePreset = input?.datePreset?.trim() ?? "all_imported";
   if (!name || name.length > 120) return NextResponse.json({ error: "Enter a report name of up to 120 characters" }, { status: 400 });
-  if (!reportTypes.has(reportType) || !visibilities.has(visibility)) return NextResponse.json({ error: "Choose a valid report type and sharing setting" }, { status: 400 });
+  if (!reportTypes.has(reportType) || !visibilities.has(visibility) || !datePresets.has(datePreset)) return NextResponse.json({ error: "Choose a valid report type and sharing setting" }, { status: 400 });
   const { data, error } = await supabase.from("saved_reports").insert({
     organization_id: membership.organization_id,
     store_id: store?.id ?? null,
@@ -51,6 +53,7 @@ export async function POST(request: Request) {
     description,
     report_type: reportType,
     visibility,
+    configuration: { datePreset },
   }).select(reportFields).single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ report: data }, { status: 201 });
@@ -67,13 +70,13 @@ export async function PATCH(request: Request) {
 
   const { supabase, userId, membership, store } = result;
   if (input.action === "duplicate") {
-    const { data: original, error: findError } = await supabase.from("saved_reports").select("name,description,report_type,visibility").eq("id", input.id).eq("organization_id", membership.organization_id).is("archived_at", null).maybeSingle();
+    const { data: original, error: findError } = await supabase.from("saved_reports").select("name,description,report_type,visibility,configuration").eq("id", input.id).eq("organization_id", membership.organization_id).is("archived_at", null).maybeSingle();
     if (findError) return NextResponse.json({ error: findError.message }, { status: 500 });
     if (!original) return NextResponse.json({ error: "Report not found" }, { status: 404 });
     const name = `${original.name} copy`.slice(0, 120);
     const { data, error } = await supabase.from("saved_reports").insert({
       organization_id: membership.organization_id, store_id: store?.id ?? null, created_by: userId,
-      name, description: original.description, report_type: original.report_type, visibility: original.visibility,
+      name, description: original.description, report_type: original.report_type, visibility: original.visibility, configuration: original.configuration,
     }).select(reportFields).single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ report: data }, { status: 201 });
