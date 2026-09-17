@@ -28,7 +28,7 @@ const revenue = [68, 79, 72, 91, 83, 100];
 const profit = [42, 48, 45, 57, 51, 66];
 const spend = [16, 20, 18, 24, 23, 29];
 
-const metrics = [
+const demoMetrics = [
   { label: "Net sales", value: "£258,592", delta: "+12.4%", positive: true, hint: "vs previous period" },
   { label: "Gross profit", value: "£144,812", delta: "+9.8%", positive: true, hint: "56.0% margin" },
   { label: "Marketing spend", value: "£27,911", delta: "+4.1%", positive: false, hint: "10.8% of sales" },
@@ -55,17 +55,51 @@ function Trend({ positive = true, children }: { positive?: boolean; children: Re
   return <span className={positive ? "trend up" : "trend down"}><Icon />{children}</span>;
 }
 
+type OverviewData = {
+  hasData: boolean;
+  currency: string;
+  range: { start: string; end: string };
+  metrics: { grossSales: number; discounts: number; netSales: number; shippingRevenue: number; orders: number; averageOrderValue: number };
+  months: Array<{ key: string; label: string; grossSales: number; discounts: number; netSales: number; shippingRevenue: number; orders: number }>;
+};
+
 function Overview() {
+  const [liveData, setLiveData] = useState<OverviewData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/analytics/overview")
+      .then(async (response) => response.ok ? response.json() : null)
+      .then((payload: OverviewData | null) => setLiveData(payload))
+      .catch(() => setLiveData(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const hasLiveData = Boolean(liveData?.hasData);
+  const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: liveData?.currency || "GBP", maximumFractionDigits: 0 });
+  const liveMetrics = liveData ? [
+    { label: "Net sales", value: formatter.format(liveData.metrics.netSales), delta: "Live Shopify data", positive: true, hint: `${liveData.metrics.orders.toLocaleString()} orders` },
+    { label: "Gross sales", value: formatter.format(liveData.metrics.grossSales), delta: "Before discounts", positive: true, hint: `${formatter.format(liveData.metrics.discounts)} discounts` },
+    { label: "Shipping revenue", value: formatter.format(liveData.metrics.shippingRevenue), delta: "Shopify orders", positive: true, hint: "Excludes tax and duties" },
+    { label: "Average order value", value: formatter.format(liveData.metrics.averageOrderValue), delta: "Net product sales", positive: true, hint: `${liveData.metrics.orders.toLocaleString()} completed orders` },
+  ] : demoMetrics;
+  const chartMonths = hasLiveData ? liveData!.months.map((month) => month.label) : months;
+  const chartRevenue = hasLiveData ? liveData!.months.map((month) => month.netSales) : revenue;
+  const chartProfit = hasLiveData ? liveData!.months.map((month) => month.grossSales) : profit;
+  const chartSpend = hasLiveData ? liveData!.months.map((month) => month.shippingRevenue) : spend;
+  const chartMaximum = Math.max(...chartRevenue, ...chartProfit, ...chartSpend, 1);
+
   return <>
-    <section className="metric-grid">{metrics.map((metric) => <article className="metric-card" key={metric.label}>
+    {loading ? <div className="data-loading">Loading your Shopify summary…</div> : !hasLiveData && liveData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to start your live dashboard</strong><span>The figures below are a preview. Your own sales and orders will appear after the first sync.</span></div></div> : null}
+    <section className="metric-grid">{liveMetrics.map((metric) => <article className="metric-card" key={metric.label}>
       <div className="metric-head"><span>{metric.label}</span><CircleDollarSign /></div>
       <strong>{metric.value}</strong>
       <div className="metric-foot"><Trend positive={metric.positive}>{metric.delta}</Trend><span>{metric.hint}</span></div>
     </article>)}</section>
     <section className="dashboard-grid">
       <article className="panel chart-panel">
-        <div className="panel-head"><div><span className="eyebrow">PERFORMANCE</span><h2>Revenue & profit trend</h2></div><div className="legend"><span className="blue-dot"/>Revenue <span className="green-dot"/>Net profit <span className="orange-dot"/>Ad spend</div></div>
-        <div className="chart-wrap"><div className="y-axis"><span>£300k</span><span>£200k</span><span>£100k</span><span>£0</span></div><div className="bar-chart">{months.map((month, index) => <div className="bar-group" key={month}><div className="bars"><i className="revenue" style={{height:`${revenue[index]}%`}}/><i className="profit" style={{height:`${profit[index]}%`}}/><i className="spend" style={{height:`${spend[index]}%`}}/></div><span>{month}</span></div>)}</div></div>
+        <div className="panel-head"><div><span className="eyebrow">PERFORMANCE</span><h2>{hasLiveData ? "Shopify sales trend" : "Revenue & profit trend"}</h2></div><div className="legend"><span className="blue-dot"/>{hasLiveData ? "Net sales" : "Revenue"} <span className="green-dot"/>{hasLiveData ? "Gross sales" : "Net profit"} <span className="orange-dot"/>{hasLiveData ? "Shipping revenue" : "Ad spend"}</div></div>
+        <div className="chart-wrap"><div className="y-axis"><span>{hasLiveData ? formatter.format(chartMaximum) : "£300k"}</span><span>{hasLiveData ? formatter.format(chartMaximum / 2) : "£200k"}</span><span>{hasLiveData ? formatter.format(chartMaximum / 4) : "£100k"}</span><span>£0</span></div><div className="bar-chart">{chartMonths.map((month, index) => <div className="bar-group" key={`${month}-${index}`}><div className="bars"><i className="revenue" style={{height:`${(chartRevenue[index] / chartMaximum) * 100}%`}}/><i className="profit" style={{height:`${(chartProfit[index] / chartMaximum) * 100}%`}}/><i className="spend" style={{height:`${(chartSpend[index] / chartMaximum) * 100}%`}}/></div><span>{month}</span></div>)}</div></div>
       </article>
       <article className="panel health-panel"><div className="panel-head"><div><span className="eyebrow">DATA HEALTH</span><h2>Store readiness</h2></div><span className="score">86%</span></div>
         <div className="health-ring"><div><strong>86</strong><span>Good</span></div></div>
