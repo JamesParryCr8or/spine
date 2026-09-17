@@ -10,11 +10,12 @@ import {
   ShoppingBag, Sparkles, Table2, TrendingUp, Upload, Users, WalletCards, X,
 } from "lucide-react";
 
-type View = "Overview" | "Profit & Loss" | "UTM Analysis" | "Products" | "Customers" | "Costs" | "Reports" | "Connections";
+type View = "Overview" | "Profit & Loss" | "Sales" | "UTM Analysis" | "Products" | "Customers" | "Costs" | "Reports" | "Connections";
 
 const nav: { label: View; icon: typeof LayoutDashboard; section?: string }[] = [
   { label: "Overview", icon: LayoutDashboard },
   { label: "Profit & Loss", icon: FileBarChart, section: "REPORTING" },
+  { label: "Sales", icon: ShoppingBag },
   { label: "UTM Analysis", icon: Megaphone },
   { label: "Products", icon: Package },
   { label: "Customers", icon: Users },
@@ -408,6 +409,16 @@ function Connections() {
   </>;
 }
 
+type SalesOrder = { id: string; order_name: string; processed_at: string | null; financial_status: string | null; fulfillment_status: string | null; source_name: string | null; net_product_sales: string; shipping_revenue: string; total_sales: string; currency: string };
+function Sales() {
+  const [data, setData] = useState<{ hasData: boolean; currency: string; orders: SalesOrder[] } | null>(null);
+  const [search, setSearch] = useState("");
+  useEffect(() => { fetch("/api/analytics/orders").then(async (response) => response.ok ? response.json() : null).then((payload) => setData(payload)).catch(() => setData(null)); }, []);
+  const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: data?.currency || "GBP", maximumFractionDigits: 2 });
+  const visibleOrders = (data?.orders ?? []).filter((order) => `${order.order_name} ${order.financial_status ?? ""} ${order.fulfillment_status ?? ""}`.toLowerCase().includes(search.trim().toLowerCase()));
+  return <section className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">SHOPIFY ORDERS</span><h2>Sales and orders</h2></div><span className="report-note">Most recent 250 imported orders</span></div><div className="filter-row"><div className="search"><Search/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search orders or status..."/></div></div>{data && !data.hasData ? <div className="cost-empty"><ShoppingBag/><strong>No Shopify orders yet</strong><span>Connect Shopify and run the first sync to populate sales.</span></div> : <div className="table-scroll"><table className="data-table"><thead><tr><th>Order</th><th>Date</th><th>Financial status</th><th>Fulfilment</th><th>Source</th><th>Product sales</th><th>Shipping</th><th>Total</th></tr></thead><tbody>{!data ? <tr><td colSpan={8} className="empty-row">Loading orders…</td></tr> : visibleOrders.length === 0 ? <tr><td colSpan={8} className="empty-row">No orders match that search.</td></tr> : visibleOrders.map((order) => <tr key={order.id}><td><strong>{order.order_name}</strong></td><td>{order.processed_at ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(new Date(order.processed_at)) : "—"}</td><td>{order.financial_status || "—"}</td><td>{order.fulfillment_status || "—"}</td><td>{order.source_name || "—"}</td><td>{formatter.format(Number(order.net_product_sales))}</td><td>{formatter.format(Number(order.shipping_revenue))}</td><td><strong>{formatter.format(Number(order.total_sales))}</strong></td></tr>)}</tbody></table></div>}</section>;
+}
+
 type ProductProfit = { key: string; product: string; variant: string; sku: string | null; units: number; revenue: number; cogs: number; grossProfit: number; margin: number | null; missingCostUnits: number };
 
 function Products() {
@@ -437,7 +448,7 @@ export function AnalyticsApp() {
     <aside className={mobileOpen?"sidebar open":"sidebar"}><div className="brand"><span className="brand-mark"><BarChart3/></span><span>Cr8or <b>Data</b></span><button className="mobile-close" onClick={()=>setMobileOpen(false)}><X/></button></div><button className="store-switcher"><span className="store-icon"><ShoppingBag/></span><span><small>STORE</small><b>HairMax UK</b></span><ChevronDown/></button><nav>{nav.map((item)=><div key={item.label}>{item.section&&<span className="nav-section">{item.section}</span>}<button className={view===item.label?"nav-item active":"nav-item"} onClick={()=>{setView(item.label);setMobileOpen(false)}}><item.icon/><span>{item.label}</span>{item.label==="Costs"&&<em>14</em>}</button></div>)}</nav><div className="sidebar-bottom"><button className="nav-item"><Settings/><span>Settings</span></button><button className="nav-item" onClick={logout}><LogOut/><span>Sign out</span></button><div className="user-card"><div>JC</div><span><b>James</b><small>james@cr8or.co.uk</small></span></div></div></aside>
     <main className="main"><header className="topbar"><button className="menu-button" onClick={()=>setMobileOpen(true)}><Menu/></button><div className="breadcrumb"><span>HairMax UK</span><b>/</b><strong>{view}</strong></div><div className="top-actions"><button className="date-button"><CalendarDays/><span>1 Sep – 16 Sep 2026</span><ChevronDown/></button><button className="icon-button" onClick={sync} title="Sync data"><RefreshCw className={syncing?"spin":""}/></button><button className="export-button"><Download/> Export</button></div></header>
       <div className="content"><div className="page-heading"><div><span className="eyebrow">ECOMMERCE INTELLIGENCE</span><h1>{view}</h1><p>{view==="Overview"?"A clear view of what your store earned—not just what it sold.":view==="UTM Analysis"?"Understand which traffic sources create profitable customers.":view==="Profit & Loss"?"Your complete ecommerce income statement, reconciled by month.":`Manage and analyse your ${view.toLowerCase()}.`}</p></div><div className="freshness"><span className={syncing?"sync-dot syncing":"sync-dot"}/><div><small>{syncing?"SYNCING NOW":"DATA FRESH"}</small><b>{syncing?"Updating Shopify…":"Shopify synced 2m ago"}</b></div></div></div>
-        {view==="Overview"?<Overview/>:view==="Profit & Loss"?<ProfitLoss/>:view==="UTM Analysis"?<UTMAnalysis/>:view==="Products"?<Products/>:view==="Costs"?<Costs/>:view==="Connections"?<Connections/>:<Generic view={view}/>}</div>
+        {view==="Overview"?<Overview/>:view==="Profit & Loss"?<ProfitLoss/>:view==="Sales"?<Sales/>:view==="UTM Analysis"?<UTMAnalysis/>:view==="Products"?<Products/>:view==="Costs"?<Costs/>:view==="Connections"?<Connections/>:<Generic view={view}/>}</div>
     </main>
   </div>;
 }
