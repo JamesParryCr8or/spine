@@ -92,7 +92,104 @@ function UTMAnalysis() {
   return <><section className="metric-grid compact"><article className="metric-card"><div className="metric-head"><span>Attributed sales</span></div><strong>£204,050</strong><div className="metric-foot"><Trend>+14.8%</Trend><span>79% of net sales</span></div></article><article className="metric-card"><div className="metric-head"><span>Attributed orders</span></div><strong>319</strong><div className="metric-foot"><Trend>+9.2%</Trend><span>£640 AOV</span></div></article><article className="metric-card"><div className="metric-head"><span>New customer sales</span></div><strong>£146,920</strong><div className="metric-foot"><Trend>+17.1%</Trend><span>72% of attributed</span></div></article><article className="metric-card"><div className="metric-head"><span>Mapped ROAS</span></div><strong>8.4x</strong><div className="metric-foot"><Trend>+0.8x</Trend><span>on £24,290 spend</span></div></article></section><section className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">LAST-TOUCH ATTRIBUTION</span><h2>Sales by UTM</h2></div><div className="segmented"><button className="active">Source</button><button>Campaign</button><button>Content</button></div></div><div className="filter-row"><div className="search"><Search/><input placeholder="Search UTMs..."/></div><button className="filter-button">All mediums <ChevronDown/></button><button className="filter-button">All campaigns <ChevronDown/></button></div><div className="table-scroll"><table className="data-table"><thead><tr><th>Source</th><th>Medium</th><th>Campaign</th><th>Net sales</th><th>Orders</th><th>AOV</th><th>ROAS</th></tr></thead><tbody>{utms.map(row=><tr key={row.join()}>{row.map((cell,i)=><td key={cell}>{i===0?<span className="utm-source"><i/>{cell}</span>:cell}</td>)}</tr>)}</tbody></table></div><div className="table-footer"><span>Showing 5 of 48 UTM combinations</span><button>View unattributed diagnostics</button></div></section></>;
 }
 
-function Costs() { return <section className="panel empty-feature"><div className="feature-icon"><WalletCards/></div><span className="eyebrow">COST ENGINE</span><h2>Make every order genuinely profitable</h2><p>Add product costs, shipping, payment fees and recurring expenses. Effective dates preserve historical reporting when costs change.</p><div className="feature-actions"><button className="primary"><Plus/> Add product cost</button><button><Upload/> Import CSV</button></div><div className="cost-grid"><div><strong>1,284</strong><span>Products synced</span></div><div><strong>97.8%</strong><span>Cost coverage</span></div><div><strong>14</strong><span>Missing costs</span></div><div><strong>£4.85</strong><span>Avg. shipping cost</span></div></div></section>; }
+type CostVariant = { id: string; title: string; sku: string | null; price: string; shopify_unit_cost: string | null; currency: string; productTitle: string };
+type ProductCost = { id: string; variant_id: string | null; sku: string | null; source: string; amount: string; currency: string; effective_from: string; effective_to: string | null; notes: string | null };
+
+function parseCsvLine(line: string) {
+  const cells: string[] = [];
+  let cell = "", quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (character === '"' && quoted && line[index + 1] === '"') { cell += '"'; index += 1; }
+    else if (character === '"') quoted = !quoted;
+    else if (character === "," && !quoted) { cells.push(cell.trim()); cell = ""; }
+    else cell += character;
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+function Costs() {
+  const [variants, setVariants] = useState<CostVariant[]>([]);
+  const [costs, setCosts] = useState<ProductCost[]>([]);
+  const [currency, setCurrency] = useState("GBP");
+  const [canEdit, setCanEdit] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [variantId, setVariantId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
+  const [effectiveTo, setEffectiveTo] = useState("");
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = () => fetch("/api/costs").then(async (response) => {
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Could not load costs");
+    setVariants(payload.variants ?? []); setCosts(payload.costs ?? []); setCurrency(payload.currency ?? "GBP"); setCanEdit(Boolean(payload.canEdit));
+  }).catch((reason) => setError(reason instanceof Error ? reason.message : "Could not load costs"));
+
+  useEffect(() => { load(); }, []);
+
+  const saveItems = async (items: Array<Record<string, string | null>>, source: "manual" | "csv", filename?: string) => {
+    setSaving(true); setError("");
+    try {
+      const response = await fetch("/api/costs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items, source, filename }) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.errors?.join(" · ") || payload.error || "Could not save costs");
+      await load();
+      return payload.imported as number;
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not save costs");
+      return 0;
+    } finally { setSaving(false); }
+  };
+
+  const saveManual = async () => {
+    const imported = await saveItems([{ variantId, amount, currency, effectiveFrom, effectiveTo: effectiveTo || null, notes: notes || null }], "manual");
+    if (imported) { setShowAdd(false); setAmount(""); setEffectiveTo(""); setNotes(""); }
+  };
+
+  const importCsv = async (file: File) => {
+    const lines = (await file.text()).replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim());
+    if (lines.length < 2) { setError("The CSV needs a header and at least one data row"); return; }
+    const headers = parseCsvLine(lines[0]).map((header) => header.toLowerCase().replace(/\s+/g, "_"));
+    const required = ["sku", "amount", "effective_from"];
+    const missing = required.filter((header) => !headers.includes(header));
+    if (missing.length) { setError(`Missing CSV columns: ${missing.join(", ")}`); return; }
+    const items = lines.slice(1).map((line) => {
+      const cells = parseCsvLine(line);
+      const row = Object.fromEntries(headers.map((header, index) => [header, cells[index] ?? ""]));
+      return { sku: row.sku, amount: row.amount, currency: row.currency || currency, effectiveFrom: row.effective_from, effectiveTo: row.effective_to || null, notes: row.notes || null };
+    });
+    await saveItems(items, "csv", file.name);
+  };
+
+  const currentDate = new Date().toISOString().slice(0, 10);
+  const currentCosts = new Map(costs.filter((cost) => cost.effective_from <= currentDate && (!cost.effective_to || cost.effective_to >= currentDate)).map((cost) => [cost.variant_id ?? `sku:${cost.sku?.toLowerCase()}`, cost]));
+  const covered = variants.filter((variant) => currentCosts.has(variant.id) || (variant.sku && currentCosts.has(`sku:${variant.sku.toLowerCase()}`)) || variant.shopify_unit_cost !== null).length;
+  const coverage = variants.length ? Math.round((covered / variants.length) * 100) : 0;
+  const variantMap = new Map(variants.map((variant) => [variant.id, variant]));
+  const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency, minimumFractionDigits: 2 });
+
+  return <>
+    <section className="cost-toolbar">
+      <div><span className="eyebrow">COST ENGINE</span><h2>Product cost history</h2><p>Costs apply from their effective date, so future changes do not rewrite historical profit.</p></div>
+      <div className="feature-actions"><button className="primary" disabled={!canEdit} onClick={()=>setShowAdd(true)}><Plus/> Add product cost</button><label className={canEdit?"csv-button":"csv-button disabled"}><Upload/> Import CSV<input type="file" accept=".csv,text/csv" disabled={!canEdit || saving} onChange={(event)=>{const file=event.target.files?.[0];if(file) void importCsv(file);event.target.value="";}}/></label></div>
+    </section>
+    {error && <div className="connection-error cost-error">{error}</div>}
+    <section className="cost-grid live"><div><strong>{variants.length.toLocaleString()}</strong><span>Variants synced</span></div><div><strong>{coverage}%</strong><span>Current cost coverage</span></div><div><strong>{Math.max(variants.length-covered,0).toLocaleString()}</strong><span>Missing costs</span></div><div><strong>{costs.length.toLocaleString()}</strong><span>Cost records</span></div></section>
+    <section className="panel report-panel cost-table-panel"><div className="panel-head"><div><span className="eyebrow">EFFECTIVE-DATED RECORDS</span><h2>Product costs</h2></div><a className="template-link" href="data:text/csv;charset=utf-8,sku%2Camount%2Ccurrency%2Ceffective_from%2Ceffective_to%2Cnotes%0AEXAMPLE-SKU%2C12.50%2CGBP%2C2026-01-01%2C%2COptional%20note" download="product-cost-template.csv">Download CSV template</a></div>
+      {variants.length===0?<div className="cost-empty"><WalletCards/><strong>No Shopify variants yet</strong><span>Connect Shopify and run the first sync before adding variant costs. CSV rows with a SKU can still be imported.</span></div>:<div className="table-scroll"><table className="data-table"><thead><tr><th>Product / variant</th><th>SKU</th><th>Source</th><th>Unit cost</th><th>Effective from</th><th>Effective to</th></tr></thead><tbody>{costs.length===0?<tr><td colSpan={6} className="empty-row">No cost records yet. Add one manually or import the CSV template.</td></tr>:costs.map((cost)=>{const variant=cost.variant_id?variantMap.get(cost.variant_id):undefined;return <tr key={cost.id}><td><strong>{variant?.productTitle ?? "SKU fallback"}</strong><small>{variant?.title ?? cost.notes ?? "Unmatched variant"}</small></td><td>{cost.sku || variant?.sku || "—"}</td><td><span className={`source-pill ${cost.source}`}>{cost.source.replace("_"," ")}</span></td><td><strong>{formatter.format(Number(cost.amount))}</strong></td><td>{cost.effective_from}</td><td>{cost.effective_to || "Ongoing"}</td></tr>})}</tbody></table></div>}
+    </section>
+    {showAdd&&<div className="modal-backdrop"><section className="connection-modal"><button className="modal-close" onClick={()=>setShowAdd(false)}><X/></button><div className="modal-brand"><span className="source-logo c"><WalletCards/></span><div><span className="eyebrow">COST ENGINE</span><h2>Add product cost</h2></div></div><p className="modal-intro">Choose a synced Shopify variant and the date this cost starts applying.</p>
+      <label className="form-field"><span>Product variant</span><select value={variantId} onChange={(event)=>setVariantId(event.target.value)}><option value="">Select a variant</option>{variants.map((variant)=><option key={variant.id} value={variant.id}>{variant.productTitle} — {variant.title}{variant.sku?` (${variant.sku})`:""}</option>)}</select></label>
+      <div className="cost-form-grid"><label className="form-field"><span>Unit cost</span><input inputMode="decimal" value={amount} onChange={(event)=>setAmount(event.target.value)} placeholder="0.00"/></label><label className="form-field"><span>Currency</span><input value={currency} onChange={(event)=>setCurrency(event.target.value.toUpperCase())} maxLength={3}/></label><label className="form-field"><span>Effective from</span><input type="date" value={effectiveFrom} onChange={(event)=>setEffectiveFrom(event.target.value)}/></label><label className="form-field"><span>Effective to <small>Optional</small></span><input type="date" value={effectiveTo} onChange={(event)=>setEffectiveTo(event.target.value)}/></label></div>
+      <label className="form-field"><span>Notes <small>Optional</small></span><input value={notes} onChange={(event)=>setNotes(event.target.value)} placeholder="Supplier, landed cost, or reason for change"/></label>
+      {error&&<div className="connection-error">{error}</div>}<div className="modal-actions"><button onClick={()=>setShowAdd(false)}>Cancel</button><button className="primary" disabled={!variantId || !amount || saving} onClick={saveManual}>{saving?"Saving…":"Save cost"}</button></div>
+    </section></div>}
+  </>;
+}
 
 function Connections() {
   const [showMetaSetup, setShowMetaSetup] = useState(false);

@@ -75,15 +75,15 @@ The product should answer these questions quickly:
 - [ ] Remove all live credentials from source files and local history before this code is shared or deployed.
 - [x] Add `.env.example` with variable names only and ensure real environment files are ignored.
 - [ ] Create separate development and production Supabase projects.
-- [ ] Use only a publishable Supabase key in the browser; keep secret/service-role credentials server-side.
-- [ ] Decide how third-party tokens will be encrypted at rest: Supabase Vault or application encryption backed by a managed key.
+- [x] Use only a publishable Supabase key in the browser; keep secret/service-role credentials server-side.
+- [x] Store third-party connector tokens in Supabase Vault behind ownership-checked server functions.
 - [ ] Add structured secret-access logging without logging secret values.
 
 ### New application workspace
 
 - [ ] Create the web application in a new directory so the Apps Script prototype remains intact.
 - [ ] Add formatting, linting, type checking, unit testing, and environment validation.
-- [ ] Add local Supabase configuration and migration workflow.
+- [x] Add local Supabase configuration and migration workflow.
 - [x] Pin dependency versions and commit the lockfile.
 - [ ] Create CI checks for type checking, tests, migrations, and production build.
 - [ ] Add a short architecture decision record explaining Supabase, lightweight persistence, and Shopify-first scope.
@@ -172,9 +172,9 @@ The cost engine must support direct entry, Shopify-provided values, and bulk imp
 
 ### Product costs / COGS
 
-- [ ] Create `product_costs` keyed to store and variant, with optional SKU fallback.
-- [ ] Store source (`shopify`, `manual`, `csv`, or `google_sheets`), amount, currency, effective-from, effective-to, and notes.
-- [ ] Import Shopify unit cost when available, but allow a manual override.
+- [x] Create `product_costs` keyed to store and variant, with optional SKU fallback.
+- [x] Store source (`shopify`, `manual`, `csv`, or `google_sheets`), amount, currency, effective-from, effective-to, and notes.
+- [x] Import Shopify unit cost when available, but allow a manual override.
 - [ ] Calculate order-line COGS using the cost effective on the order date.
 - [ ] Add a product cost table with product, variant, SKU, selling price, Shopify cost, override cost, and shipping cost.
 - [ ] Add inline editing with validation and an audit history.
@@ -206,7 +206,7 @@ The cost engine must support direct entry, Shopify-provided values, and bulk imp
 
 ### Cost import workflow
 
-- [ ] Provide a downloadable CSV template and in-app column descriptions.
+- [x] Provide a downloadable CSV template and in-app column descriptions.
 - [ ] Add drag-and-drop CSV upload with encoding, delimiter, date, currency, and decimal detection.
 - [ ] Add a column-mapping step before import.
 - [ ] Preview parsed rows, validation errors, duplicates, and projected allocations.
