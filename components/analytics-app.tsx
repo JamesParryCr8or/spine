@@ -448,6 +448,7 @@ function Connections() {
   const [accountId, setAccountId] = useState("");
   const [metaLookbackMonths, setMetaLookbackMonths] = useState("12");
   const [metaConnected, setMetaConnected] = useState(false);
+  const [klaviyoConnected, setKlaviyoConnected] = useState(false);
   const [metaAccountName, setMetaAccountName] = useState("");
   const [metaSyncResult, setMetaSyncResult] = useState("");
   const [metaLastSync, setMetaLastSync] = useState<{ importedDays: number; latestDate: string | null; syncedAt: string | null } | null>(null);
@@ -474,6 +475,7 @@ function Connections() {
         setMetaLastSync(payload.sync ?? null);
       })
       .catch(() => undefined);
+    fetch("/api/connections/klaviyo").then((response) => response.ok ? response.json() : null).then((payload) => setKlaviyoConnected(payload?.connection?.status === "connected")).catch(() => undefined);
     fetch("/api/connections/shopify")
       .then((response) => response.ok ? response.json() : null)
       .then((payload) => {
@@ -541,16 +543,18 @@ function Connections() {
     window.setTimeout(() => window.location.reload(), 750);
   };
 
+  const connectKlaviyo = async () => { const apiKey = window.prompt("Paste your Klaviyo private API key"); if (!apiKey) return; setSavingConnection(true); const response = await fetch("/api/connections/klaviyo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey }) }); setSavingConnection(false); if (!response.ok) { const payload = await response.json(); setConnectionError(payload.error || "Could not connect Klaviyo"); return; } setKlaviyoConnected(true); };
+
   const connections = [
     ["Shopify", "Sales, orders, products & customers", shopifyConnected ? "Connected" : "Connect", "S"],
     ["Meta Ads", "Campaign spend & performance", metaConnected ? "Connected" : "Connect", "M"],
     ["Google Ads", "Campaign and keyword reporting", "Coming next", "G"],
-    ["Klaviyo", "Campaign and flow analytics", "Coming next", "K"],
+    ["Klaviyo", "Campaign and flow analytics", klaviyoConnected ? "Connected" : "Connect", "K"],
   ];
 
   return <>
     <div className="connection-notice"><Info/><div><strong>Secure connection storage</strong><span>Access tokens are encrypted in Supabase Vault and are never returned to the browser after saving.</span></div></div>
-    <section className="connection-grid">{connections.map(([name,desc,status,letter])=><article className="connection-card" key={name}><div className={`source-logo ${letter.toLowerCase()}`}>{letter}</div><div><h3>{name}</h3><p>{desc}</p></div><button disabled={status === "Coming next"} onClick={()=>name === "Meta Ads" ? setShowMetaSetup(true) : name === "Shopify" && setShowShopifySetup(true)} className={status==="Connected"?"connected":""}>{status==="Connected"&&<span/>}{status}</button></article>)}</section>
+    <section className="connection-grid">{connections.map(([name,desc,status,letter])=><article className="connection-card" key={name}><div className={`source-logo ${letter.toLowerCase()}`}>{letter}</div><div><h3>{name}</h3><p>{desc}</p></div><button disabled={status === "Coming next"} onClick={()=>name === "Meta Ads" ? setShowMetaSetup(true) : name === "Shopify" ? setShowShopifySetup(true) : name === "Klaviyo" && void connectKlaviyo()} className={status==="Connected"?"connected":""}>{status==="Connected"&&<span/>}{status}</button></article>)}</section>
     {showShopifySetup && <div className="modal-backdrop" onMouseDown={()=>setShowShopifySetup(false)}><section className="connection-modal" onMouseDown={(event)=>event.stopPropagation()}>
       <button className="modal-close" onClick={()=>setShowShopifySetup(false)}><X/></button><div className="modal-brand"><div className="source-logo s">S</div><div><span className="eyebrow">PRIMARY SALES SOURCE</span><h2>Connect Shopify</h2></div></div>
       <p className="modal-intro">Connect an Admin API token to validate the store and import catalogue, order, customer, refund and attribution data. Disconnecting removes the encrypted token but preserves your imported reporting data.</p>
