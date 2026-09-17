@@ -179,7 +179,7 @@ The cost engine must support direct entry, Shopify-provided values, and bulk imp
 - [x] Create `product_costs` keyed to store and variant, with optional SKU fallback.
 - [x] Store source (`shopify`, `manual`, `csv`, or `google_sheets`), amount, currency, effective-from, effective-to, and notes.
 - [x] Import Shopify unit cost when available, but allow a manual override.
-- [ ] Calculate order-line COGS using the cost effective on the order date.
+- [x] Calculate order-line COGS using the cost effective on the order date.
 - [ ] Add a product cost table with product, variant, SKU, selling price, Shopify cost, override cost, and shipping cost.
 - [ ] Add inline editing with validation and an audit history.
 - [ ] Highlight missing or stale product costs and quantify affected revenue/orders.
@@ -201,11 +201,11 @@ The cost engine must support direct entry, Shopify-provided values, and bulk imp
 
 ### Custom costs and expenses
 
-- [ ] Create `custom_costs` with name, category, amount, currency, tax treatment, start date, end date, and notes.
-- [ ] Support one-off, daily, weekly, monthly, and annual recurring costs.
-- [ ] Support fixed costs and variable costs based on orders, units, revenue, or percentage of another metric.
+- [x] Create `custom_costs` with name, category, amount, currency, tax treatment, start date, end date, and notes.
+- [x] Support one-off, daily, weekly, monthly, and annual recurring costs.
+- [x] Support fixed costs and variable costs based on orders, units, and revenue percentage.
 - [ ] Support allocation across all stores, selected stores, products, channels, or custom tags.
-- [ ] Add categories such as software, agency, payroll, warehouse, rent, creative, fulfilment, duties, and other.
+- [x] Add categories such as software, agency, payroll, warehouse, rent, creative, fulfilment, duties, and other.
 - [ ] Keep personnel costs out of MVP unless required; model them as a custom-cost category first.
 
 ### Cost import workflow
@@ -241,7 +241,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [ ] Shipping and fulfilment costs.
 - [ ] Handling costs.
 - [ ] Contribution margin and contribution margin percentage.
-- [ ] Operating/custom expenses.
+- [x] Operating/custom expenses.
 - [ ] Net profit and net margin percentage.
 
 ### Acquisition and customer metrics
@@ -249,7 +249,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [ ] Orders and units sold.
 - [x] Average order value.
 - [ ] New customers and repeat customers.
-- [ ] New-customer sales and repeat-customer sales.
+- [x] New-customer sales and repeat-customer sales.
 - [ ] New-customer AOV and repeat-customer AOV.
 - [ ] Blended CAC.
 - [ ] Blended MER/ROAS.
@@ -326,7 +326,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 
 ### Customer analytics
 
-- [ ] Add new versus repeat customer trends.
+- [x] Add new versus repeat customer metrics and sales.
 - [ ] Add cohort retention and cumulative revenue/profit tables.
 - [ ] Add LTV, order frequency, time-to-second-order, and repeat purchase rate.
 - [ ] Mask or restrict personal customer data according to role.
