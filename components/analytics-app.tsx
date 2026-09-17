@@ -87,7 +87,7 @@ function Overview() {
       .then((payload: OverviewData | null) => setLiveData(payload))
       .catch(() => setLiveData(null))
       .finally(() => setLoading(false));
-  }, [fromDate, toDate]);
+  }, []);
 
   const hasLiveData = Boolean(liveData?.hasData);
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: liveData?.currency || "GBP", maximumFractionDigits: 0 });
@@ -167,7 +167,7 @@ function ProfitLoss() {
       .then((payload: PnlData | null) => setPnl(payload))
       .catch(() => setPnl(null))
       .finally(() => setLoading(false));
-  }, []);
+  }, [fromDate, toDate]);
 
   const hasLiveData = Boolean(pnl?.hasData);
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: pnl?.currency || "GBP", maximumFractionDigits: 0 });
