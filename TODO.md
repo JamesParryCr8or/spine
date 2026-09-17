@@ -295,7 +295,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 ### Sales and orders
 
 - [ ] Add sales breakdown by date, country, channel, discount code, new/repeat status, and product.
-- [ ] Add a searchable order table with financial-status and refund filters.
+- [x] Add a searchable order table with financial-status and refund filters.
 - [x] Add an order detail drawer showing source totals, product costs, refunds, and gross profit.
 - [ ] Add saved column layouts and filters later.
 
