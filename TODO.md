@@ -181,7 +181,7 @@ The cost engine must support direct entry, Shopify-provided values, and bulk imp
 - [x] Import Shopify unit cost when available, but allow a manual override.
 - [x] Calculate order-line COGS using the cost effective on the order date.
 - [ ] Add a product cost table with product, variant, SKU, selling price, Shopify cost, override cost, and shipping cost.
-- [ ] Add inline editing with validation and an audit history.
+- [x] Add inline editing with validation and an audit history.
 - [ ] Highlight missing or stale product costs and quantify affected revenue/orders.
 
 ### Transaction costs
