@@ -11,7 +11,9 @@ function valueOrDirect(value: string | null, fallback: string) {
   return normalized || fallback;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const requestedModel = new URL(request.url).searchParams.get("attribution");
+  const attributionModel = requestedModel === "first_touch" ? "first_touch" : "last_touch";
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
   const userId = claims?.claims?.sub;
@@ -33,7 +35,7 @@ export async function GET() {
   const attributions: Attribution[] = [];
   const orderIds = orderRows.map((order) => order.id);
   for (let index = 0; index < orderIds.length; index += 500) {
-    const { data, error } = await supabase.from("shopify_order_attribution").select("order_id,source,utm_source,utm_medium,utm_campaign,customer_order_index").eq("attribution_model", "last_touch").in("order_id", orderIds.slice(index, index + 500));
+    const { data, error } = await supabase.from("shopify_order_attribution").select("order_id,source,utm_source,utm_medium,utm_campaign,customer_order_index").eq("attribution_model", attributionModel).in("order_id", orderIds.slice(index, index + 500));
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     attributions.push(...((data ?? []) as Attribution[]));
   }
@@ -56,5 +58,5 @@ export async function GET() {
   }
   const rows = [...groups.values()].map((group) => ({ ...group, averageOrderValue: group.orders ? group.sales / group.orders : 0 })).sort((left, right) => right.sales - left.sales);
   const totals = rows.reduce((total, group) => ({ sales: total.sales + group.sales, orders: total.orders + group.orders, newCustomerSales: total.newCustomerSales + group.newCustomerSales }), { sales: 0, orders: 0, newCustomerSales: 0 });
-  return NextResponse.json({ hasData: rows.length > 0, currency: store.currency, totals: { ...totals, averageOrderValue: totals.orders ? totals.sales / totals.orders : 0 }, rows });
+  return NextResponse.json({ hasData: rows.length > 0, currency: store.currency, attributionModel, totals: { ...totals, averageOrderValue: totals.orders ? totals.sales / totals.orders : 0 }, rows });
 }
