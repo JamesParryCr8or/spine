@@ -133,7 +133,7 @@ Shopify is the primary sales and catalog source. Other sources enrich Shopify ra
 - [x] Validate the shop domain and required scopes before saving a connection.
 - [x] Store encrypted access credentials server-side.
 - [ ] Show connection status, granted scopes, shop currency, timezone, last sync, and reconnect action.
-- [ ] Add disconnect behavior that revokes access where possible and preserves or deletes imported data according to a clear policy.
+- [x] Add disconnect behavior that removes the saved token and preserves imported data under a clear policy.
 
 ### Shopify source tables
 
