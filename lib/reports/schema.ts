@@ -92,9 +92,12 @@ export function parseFinishReportRun(value: unknown): ValidationResult<FinishRep
   if (value.status !== "completed" && value.status !== "failed") {
     return { ok: false, error: "Choose a valid report run status" };
   }
-  const rowCount = value.rowCount === undefined || value.rowCount === null ? null : value.rowCount;
-  if (rowCount !== null && (!Number.isInteger(rowCount) || rowCount < 0)) {
-    return { ok: false, error: "Row count must be a positive whole number" };
+  let rowCount: number | null = null;
+  if (value.rowCount !== undefined && value.rowCount !== null) {
+    if (typeof value.rowCount !== "number" || !Number.isInteger(value.rowCount) || value.rowCount < 0) {
+      return { ok: false, error: "Row count must be a non-negative whole number" };
+    }
+    rowCount = value.rowCount;
   }
   const errorMessage = optionalText(value.errorMessage, 500);
   if (errorMessage === undefined) return { ok: false, error: "Keep the run error under 500 characters" };
