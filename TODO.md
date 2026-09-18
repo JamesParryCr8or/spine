@@ -56,6 +56,7 @@
 - [x] Save the current UTM date range, attribution model, comparison, and dimension filters as a reusable report definition.
 - [x] Export the current UTM drilldown as a formatted XLSX workbook with numeric currency and percentage cells.
 - [x] Audit connector credential creation, rotation, deletion, and Shopify scope updates without storing secret values.
+- [x] Show the tenant-scoped connector credential audit history to workspace owners and admins in Settings.
 
 ### Active build order
 
