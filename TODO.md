@@ -62,6 +62,7 @@
 - [x] Add a manual field-mapping screen for custom-spend CSV files with non-standard headers.
 - [x] Add validated starter saved-report templates for income statements, channel spend, product profitability, and new-customer acquisition.
 - [x] Add blended net profit per new customer to Customer analytics with explicit completeness requirements.
+- [x] Audit the foundation checklist against the current auth, tenancy, and CI implementation and split remaining gaps precisely.
 
 ### Active build order
 
@@ -131,10 +132,12 @@ The product should answer these questions quickly:
 ### New application workspace
 
 - [ ] Create the web application in a new directory so the Apps Script prototype remains intact.
-- [ ] Add formatting, linting, type checking, unit testing, and environment validation.
+- [x] Add linting, type checking, unit testing, and production-build validation.
+- [ ] Add an automatic formatter and explicit environment validation.
 - [x] Add local Supabase configuration and migration workflow.
 - [x] Pin dependency versions and commit the lockfile.
-- [ ] Create CI checks for type checking, tests, migrations, and production build.
+- [x] Create CI checks for type checking, linting, tests, and the production build.
+- [ ] Add migration verification to CI.
 - [x] Add a short architecture decision record explaining Supabase, lightweight persistence, and Shopify-first scope.
 
 ## Phase 1 — Auth, organizations, and onboarding shell
@@ -142,10 +145,10 @@ The product should answer these questions quickly:
 ### Authentication
 
 - [ ] Add Supabase Auth with Google and email magic-link sign-in for v1.
-- [ ] Add sign-out, session refresh, account recovery, and protected routes.
-- [ ] Create user profile records without using editable user metadata for authorization.
-- [ ] Add organization creation during onboarding.
-- [ ] Add owner and member roles using trusted application metadata or membership records.
+- [x] Add sign-out, session refresh, account recovery, and protected routes.
+- [x] Create user profile records without using editable user metadata for authorization.
+- [x] Create an organization, owner membership, and initial store automatically during account onboarding.
+- [x] Add owner, admin, analyst, and viewer roles through trusted organization membership records.
 
 ### Multi-tenant model
 
@@ -297,7 +300,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 
 - [x] Orders and units sold from imported non-test, non-cancelled Shopify orders and their current line quantities.
 - [x] Average order value.
-- [ ] New customers and repeat customers.
+- [x] New customers and repeat customers, classified from each customer’s first valid order.
 - [x] New-customer sales and repeat-customer sales.
 - [x] New-customer AOV and repeat-customer AOV.
 - [x] Blended CAC using imported Meta spend divided by first-observed Shopify customers in the imported window.
