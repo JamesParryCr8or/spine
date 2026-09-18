@@ -58,6 +58,7 @@
 - [x] Audit connector credential creation, rotation, deletion, and Shopify scope updates without storing secret values.
 - [x] Show the tenant-scoped connector credential audit history to workspace owners and admins in Settings.
 - [x] Import tenant-protected daily custom marketing spend from CSV, deduplicate it deterministically, convert currencies by date, and allocate it to matching UTM groups.
+- [x] Preview custom-spend imports, show batch history, and roll back imports while restoring overwritten rows.
 
 ### Active build order
 
@@ -413,7 +414,8 @@ Normalize every ad source into shared daily dimensions while retaining source-sp
 
 - [x] Allow CSV import of daily spend for channels without an API connector.
 - [x] Require date, source/channel, and spend; optionally accept account, campaign, ad group, currency, and external ID.
-- [ ] Reuse the cost import mapping, preview, validation, batch, and rollback framework.
+- [x] Add preview, server validation, import batches, and reversible rollback for custom-spend CSV imports.
+- [ ] Add a manual column-mapping step for non-standard custom-spend CSV headers.
 - [x] Prevent duplicate spend with deterministic import keys.
 
 ## Phase 7 — Klaviyo analytics
