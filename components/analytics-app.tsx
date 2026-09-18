@@ -101,35 +101,68 @@ type OverviewData = {
 function Overview({ reportRunId }: { reportRunId?: string }) {
   const finishReportRun = useReportRun(reportRunId);
   const [liveData, setLiveData] = useState<OverviewData | null>(null);
+  const [comparisonData, setComparisonData] = useState<OverviewData | null>(null);
   const [pnlSummary, setPnlSummary] = useState<PnlData | null>(null);
+  const [pnlComparison, setPnlComparison] = useState<PnlData | null>(null);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (fromDate) params.set("from", fromDate);
+    if (toDate) params.set("to", toDate);
+    const suffix = params.size ? `?${params}` : "";
+    let comparisonSuffix: string | null = null;
+    if (fromDate && toDate) {
+      const start = new Date(`${fromDate}T00:00:00Z`);
+      const end = new Date(`${toDate}T00:00:00Z`);
+      const days = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+      const previousEnd = new Date(start); previousEnd.setUTCDate(previousEnd.getUTCDate() - 1);
+      const previousStart = new Date(previousEnd); previousStart.setUTCDate(previousStart.getUTCDate() - days + 1);
+      comparisonSuffix = `?from=${previousStart.toISOString().slice(0, 10)}&to=${previousEnd.toISOString().slice(0, 10)}`;
+    }
     Promise.all([
-      fetch("/api/analytics/overview").then(async (response) => response.ok ? response.json() as Promise<OverviewData> : null),
-      fetch("/api/analytics/pnl").then(async (response) => response.ok ? response.json() as Promise<PnlData> : null),
+      fetch(`/api/analytics/overview${suffix}`).then(async (response) => response.ok ? response.json() as Promise<OverviewData> : null),
+      fetch(`/api/analytics/pnl${suffix}`).then(async (response) => response.ok ? response.json() as Promise<PnlData> : null),
+      comparisonSuffix ? fetch(`/api/analytics/overview${comparisonSuffix}`).then(async (response) => response.ok ? response.json() as Promise<OverviewData> : null) : Promise.resolve(null),
+      comparisonSuffix ? fetch(`/api/analytics/pnl${comparisonSuffix}`).then(async (response) => response.ok ? response.json() as Promise<PnlData> : null) : Promise.resolve(null),
     ])
-      .then(([overview, pnl]) => { setLiveData(overview); setPnlSummary(pnl); finishReportRun(overview ? "completed" : "failed", overview?.metrics.orders ?? null); })
-      .catch(() => { setLiveData(null); setPnlSummary(null); finishReportRun("failed", null, "Overview data could not be loaded"); })
+      .then(([overview, pnl, comparison, previousPnl]) => {
+        setLiveData(overview); setPnlSummary(pnl); setComparisonData(comparison); setPnlComparison(previousPnl);
+        finishReportRun(overview ? "completed" : "failed", overview?.metrics.orders ?? null);
+      })
+      .catch(() => { setLiveData(null); setPnlSummary(null); setComparisonData(null); setPnlComparison(null); finishReportRun("failed", null, "Overview data could not be loaded"); })
       .finally(() => setLoading(false));
-  }, [finishReportRun]);
+  }, [finishReportRun, fromDate, toDate]);
 
   const hasLiveData = Boolean(liveData?.hasData);
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: liveData?.currency || "GBP", maximumFractionDigits: 0 });
+  const comparisonDelta = (current: number | null, previous: number | null | undefined, format: (value: number) => string, fallback: string, lowerIsBetter = false) => {
+    if (current === null || previous === null || previous === undefined || !comparisonData) return { delta: fallback, positive: true };
+    const change = current - previous;
+    const percentage = previous === 0 ? null : change / Math.abs(previous) * 100;
+    const signedValue = `${change > 0 ? "+" : ""}${format(change)}`;
+    return { delta: `${signedValue}${percentage === null ? "" : ` (${percentage > 0 ? "+" : ""}${percentage.toFixed(1)}%)`}`, positive: lowerIsBetter ? change <= 0 : change >= 0 };
+  };
+  const moneyDelta = (current: number | null, previous: number | null | undefined, fallback: string, lowerIsBetter = false) => comparisonDelta(current, previous, (value) => formatter.format(value), fallback, lowerIsBetter);
+  const countDelta = (current: number, previous: number | undefined, fallback: string) => comparisonDelta(current, previous, (value) => Math.round(value).toLocaleString(), fallback);
+  const ratioDelta = (current: number | null, previous: number | null | undefined, fallback: string, lowerIsBetter = false) => comparisonDelta(current, previous, (value) => `${value.toFixed(2)}x`, fallback, lowerIsBetter);
   const liveMetrics = liveData ? [
-    { label: "Net sales", value: formatter.format(liveData.metrics.netSales), delta: "Live Shopify data", positive: true, hint: `${liveData.metrics.orders.toLocaleString()} orders` },
-    { label: "Orders", value: liveData.metrics.orders.toLocaleString(), delta: "Imported Shopify orders", positive: true, hint: `${liveData.metrics.unitsSold.toLocaleString()} units sold` },
-    { label: "Units sold", value: liveData.metrics.unitsSold.toLocaleString(), delta: "Current quantities", positive: true, hint: `${liveData.metrics.orders ? (liveData.metrics.unitsSold / liveData.metrics.orders).toFixed(1) : "0.0"} units per order` },
-    { label: "Average order value", value: formatter.format(liveData.metrics.averageOrderValue), delta: "Net product sales", positive: true, hint: `${liveData.metrics.orders.toLocaleString()} completed orders` },
-    { label: "Gross sales", value: formatter.format(liveData.metrics.grossSales), delta: "Before discounts", positive: true, hint: `${formatter.format(liveData.metrics.discounts)} discounts` },
-    { label: "Shipping revenue", value: formatter.format(liveData.metrics.shippingRevenue), delta: "Shopify orders", positive: true, hint: "Excludes tax and duties" },
-    { label: "Blended CAC", value: liveData.metrics.blendedCac === null ? "—" : formatter.format(liveData.metrics.blendedCac), delta: "Meta spend ÷ new customers", positive: true, hint: `${liveData.metrics.newCustomers.toLocaleString()} first-observed customers` },
-    { label: "Blended MER", value: liveData.metrics.blendedMer === null ? "—" : `${liveData.metrics.blendedMer.toFixed(2)}x`, delta: "Net sales ÷ Meta spend", positive: true, hint: liveData.metrics.marketingSpend ? `${formatter.format(liveData.metrics.marketingSpend)} imported spend` : "Connect Meta spend" },
-    { label: "New-customer ROAS", value: liveData.metrics.newCustomerRoas === null ? "—" : `${liveData.metrics.newCustomerRoas.toFixed(2)}x`, delta: "First observed order sales", positive: true, hint: "Uses blended Meta spend for the imported window" },
-    { label: "Gross profit", value: pnlSummary?.hasData ? formatter.format(pnlSummary.metrics.grossProfit) : "—", delta: "Net product sales less refunds and COGS", positive: true, hint: pnlSummary?.metrics.missingCostLines ? `${pnlSummary.metrics.missingCostLines.toLocaleString()} lines need costs` : "Product costs covered" },
-    { label: "Marketing cost", value: pnlSummary?.availability.marketingSpend ? formatter.format(pnlSummary.metrics.marketingSpend) : "—", delta: "Imported Meta spend", positive: true, hint: pnlSummary?.availability.marketingSpend ? "Matching reporting currency" : "Connect Meta spend" },
-    { label: "Contribution margin", value: pnlSummary?.availability.marketingSpend && pnlSummary.availability.shippingCosts && pnlSummary.availability.handlingCosts ? formatter.format(pnlSummary.metrics.contributionMargin) : "—", delta: "After variable direct costs", positive: true, hint: pnlSummary?.availability.shippingCosts && pnlSummary?.availability.handlingCosts ? "Shipping and handling included" : "Complete shipping and handling costs" },
-    { label: "Net profit", value: pnlSummary?.availability.netProfit && pnlSummary.metrics.netProfit !== null ? formatter.format(pnlSummary.metrics.netProfit) : "—", delta: "After known operating costs", positive: true, hint: pnlSummary?.availability.netProfit ? `${pnlSummary.metrics.netMargin === null ? "—" : `${(pnlSummary.metrics.netMargin * 100).toFixed(1)}%`} net margin` : "Complete cost coverage" },
+    { label: "Net sales", value: formatter.format(liveData.metrics.netSales), ...moneyDelta(liveData.metrics.netSales, comparisonData?.metrics.netSales, "Live Shopify data"), hint: `${liveData.metrics.orders.toLocaleString()} orders` },
+    { label: "Orders", value: liveData.metrics.orders.toLocaleString(), ...countDelta(liveData.metrics.orders, comparisonData?.metrics.orders, "Imported Shopify orders"), hint: `${liveData.metrics.unitsSold.toLocaleString()} units sold` },
+    { label: "Units sold", value: liveData.metrics.unitsSold.toLocaleString(), ...countDelta(liveData.metrics.unitsSold, comparisonData?.metrics.unitsSold, "Current quantities"), hint: `${liveData.metrics.orders ? (liveData.metrics.unitsSold / liveData.metrics.orders).toFixed(1) : "0.0"} units per order` },
+    { label: "Average order value", value: formatter.format(liveData.metrics.averageOrderValue), ...moneyDelta(liveData.metrics.averageOrderValue, comparisonData?.metrics.averageOrderValue, "Net product sales"), hint: `${liveData.metrics.orders.toLocaleString()} completed orders` },
+    { label: "Gross sales", value: formatter.format(liveData.metrics.grossSales), ...moneyDelta(liveData.metrics.grossSales, comparisonData?.metrics.grossSales, "Before discounts"), hint: `${formatter.format(liveData.metrics.discounts)} discounts` },
+    { label: "Shipping revenue", value: formatter.format(liveData.metrics.shippingRevenue), ...moneyDelta(liveData.metrics.shippingRevenue, comparisonData?.metrics.shippingRevenue, "Shopify orders"), hint: "Excludes tax and duties" },
+    { label: "Blended CAC", value: liveData.metrics.blendedCac === null ? "—" : formatter.format(liveData.metrics.blendedCac), ...moneyDelta(liveData.metrics.blendedCac, comparisonData?.metrics.blendedCac, "Meta spend ÷ new customers", true), hint: `${liveData.metrics.newCustomers.toLocaleString()} first-observed customers` },
+    { label: "Blended MER", value: liveData.metrics.blendedMer === null ? "—" : `${liveData.metrics.blendedMer.toFixed(2)}x`, ...ratioDelta(liveData.metrics.blendedMer, comparisonData?.metrics.blendedMer, "Net sales ÷ Meta spend"), hint: liveData.metrics.marketingSpend ? `${formatter.format(liveData.metrics.marketingSpend)} imported spend` : "Connect Meta spend" },
+    { label: "New-customer ROAS", value: liveData.metrics.newCustomerRoas === null ? "—" : `${liveData.metrics.newCustomerRoas.toFixed(2)}x`, ...ratioDelta(liveData.metrics.newCustomerRoas, comparisonData?.metrics.newCustomerRoas, "First observed order sales"), hint: "Uses blended Meta spend for the imported window" },
+    { label: "Gross profit", value: pnlSummary?.hasData ? formatter.format(pnlSummary.metrics.grossProfit) : "—", ...moneyDelta(pnlSummary?.hasData ? pnlSummary.metrics.grossProfit : null, pnlComparison?.hasData ? pnlComparison.metrics.grossProfit : null, "Net product sales less refunds and COGS"), hint: pnlSummary?.metrics.missingCostLines ? `${pnlSummary.metrics.missingCostLines.toLocaleString()} lines need costs` : "Product costs covered" },
+    { label: "Marketing cost", value: pnlSummary?.availability.marketingSpend ? formatter.format(pnlSummary.metrics.marketingSpend) : "—", ...moneyDelta(pnlSummary?.availability.marketingSpend ? pnlSummary.metrics.marketingSpend : null, pnlComparison?.availability.marketingSpend ? pnlComparison.metrics.marketingSpend : null, "Imported Meta spend", true), hint: pnlSummary?.availability.marketingSpend ? "Matching reporting currency" : "Connect Meta spend" },
+    { label: "Contribution margin", value: pnlSummary?.availability.marketingSpend && pnlSummary.availability.shippingCosts && pnlSummary.availability.handlingCosts ? formatter.format(pnlSummary.metrics.contributionMargin) : "—", ...moneyDelta(pnlSummary?.availability.marketingSpend && pnlSummary.availability.shippingCosts && pnlSummary.availability.handlingCosts ? pnlSummary.metrics.contributionMargin : null, pnlComparison?.availability.marketingSpend && pnlComparison.availability.shippingCosts && pnlComparison.availability.handlingCosts ? pnlComparison.metrics.contributionMargin : null, "After variable direct costs"), hint: pnlSummary?.availability.shippingCosts && pnlSummary?.availability.handlingCosts ? "Shipping and handling included" : "Complete shipping and handling costs" },
+    { label: "Net profit", value: pnlSummary?.availability.netProfit && pnlSummary.metrics.netProfit !== null ? formatter.format(pnlSummary.metrics.netProfit) : "—", ...moneyDelta(pnlSummary?.availability.netProfit ? pnlSummary.metrics.netProfit : null, pnlComparison?.availability.netProfit ? pnlComparison.metrics.netProfit : null, "After known operating costs"), hint: pnlSummary?.availability.netProfit ? `${pnlSummary.metrics.netMargin === null ? "—" : `${(pnlSummary.metrics.netMargin * 100).toFixed(1)}%`} net margin` : "Complete cost coverage" },
   ] : demoMetrics;
   const chartMonths = hasLiveData ? liveData!.months.map((month) => month.label) : months;
   const chartRevenue = hasLiveData ? liveData!.months.map((month) => month.netSales) : revenue;
@@ -166,6 +199,7 @@ function Overview({ reportRunId }: { reportRunId?: string }) {
   };
 
   return <>
+    <section className="filter-row pnl-period"><label>From<input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)}/></label><label>To<input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)}/></label>{fromDate && toDate ? <span className="report-note">Comparing with the immediately preceding equal-length period.</span> : <span className="report-note">Select both dates to compare the previous period.</span>}{(fromDate || toDate) && <button onClick={() => { setFromDate(""); setToDate(""); }}>All imported data</button>}</section>
     {loading ? <div className="data-loading">Loading your Shopify summary…</div> : !hasLiveData && liveData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to start your live dashboard</strong><span>The figures below are a preview. Your own sales and orders will appear after the first sync.</span></div></div> : null}{liveData?.currencyCoverage.convertedOrders ? <div className="connection-notice"><Info/><div><strong>{liveData.currencyCoverage.convertedOrders.toLocaleString()} orders converted to {liveData.currency}</strong><span>Historical rates applied: {liveData.currencyCoverage.convertedCurrencies.map((item) => `${item.currency} (${item.orders.toLocaleString()})`).join(", ")}.</span></div></div> : null}{liveData?.currencyCoverage.excludedOrders ? <div className="connection-notice"><Info/><div><strong>{liveData.currencyCoverage.excludedOrders.toLocaleString()} orders excluded from financial totals</strong><span>Reporting currency is {liveData.currency}. Excluded: {liveData.currencyCoverage.excludedCurrencies.map((item) => `${item.currency} (${item.orders.toLocaleString()})`).join(", ")}. Add explicit exchange rates before consolidating these orders.</span></div></div> : null}{liveData?.marketingCurrencyCoverage.convertedRows ? <div className="connection-notice"><Info/><div><strong>{liveData.marketingCurrencyCoverage.convertedRows.toLocaleString()} advertising spend rows converted to {liveData.currency}</strong><span>Historical rates applied: {liveData.marketingCurrencyCoverage.convertedCurrencies.map((item) => `${item.currency} (${item.rows.toLocaleString()})`).join(", ")}.</span></div></div> : null}{liveData?.marketingCurrencyCoverage.excludedRows ? <div className="connection-notice"><Info/><div><strong>{liveData.marketingCurrencyCoverage.excludedRows.toLocaleString()} advertising spend rows excluded</strong><span>Missing dated rates: {liveData.marketingCurrencyCoverage.excludedCurrencies.map((item) => `${item.currency} (${item.rows.toLocaleString()})`).join(", ")}.</span></div></div> : null}
     {hasLiveData ? <div className="report-export"><button className="export-button" onClick={exportOverview}><Download/> Export overview CSV</button></div> : null}
     <section className="metric-grid">{liveMetrics.map((metric) => <article className="metric-card" key={metric.label}>

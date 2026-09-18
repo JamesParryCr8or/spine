@@ -5,7 +5,7 @@ import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 import { calculateAcquisitionMetrics } from "@/lib/analytics/acquisition";
 import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
-import { reportingDateKey, reportingMonthKey } from "@/lib/analytics/reporting-range";
+import { reportingDateKey, reportingMonthKey, reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 
 type Order = {
   id: string;
@@ -32,7 +32,14 @@ function monthLabel(date: Date, timezone: string) {
  * Financial calculations stay on the server. All imported orders contribute to
  * the headline totals; the chart displays the six latest months in the store.
  */
-export async function GET() {
+export async function GET(request: Request) {
+  const params = new URL(request.url).searchParams;
+  const fromDate = params.get("from") ?? "";
+  const toDate = params.get("to") ?? "";
+  const isDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+  if ((fromDate && !isDate(fromDate)) || (toDate && !isDate(toDate)) || (fromDate && toDate && fromDate > toDate)) {
+    return NextResponse.json({ error: "Use a valid start and end date" }, { status: 400 });
+  }
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
   const userId = claims?.claims?.sub;
@@ -62,19 +69,25 @@ export async function GET() {
     .order("effective_date", { ascending: true });
   if (exchangeRateError) return NextResponse.json({ error: exchangeRateError.message }, { status: 500 });
   const exchangeRates = (exchangeRateRows ?? []) as DatedExchangeRate[];
+  const timezone = store.timezone || "UTC";
+  const dateRange = fromDate && toDate ? reportingRangeToUtc(fromDate, toDate, timezone) : null;
   const orders: Order[] = [];
   const currencyCoverage = createCurrencyCoverage(store.currency);
   const pageSize = 1000;
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("shopify_orders")
       .select("id,customer_id,processed_at,gross_sales,discounts,net_product_sales,shipping_revenue,total_sales,currency")
       .eq("store_id", store.id)
       .is("cancelled_at", null)
       .eq("test", false)
-      .not("processed_at", "is", null)
-      .order("processed_at", { ascending: true })
-      .range(from, from + pageSize - 1);
+      .not("processed_at", "is", null);
+    if (dateRange) query = query.gte("processed_at", dateRange.start).lt("processed_at", dateRange.endExclusive);
+    else {
+      if (fromDate) query = query.gte("processed_at", reportingRangeToUtc(fromDate, fromDate, timezone).start);
+      if (toDate) query = query.lt("processed_at", reportingRangeToUtc(toDate, toDate, timezone).endExclusive);
+    }
+    const { data, error } = await query.order("processed_at", { ascending: true }).range(from, from + pageSize - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const page = (data ?? []) as Array<Omit<Order, "exchange_rate">>;
     for (const order of page) {
@@ -86,8 +99,8 @@ export async function GET() {
 
   const latestOrderAt = orders.reduce<string | null>((latest, order) => !latest || (order.processed_at && order.processed_at > latest) ? order.processed_at : latest, null);
   const earliestOrderAt = orders[0]?.processed_at ?? null;
-  const timezone = store.timezone || "UTC";
-  const latestLocalDate = reportingDateKey(latestOrderAt ?? new Date(), timezone);
+  const fallbackEnd = toDate ? new Date(`${toDate}T12:00:00.000Z`) : new Date();
+  const latestLocalDate = reportingDateKey(latestOrderAt ?? fallbackEnd, timezone);
   const [latestYear, latestMonth] = latestLocalDate.slice(0, 7).split("-").map(Number);
   const chartEnd = new Date(Date.UTC(latestYear, latestMonth - 1, 1));
   const chartStart = new Date(Date.UTC(latestYear, latestMonth - 6, 1));
@@ -101,7 +114,17 @@ export async function GET() {
   let netSales = 0;
   let shippingRevenue = 0;
   let newCustomerSales = 0;
-  const customerClasses = classifyCustomerOrders(orders.map((order) => ({ id: order.id, customerId: order.customer_id, processedAt: order.processed_at })));
+  const classificationOrders: Array<{ id: string; customerId: string | null; processedAt: string | null }> = [];
+  for (let from = 0; ; from += pageSize) {
+    let historyQuery = supabase.from("shopify_orders").select("id,customer_id,processed_at").eq("store_id", store.id).is("cancelled_at", null).eq("test", false).not("processed_at", "is", null);
+    if (toDate) historyQuery = historyQuery.lt("processed_at", reportingRangeToUtc(toDate, toDate, timezone).endExclusive);
+    const { data, error } = await historyQuery.order("processed_at", { ascending: true }).range(from, from + pageSize - 1);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const page = data ?? [];
+    classificationOrders.push(...page.map((order) => ({ id: order.id, customerId: order.customer_id, processedAt: order.processed_at })));
+    if (page.length < pageSize) break;
+  }
+  const customerClasses = classifyCustomerOrders(classificationOrders);
 
   for (const order of orders) {
     if (!order.processed_at) continue;
@@ -126,8 +149,10 @@ export async function GET() {
   }
 
   let metaQuery = supabase.from("meta_ad_insights_daily").select("date_start,spend,currency").eq("store_id", store.id).order("date_start", { ascending: true });
-  if (earliestOrderAt) metaQuery = metaQuery.gte("date_start", earliestOrderAt.slice(0, 10));
-  if (latestOrderAt) metaQuery = metaQuery.lte("date_start", latestOrderAt.slice(0, 10));
+  if (fromDate) metaQuery = metaQuery.gte("date_start", fromDate);
+  else if (earliestOrderAt) metaQuery = metaQuery.gte("date_start", earliestOrderAt.slice(0, 10));
+  if (toDate) metaQuery = metaQuery.lte("date_start", toDate);
+  else if (latestOrderAt) metaQuery = metaQuery.lte("date_start", latestOrderAt.slice(0, 10));
   const { data: metaRows, error: metaError } = await metaQuery;
   if (metaError) return NextResponse.json({ error: metaError.message }, { status: 500 });
   const orderCount = orders.length;
@@ -154,7 +179,7 @@ export async function GET() {
     timezone,
     currencyCoverage: currencyCoverage.summary(),
     marketingCurrencyCoverage: marketingCurrencyCoverage.summary(),
-    range: { start: earliestOrderAt ? reportingDateKey(earliestOrderAt, timezone) : isoDate(chartStart), end: latestOrderAt ? reportingDateKey(latestOrderAt, timezone) : latestLocalDate },
+    range: { start: fromDate || (earliestOrderAt ? reportingDateKey(earliestOrderAt, timezone) : isoDate(chartStart)), end: toDate || (latestOrderAt ? reportingDateKey(latestOrderAt, timezone) : latestLocalDate) },
     metrics: {
       grossSales,
       discounts,
