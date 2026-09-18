@@ -16,7 +16,7 @@ import { calculateProfitAndLoss } from '../lib/analytics/profit-and-loss.ts';
 import { normalizeAttribution, normalizeUtmSource } from '../lib/analytics/utm-attribution.ts';
 import { shopifySyncWindow, shopifyUpdatedAtQuery } from '../lib/shopify/sync-window.ts';
 import { reportingPeriods } from '../lib/analytics/reporting-periods.ts';
-import { parseCreateReport, parseUpdateReport, REPORT_SCHEMA_VERSION } from '../lib/reports/schema.ts';
+import { parseCreateReport, parseFinishReportRun, parseStartReportRun, parseUpdateReport, REPORT_SCHEMA_VERSION } from '../lib/reports/schema.ts';
 import goldenStore from './fixtures/golden-store-pnl.json' with { type: 'json' };
 
 const success = () => Response.json({ data: { orders: ['order-1'] } });
@@ -352,4 +352,17 @@ test('saved report updates require UUIDs and allow only known actions', () => {
   });
   assert.equal(parseUpdateReport({ id, action: 'publish' }).ok, false);
   assert.equal(parseUpdateReport({ id: 'not-a-uuid', action: 'archive' }).ok, false);
+});
+
+
+test('saved report run payloads bind executions to valid identifiers and terminal states', () => {
+  const id = '123e4567-e89b-42d3-a456-426614174000';
+  assert.deepEqual(parseStartReportRun({ reportId: id }), { ok: true, value: { reportId: id } });
+  assert.equal(parseStartReportRun({ reportId: 'bad' }).ok, false);
+  assert.deepEqual(parseFinishReportRun({ runId: id, status: 'completed', rowCount: 42 }), {
+    ok: true,
+    value: { runId: id, status: 'completed', rowCount: 42, errorMessage: null },
+  });
+  assert.equal(parseFinishReportRun({ runId: id, status: 'running' }).ok, false);
+  assert.equal(parseFinishReportRun({ runId: id, status: 'failed', rowCount: -1 }).ok, false);
 });

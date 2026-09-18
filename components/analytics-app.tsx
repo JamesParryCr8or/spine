@@ -70,6 +70,19 @@ function downloadCsv(filename: string, rows: Array<Array<string | number>>) {
   URL.revokeObjectURL(url);
 }
 
+function useReportRun(reportRunId?: string) {
+  const finishedRun = useRef<string | null>(null);
+  return useCallback((status: "completed" | "failed", rowCount: number | null = null, errorMessage: string | null = null) => {
+    if (!reportRunId || finishedRun.current === reportRunId) return;
+    finishedRun.current = reportRunId;
+    void fetch("/api/reports/runs", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId: reportRunId, status, rowCount, errorMessage }),
+    });
+  }, [reportRunId]);
+}
+
 type OverviewData = {
   hasData: boolean;
   currency: string;
@@ -79,7 +92,8 @@ type OverviewData = {
   meta?: { importedDays: number; start: string | null; end: string | null };
 };
 
-function Overview() {
+function Overview({ reportRunId }: { reportRunId?: string }) {
+  const finishReportRun = useReportRun(reportRunId);
   const [liveData, setLiveData] = useState<OverviewData | null>(null);
   const [pnlSummary, setPnlSummary] = useState<PnlData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -89,10 +103,10 @@ function Overview() {
       fetch("/api/analytics/overview").then(async (response) => response.ok ? response.json() as Promise<OverviewData> : null),
       fetch("/api/analytics/pnl").then(async (response) => response.ok ? response.json() as Promise<PnlData> : null),
     ])
-      .then(([overview, pnl]) => { setLiveData(overview); setPnlSummary(pnl); })
-      .catch(() => { setLiveData(null); setPnlSummary(null); })
+      .then(([overview, pnl]) => { setLiveData(overview); setPnlSummary(pnl); finishReportRun(overview ? "completed" : "failed", overview?.metrics.orders ?? null); })
+      .catch(() => { setLiveData(null); setPnlSummary(null); finishReportRun("failed", null, "Overview data could not be loaded"); })
       .finally(() => setLoading(false));
-  }, []);
+  }, [finishReportRun]);
 
   const hasLiveData = Boolean(liveData?.hasData);
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: liveData?.currency || "GBP", maximumFractionDigits: 0 });
@@ -176,7 +190,8 @@ type PnlData = {
 type PnlPeriodData = { period: ReportingPeriod; data: PnlData };
 type PnlRow = { section: string; label: string; value: (data: PnlData) => string };
 
-function ProfitLoss({ savedPreset }: { savedPreset?: "all_imported" | "latest_30_days" | "latest_90_days" }) {
+function ProfitLoss({ savedPreset, reportRunId }: { savedPreset?: "all_imported" | "latest_30_days" | "latest_90_days"; reportRunId?: string }) {
+  const finishReportRun = useReportRun(reportRunId);
   const [pnl, setPnl] = useState<PnlData | null>(null);
   const [comparison, setComparison] = useState<PnlData | null>(null);
   const [yearComparison, setYearComparison] = useState<PnlData | null>(null);
@@ -198,6 +213,7 @@ function ProfitLoss({ savedPreset }: { savedPreset?: "all_imported" | "latest_30
       .then(async (response) => response.ok ? response.json() : null)
       .then(async (payload: PnlData | null) => {
         setPnl(payload); setComparison(null); setYearComparison(null);
+        finishReportRun(payload ? "completed" : "failed", payload?.metrics.orders ?? null);
         if (!payload?.period) return;
         const start = new Date(`${payload.period.start}T00:00:00Z`);
         const end = new Date(`${payload.period.end}T00:00:00Z`);
@@ -214,9 +230,9 @@ function ProfitLoss({ savedPreset }: { savedPreset?: "all_imported" | "latest_30
         if (previousResponse.ok) setComparison(await previousResponse.json() as PnlData);
         if (previousYearResponse.ok) setYearComparison(await previousYearResponse.json() as PnlData);
       })
-      .catch(() => { setPnl(null); setComparison(null); setYearComparison(null); })
+      .catch(() => { setPnl(null); setComparison(null); setYearComparison(null); finishReportRun("failed", null, "Profit and loss data could not be loaded"); })
       .finally(() => setLoading(false));
-  }, [fromDate, toDate]);
+  }, [fromDate, toDate, finishReportRun]);
 
   useEffect(() => {
     if (!savedPreset || !pnl?.period?.end || appliedSavedPreset.current === savedPreset) return;
@@ -385,7 +401,8 @@ function ProfitLoss({ savedPreset }: { savedPreset?: "all_imported" | "latest_30
 type UtmRow = { channel: string; source: string; medium: string; campaign: string; content: string; term: string; landingPage: string; customerType: string; sales: number; orders: number; customers: number; newCustomerSales: number; averageOrderValue: number; revenuePerCustomer: number | null };
 type UtmData = { hasData: boolean; currency: string; attributionModel: "first_touch" | "last_touch"; period: { start: string; end: string } | null; totals: { sales: number; orders: number; attributedOrders: number; customers: number; newCustomerSales: number; averageOrderValue: number; revenuePerCustomer: number | null }; diagnostics: { missingAttribution: { orders: number; sales: number }; missingUtm: { orders: number; sales: number }; missingLandingPage: { orders: number; sales: number }; missingReferrer: { orders: number; sales: number } }; trends: Array<{ period: string; sales: number; orders: number; customers: number; newCustomerSales: number }>; rows: UtmRow[] };
 
-function UTMAnalysis() {
+function UTMAnalysis({ reportRunId }: { reportRunId?: string }) {
+  const finishReportRun = useReportRun(reportRunId);
   const [data, setData] = useState<UtmData | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -401,8 +418,8 @@ function UTMAnalysis() {
     const params = new URLSearchParams({ attribution: attributionModel });
     if (fromDate) params.set("from", fromDate);
     if (toDate) params.set("to", toDate);
-    fetch(`/api/analytics/utm?${params}`).then(async (response) => response.ok ? response.json() : null).then((payload: UtmData | null) => setData(payload)).catch(() => setData(null)).finally(() => setLoading(false));
-  }, [attributionModel, fromDate, toDate]);
+    fetch(`/api/analytics/utm?${params}`).then(async (response) => response.ok ? response.json() : null).then((payload: UtmData | null) => { setData(payload); finishReportRun(payload ? "completed" : "failed", payload?.rows.length ?? null); }).catch(() => { setData(null); finishReportRun("failed", null, "UTM data could not be loaded"); }).finally(() => setLoading(false));
+  }, [attributionModel, fromDate, toDate, finishReportRun]);
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: data?.currency || "GBP", maximumFractionDigits: 0 });
   const metrics = data ? [["Net sales", formatter.format(data.totals.sales), `${data.rows.length.toLocaleString()} normalized groups`], ["Attributed orders", data.totals.attributedOrders.toLocaleString(), `${data.totals.orders.toLocaleString()} valid orders total`], ["New-customer sales", formatter.format(data.totals.newCustomerSales), attributionModel === "last_touch" ? "Last-touch customer journey" : "First-touch customer journey"], ["Average order value", formatter.format(data.totals.averageOrderValue), `${data.totals.customers.toLocaleString()} identified customers`], ["Revenue per customer", data.totals.revenuePerCustomer === null ? "—" : formatter.format(data.totals.revenuePerCustomer), "Identified customers only"], ["Profit and ROAS", "—", "Available after campaign spend mapping"]] : [["Net sales", "£204,050", "79% of net sales"], ["Attributed orders", "319", "All valid orders shown"], ["New customer sales", "£146,920", "72% of attributed"], ["Average order value", "£640", "Across valid orders"], ["Revenue per customer", "£820", "Identified customers"], ["Profit and ROAS", "—", "Map campaign spend"]];
   const rows = data?.hasData ? data.rows : utms.map(([source, medium, campaign, sales, orders, aov]) => ({ channel: "Attributed", source, medium, campaign, content: "—", term: "—", landingPage: "Unknown", customerType: "New", sales: Number(String(sales).replace(/[^0-9.-]/g, "")), orders: Number(orders), customers: Number(orders), newCustomerSales: 0, averageOrderValue: Number(aov.replace(/[^0-9]/g, "")), revenuePerCustomer: null }));
@@ -820,7 +837,8 @@ function Connections() {
 type SalesOrder = { id: string; order_name: string; processed_at: string | null; financial_status: string | null; fulfillment_status: string | null; source_name: string | null; net_product_sales: string; shipping_revenue: string; total_sales: string; currency: string; refunded: number };
 type OrderDetail = { currency: string; order: SalesOrder & { gross_sales: string; discounts: string; tax: string; duties: string }; lines: Array<{ id: string; title: string; variant_title: string | null; sku: string | null; current_quantity: number; net_sales: string; unitCost: number | null; cogs: number | null }>; metrics: { refunds: number; cogs: number; grossProfit: number; missingCostLines: number } };
 
-function Sales() {
+function Sales({ reportRunId }: { reportRunId?: string }) {
+  const finishReportRun = useReportRun(reportRunId);
   const [data, setData] = useState<{ hasData: boolean; currency: string; orders: SalesOrder[] } | null>(null);
   const [search, setSearch] = useState("");
   const [financialStatus, setFinancialStatus] = useState("all");
@@ -830,7 +848,7 @@ function Sales() {
   const [detail, setDetail] = useState<OrderDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
-  useEffect(() => { fetch("/api/analytics/orders").then(async (response) => response.ok ? response.json() : null).then((payload) => setData(payload)).catch(() => setData(null)); }, []);
+  useEffect(() => { fetch("/api/analytics/orders").then(async (response) => response.ok ? response.json() : null).then((payload) => { setData(payload); finishReportRun(payload ? "completed" : "failed", payload?.orders?.length ?? null); }).catch(() => { setData(null); finishReportRun("failed", null, "Sales data could not be loaded"); }); }, [finishReportRun]);
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: detail?.currency || data?.currency || "GBP", maximumFractionDigits: 2 });
   const orders = data?.orders ?? [];
   const financialStatuses = [...new Set(orders.map((order) => order.financial_status || "Unknown"))].sort();
@@ -845,7 +863,8 @@ function Sales() {
 type ProductProfit = { key: string; product: string; variant: string; sku: string | null; units: number; revenue: number; discounts: number; refunds: number; netRevenue: number; cogs: number; grossProfit: number; margin: number | null; missingCostUnits: number; shippingCosts: number; handlingCosts: number; transactionFeeAllocation: number; marketingAllocation: number; contributionProfit: number; contributionMargin: number | null; trend: Array<{ period: string; units: number; revenue: number; refunds: number; netRevenue: number }> };
 type ProductData = { hasData: boolean; currency: string; period: { start: string; end: string } | null; products: ProductProfit[] };
 
-function Products({ openCosts }: { openCosts: (sku: string | null) => void }) {
+function Products({ openCosts, reportRunId }: { openCosts: (sku: string | null) => void; reportRunId?: string }) {
+  const finishReportRun = useReportRun(reportRunId);
   const [data, setData] = useState<ProductData | null>(null);
   const [comparisonData, setComparisonData] = useState<ProductData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -871,10 +890,10 @@ function Products({ openCosts }: { openCosts: (sku: string | null) => void }) {
       fetch(`/api/analytics/products${params.size ? `?${params}` : ""}`).then(async (response) => response.ok ? response.json() as Promise<ProductData> : null),
       comparisonUrl ? fetch(comparisonUrl).then(async (response) => response.ok ? response.json() as Promise<ProductData> : null) : Promise.resolve(null),
     ])
-      .then(([payload, comparison]) => { setData(payload); setComparisonData(comparison); })
-      .catch(() => { setData(null); setComparisonData(null); })
+      .then(([payload, comparison]) => { setData(payload); setComparisonData(comparison); finishReportRun(payload ? "completed" : "failed", payload?.products.length ?? null); })
+      .catch(() => { setData(null); setComparisonData(null); finishReportRun("failed", null, "Product data could not be loaded"); })
       .finally(() => setLoading(false));
-  }, [fromDate, toDate]);
+  }, [fromDate, toDate, finishReportRun]);
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: data?.currency || "GBP", maximumFractionDigits: 0 });
   const products = data?.products ?? [];
   const selectedProduct = products.find((product) => product.key === selectedProductKey) ?? products[0] ?? null;
@@ -906,17 +925,18 @@ type CustomerData = {
   cohorts: Array<{ key: string; customers: number; periods: Array<{ period: number; activeCustomers: number; retentionRate: number; revenue: number; cumulativeRevenue: number }> }>;
 };
 
-function Customers() {
+function Customers({ reportRunId }: { reportRunId?: string }) {
+  const finishReportRun = useReportRun(reportRunId);
   const [data, setData] = useState<CustomerData | null>(null);
   const [loading, setLoading] = useState(true);
   const [cohortMetric, setCohortMetric] = useState<"retention" | "revenue">("retention");
   useEffect(() => {
     fetch("/api/analytics/customers")
       .then(async (response) => response.ok ? response.json() : null)
-      .then((payload: CustomerData | null) => setData(payload))
-      .catch(() => setData(null))
+      .then((payload: CustomerData | null) => { setData(payload); finishReportRun(payload ? "completed" : "failed", payload?.customers.length ?? null); })
+      .catch(() => { setData(null); finishReportRun("failed", null, "Customer data could not be loaded"); })
       .finally(() => setLoading(false));
-  }, []);
+  }, [finishReportRun]);
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: data?.currency || "GBP", maximumFractionDigits: 0 });
   const metrics = data ? [
     ["CUSTOMERS", data.metrics.customers.toLocaleString(), `${data.metrics.repeatCustomers.toLocaleString()} repeat customers`],
@@ -928,7 +948,7 @@ function Customers() {
   return <>{loading ? <div className="data-loading">Calculating customer metrics…</div> : !data?.hasData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to analyse your customer base</strong><span>Customer metrics appear after orders have been imported.</span></div></div> : <><section className="metric-grid">{metrics.map(([label, value, hint]) => <article className="metric-card" key={label}><div className="metric-head"><span>{label}</span><Users/></div><strong>{value}</strong><div className="metric-foot"><span>{hint}</span></div></article>)}</section><section className="cost-grid live"><div><strong>{data.metrics.averageCustomerValue === null ? "—" : formatter.format(data.metrics.averageCustomerValue)}</strong><span>Average customer value</span></div><div><strong>{data.metrics.averageOrdersPerCustomer === null ? "—" : data.metrics.averageOrdersPerCustomer.toFixed(2)}</strong><span>Orders per customer</span></div><div><strong>{data.metrics.averageDaysToSecondOrder === null ? "—" : `${data.metrics.averageDaysToSecondOrder.toFixed(0)} days`}</strong><span>Average time to second order</span></div></section>{data.customerDetailsMasked ? <div className="connection-notice"><Info/><div><strong>Customer names are masked for your role</strong><span>Sales and retention metrics remain available. Ask a workspace owner or admin for customer-level access.</span></div></div> : null}{data.metrics.guestOrders > 0 ? <div className="connection-notice"><Info/><div><strong>{data.metrics.guestOrders.toLocaleString()} guest orders are separate from customer cohorts</strong><span>{formatter.format(data.metrics.guestSales)} is excluded from new-versus-repeat classification because Shopify has no customer record for these orders.</span></div></div> : null}<section className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">CUSTOMER TREND</span><h2>New versus repeat sales</h2></div></div><div className="table-scroll"><table className="data-table"><thead><tr><th>Month</th><th>New orders</th><th>New-customer sales</th><th>Repeat orders</th><th>Repeat sales</th></tr></thead><tbody>{data.months.length ? data.months.map((month) => <tr key={month.key}><td>{new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric" }).format(new Date(`${month.key}-01T00:00:00Z`))}</td><td>{month.newCustomerOrders.toLocaleString()}</td><td><strong>{formatter.format(month.newCustomerSales)}</strong></td><td>{month.repeatCustomerOrders.toLocaleString()}</td><td><strong>{formatter.format(month.repeatCustomerSales)}</strong></td></tr>) : <tr><td colSpan={5} className="empty-row">No customer trend data yet.</td></tr>}</tbody></table></div></section><section className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">RETENTION COHORTS</span><h2>Customers retained after their first order</h2></div><div className="feature-actions"><span className="report-note">Each row starts in the month a customer first placed a valid Shopify order.</span><select aria-label="Cohort metric" value={cohortMetric} onChange={(event) => setCohortMetric(event.target.value as "retention" | "revenue")}><option value="retention">Customer retention</option><option value="revenue">Cumulative revenue</option></select></div></div><div className="table-scroll"><table className="data-table"><thead><tr><th>First-order cohort</th><th>Customers</th>{Array.from({ length: 7 }, (_, period) => <th key={period}>Month {period}</th>)}</tr></thead><tbody>{data.cohorts.length ? data.cohorts.map((cohort) => <tr key={cohort.key}><td>{new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric" }).format(new Date(`${cohort.key}-01T00:00:00Z`))}</td><td>{cohort.customers.toLocaleString()}</td>{cohort.periods.map((period) => <td key={period.period}>{cohortMetric === "retention" ? <><strong>{(period.retentionRate * 100).toFixed(1)}%</strong><small>{period.activeCustomers.toLocaleString()} customers</small></> : <><strong>{formatter.format(period.cumulativeRevenue)}</strong><small>through Month {period.period}</small></>}</td>)}</tr>) : <tr><td colSpan={9} className="empty-row">No customer cohorts yet.</td></tr>}</tbody></table></div></section><section className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">CUSTOMER VALUE</span><h2>Top Shopify customers</h2></div><button className="export-button" disabled={!data.customers.length} onClick={exportCustomers}><Download/> Export CSV</button></div><div className="table-scroll"><table className="data-table"><thead><tr><th>Customer</th><th>Orders</th><th>Lifetime spend</th><th>Last updated</th></tr></thead><tbody>{data.customers.map((customer) => <tr key={customer.id}><td>{customer.display_name || "Unnamed customer"}</td><td>{customer.number_of_orders.toLocaleString()}</td><td>{formatter.format(Number(customer.amount_spent))}</td><td>{new Date(customer.updated_at_shopify).toLocaleDateString("en-GB")}</td></tr>)}</tbody></table></div></section></>}</>;
 }
 
-type SavedReport = { id: string; name: string; description: string | null; report_type: "overview" | "pnl" | "sales" | "products" | "customers" | "utm"; visibility: "private" | "organization"; is_favorite: boolean; configuration: { schemaVersion?: number; datePreset?: "all_imported" | "latest_30_days" | "latest_90_days" }; definition_version: number; updated_at: string };
+type SavedReport = { id: string; name: string; description: string | null; report_type: "overview" | "pnl" | "sales" | "products" | "customers" | "utm"; visibility: "private" | "organization"; is_favorite: boolean; configuration: { schemaVersion?: number; datePreset?: "all_imported" | "latest_30_days" | "latest_90_days" }; definition_version: number; last_successful_run_at: string | null; updated_at: string };
 const reportViews: Record<SavedReport["report_type"], View> = { overview: "Overview", pnl: "Profit & Loss", sales: "Sales", products: "Products", customers: "Customers", utm: "UTM Analysis" };
 const reportTypeLabels: Record<SavedReport["report_type"], string> = { overview: "Overview", pnl: "Profit & Loss", sales: "Sales orders", products: "Product profitability", customers: "Customers", utm: "UTM analysis" };
 const datePresetLabels = { all_imported: "All imported data", latest_30_days: "Latest 30 days", latest_90_days: "Latest 90 days" } as const;
@@ -939,7 +959,7 @@ const starterReports: Array<{ name: string; description: string; reportType: Sav
   { name: "UTM performance", description: "Review Shopify last-touch campaign results.", reportType: "utm" },
 ];
 
-function Reports({ openReport }: { openReport: (view: View, preset?: "all_imported" | "latest_30_days" | "latest_90_days") => void }) {
+function Reports({ openReport }: { openReport: (view: View, preset: "all_imported" | "latest_30_days" | "latest_90_days", runId: string) => void }) {
   const [reports, setReports] = useState<SavedReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [showArchived, setShowArchived] = useState(false);
@@ -979,7 +999,14 @@ function Reports({ openReport }: { openReport: (view: View, preset?: "all_import
     const updated = await updateReport({ id: editing.id, action: "rename", name: editForm.name, description: editForm.description, visibility: editForm.visibility }, "Could not update report");
     if (updated) setEditing(null);
   };
-  return <><section className="cost-toolbar"><div><span className="eyebrow">REPORT LIBRARY</span><h2>Saved reports</h2><p>Keep the report views you revisit, then share them with your workspace when ready.</p></div><div className="feature-actions"><button onClick={() => setShowArchived(!showArchived)}>{showArchived ? "Current reports" : "Archived reports"}</button>{!showArchived && <button className="primary" onClick={() => setShowSave(true)}><Plus/> Save report</button>}</div></section><section className="panel report-panel starter-reports"><div className="panel-head"><div><span className="eyebrow">STARTER TEMPLATES</span><h2>Begin with a trusted view</h2></div></div><div className="template-grid">{starterReports.map((template) => <button key={template.name} onClick={() => { setForm({ name: template.name, description: template.description, reportType: template.reportType, visibility: "private", datePreset: "all_imported" }); setShowSave(true); }}><strong>{template.name}</strong><span>{template.description}</span></button>)}</div></section>{error && <div className="connection-error cost-error">{error}</div>}<section className="panel report-panel">{loading ? <div className="data-loading">Loading saved reports…</div> : reports.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Report</th><th>Version</th><th>Type</th><th>Access</th><th>Period</th><th>Updated</th><th/></tr></thead><tbody>{reports.map((report) => <tr key={report.id}><td><strong>{report.name}</strong>{report.description && <small>{report.description}</small>}</td><td>v{report.definition_version}</td><td>{reportTypeLabels[report.report_type]}</td><td>{report.visibility === "organization" ? "Workspace shared" : "Private"}</td><td>{datePresetLabels[report.configuration?.datePreset ?? "all_imported"]}</td><td>{new Date(report.updated_at).toLocaleDateString("en-GB")}</td><td><div className="feature-actions"><button className={report.is_favorite ? "favourite-report active" : "favourite-report"} title={report.is_favorite ? "Remove favourite" : "Add favourite"} onClick={() => void toggleFavorite(report)}>{report.is_favorite ? "★" : "☆"}</button><button onClick={() => openReport(reportViews[report.report_type], report.configuration?.datePreset)}>Open</button><button onClick={() => beginRename(report)}>Rename</button><button onClick={() => void duplicate(report)}>Duplicate</button>{showArchived ? <button onClick={() => void restore(report)}>Restore</button> : <button className="icon-button" title="Archive report" onClick={() => void archive(report)}><Trash2/></button>}</div></td></tr>)}</tbody></table></div> : <div className="cost-empty"><Table2/><strong>No saved reports yet</strong><span>Save a report configuration to keep it in your library.</span></div>}</section>{showSave && <div className="modal-backdrop"><section className="connection-modal"><button className="modal-close" onClick={() => setShowSave(false)}><X/></button><div className="modal-brand"><span className="source-logo c"><Table2/></span><div><span className="eyebrow">REPORT LIBRARY</span><h2>Save report</h2></div></div><label className="form-field"><span>Report name</span><input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Weekly P&L"/></label><label className="form-field"><span>Report type</span><select value={form.reportType} onChange={(event) => setForm({ ...form, reportType: event.target.value })}>{Object.entries(reportTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="form-field"><span>Access</span><select value={form.visibility} onChange={(event) => setForm({ ...form, visibility: event.target.value })}><option value="private">Private to me</option><option value="organization">Share with workspace</option></select></label><label className="form-field"><span>Date range</span><select value={form.datePreset} onChange={(event) => setForm({ ...form, datePreset: event.target.value })}>{Object.entries(datePresetLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="form-field"><span>Description <small>Optional</small></span><input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="What this view is for"/></label><div className="modal-actions"><button onClick={() => setShowSave(false)}>Cancel</button><button className="primary" disabled={!form.name.trim() || saving} onClick={() => void save()}>{saving ? "Saving…" : "Save report"}</button></div></section></div>}{editing && <div className="modal-backdrop"><section className="connection-modal"><button className="modal-close" onClick={() => setEditing(null)}><X/></button><div className="modal-brand"><span className="source-logo c"><Table2/></span><div><span className="eyebrow">REPORT LIBRARY</span><h2>Edit report</h2></div></div><label className="form-field"><span>Report name</span><input value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })}/></label><label className="form-field"><span>Access</span><select value={editForm.visibility} onChange={(event) => setEditForm({ ...editForm, visibility: event.target.value })}><option value="private">Private to me</option><option value="organization">Share with workspace</option></select></label><label className="form-field"><span>Description <small>Optional</small></span><input value={editForm.description} onChange={(event) => setEditForm({ ...editForm, description: event.target.value })}/></label><div className="modal-actions"><button onClick={() => setEditing(null)}>Cancel</button><button className="primary" disabled={!editForm.name.trim()} onClick={() => void rename()}>Save changes</button></div></section></div>}</>;
+  const runReport = async (report: SavedReport) => {
+    setError("");
+    const response = await fetch("/api/reports/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reportId: report.id }) });
+    const payload = await response.json();
+    if (!response.ok) { setError(payload.error || "Could not start report"); return; }
+    openReport(reportViews[report.report_type], report.configuration?.datePreset ?? "all_imported", payload.run.id);
+  };
+  return <><section className="cost-toolbar"><div><span className="eyebrow">REPORT LIBRARY</span><h2>Saved reports</h2><p>Keep the report views you revisit, then share them with your workspace when ready.</p></div><div className="feature-actions"><button onClick={() => setShowArchived(!showArchived)}>{showArchived ? "Current reports" : "Archived reports"}</button>{!showArchived && <button className="primary" onClick={() => setShowSave(true)}><Plus/> Save report</button>}</div></section><section className="panel report-panel starter-reports"><div className="panel-head"><div><span className="eyebrow">STARTER TEMPLATES</span><h2>Begin with a trusted view</h2></div></div><div className="template-grid">{starterReports.map((template) => <button key={template.name} onClick={() => { setForm({ name: template.name, description: template.description, reportType: template.reportType, visibility: "private", datePreset: "all_imported" }); setShowSave(true); }}><strong>{template.name}</strong><span>{template.description}</span></button>)}</div></section>{error && <div className="connection-error cost-error">{error}</div>}<section className="panel report-panel">{loading ? <div className="data-loading">Loading saved reports…</div> : reports.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Report</th><th>Version</th><th>Type</th><th>Access</th><th>Period</th><th>Last successful run</th><th>Updated</th><th/></tr></thead><tbody>{reports.map((report) => <tr key={report.id}><td><strong>{report.name}</strong>{report.description && <small>{report.description}</small>}</td><td>v{report.definition_version}</td><td>{reportTypeLabels[report.report_type]}</td><td>{report.visibility === "organization" ? "Workspace shared" : "Private"}</td><td>{datePresetLabels[report.configuration?.datePreset ?? "all_imported"]}</td><td>{report.last_successful_run_at ? new Date(report.last_successful_run_at).toLocaleString("en-GB") : "Not run yet"}</td><td>{new Date(report.updated_at).toLocaleDateString("en-GB")}</td><td><div className="feature-actions"><button className={report.is_favorite ? "favourite-report active" : "favourite-report"} title={report.is_favorite ? "Remove favourite" : "Add favourite"} onClick={() => void toggleFavorite(report)}>{report.is_favorite ? "★" : "☆"}</button><button onClick={() => void runReport(report)}>Open</button><button onClick={() => beginRename(report)}>Rename</button><button onClick={() => void duplicate(report)}>Duplicate</button>{showArchived ? <button onClick={() => void restore(report)}>Restore</button> : <button className="icon-button" title="Archive report" onClick={() => void archive(report)}><Trash2/></button>}</div></td></tr>)}</tbody></table></div> : <div className="cost-empty"><Table2/><strong>No saved reports yet</strong><span>Save a report configuration to keep it in your library.</span></div>}</section>{showSave && <div className="modal-backdrop"><section className="connection-modal"><button className="modal-close" onClick={() => setShowSave(false)}><X/></button><div className="modal-brand"><span className="source-logo c"><Table2/></span><div><span className="eyebrow">REPORT LIBRARY</span><h2>Save report</h2></div></div><label className="form-field"><span>Report name</span><input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Weekly P&L"/></label><label className="form-field"><span>Report type</span><select value={form.reportType} onChange={(event) => setForm({ ...form, reportType: event.target.value })}>{Object.entries(reportTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="form-field"><span>Access</span><select value={form.visibility} onChange={(event) => setForm({ ...form, visibility: event.target.value })}><option value="private">Private to me</option><option value="organization">Share with workspace</option></select></label><label className="form-field"><span>Date range</span><select value={form.datePreset} onChange={(event) => setForm({ ...form, datePreset: event.target.value })}>{Object.entries(datePresetLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="form-field"><span>Description <small>Optional</small></span><input value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="What this view is for"/></label><div className="modal-actions"><button onClick={() => setShowSave(false)}>Cancel</button><button className="primary" disabled={!form.name.trim() || saving} onClick={() => void save()}>{saving ? "Saving…" : "Save report"}</button></div></section></div>}{editing && <div className="modal-backdrop"><section className="connection-modal"><button className="modal-close" onClick={() => setEditing(null)}><X/></button><div className="modal-brand"><span className="source-logo c"><Table2/></span><div><span className="eyebrow">REPORT LIBRARY</span><h2>Edit report</h2></div></div><label className="form-field"><span>Report name</span><input value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })}/></label><label className="form-field"><span>Access</span><select value={editForm.visibility} onChange={(event) => setEditForm({ ...editForm, visibility: event.target.value })}><option value="private">Private to me</option><option value="organization">Share with workspace</option></select></label><label className="form-field"><span>Description <small>Optional</small></span><input value={editForm.description} onChange={(event) => setEditForm({ ...editForm, description: event.target.value })}/></label><div className="modal-actions"><button onClick={() => setEditing(null)}>Cancel</button><button className="primary" disabled={!editForm.name.trim()} onClick={() => void rename()}>Save changes</button></div></section></div>}</>;
 }
 
 function Generic({ view }: { view: View }) { return <section className="panel empty-feature"><div className="feature-icon"><BarChart3/></div><span className="eyebrow">COMING INTO FOCUS</span><h2>{view}</h2><p>The product shell is ready. This report will use the same trusted Shopify financial model, filters and export workflow.</p><button className="primary"><Plus/> Create report</button></section>; }
@@ -990,6 +1017,7 @@ export function AnalyticsApp() {
   const [view, setView] = useState<View>("Overview");
   const [costSku, setCostSku] = useState<string | null>(null);
   const [pnlPreset, setPnlPreset] = useState<"all_imported" | "latest_30_days" | "latest_90_days">("all_imported");
+  const [activeReportRun, setActiveReportRun] = useState<{ id: string; view: View } | null>(null);
   const [account, setAccount] = useState({ name: "Account", email: "" });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [freshness, setFreshness] = useState<Freshness | null>(null);
@@ -1002,10 +1030,10 @@ export function AnalyticsApp() {
   const freshnessHeading = !freshness ? "SHOPIFY DATA" : !freshness.connected ? "SHOPIFY NOT CONNECTED" : freshness.latestStatus === "running" ? "IMPORTING SHOPIFY" : freshness.latestStatus === "failed" || freshness.latestStatus === "interrupted" ? "SYNC NEEDS ATTENTION" : freshness.lastSuccessfulSync ? "SHOPIFY SYNCED" : "READY TO SYNC";
   const freshnessDetail = freshness?.latestStatus === "running" ? "Importing your Shopify catalogue and orders" : freshness?.latestStatus === "interrupted" ? "Open Connections to resume the saved import" : freshness?.lastSuccessfulSync ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(freshness.lastSuccessfulSync)) : freshness?.latestStatus === "failed" ? "Open Connections to review the failed sync" : "Open Connections to import Shopify data";
   return <div className="app-shell">
-    <aside className={mobileOpen?"sidebar open":"sidebar"}><div className="brand"><span className="brand-mark"><Image src="/spine-logo.png" alt="" width={34} height={34} priority /></span><span><b>Spine</b><small>The backbone of your business</small></span><button className="mobile-close" onClick={()=>setMobileOpen(false)}><X/></button></div><button className="store-switcher"><span className="store-icon"><ShoppingBag/></span><span><small>STORE</small><b>{activeStoreName}</b></span><ChevronDown/></button><nav>{nav.map((item)=><div key={item.label}>{item.section&&<span className="nav-section">{item.section}</span>}<button className={view===item.label?"nav-item active":"nav-item"} onClick={()=>{setView(item.label);setMobileOpen(false)}}><item.icon/><span>{item.label}</span></button></div>)}</nav><div className="sidebar-bottom"><button className="nav-item"><Settings/><span>Settings</span></button><button className="nav-item" onClick={logout}><LogOut/><span>Sign out</span></button><div className="user-card"><div>{account.name.slice(0, 2).toUpperCase()}</div><span><b>{account.name}</b><small>{account.email}</small></span></div></div></aside>
+    <aside className={mobileOpen?"sidebar open":"sidebar"}><div className="brand"><span className="brand-mark"><Image src="/spine-logo.png" alt="" width={34} height={34} priority /></span><span><b>Spine</b><small>The backbone of your business</small></span><button className="mobile-close" onClick={()=>setMobileOpen(false)}><X/></button></div><button className="store-switcher"><span className="store-icon"><ShoppingBag/></span><span><small>STORE</small><b>{activeStoreName}</b></span><ChevronDown/></button><nav>{nav.map((item)=><div key={item.label}>{item.section&&<span className="nav-section">{item.section}</span>}<button className={view===item.label?"nav-item active":"nav-item"} onClick={()=>{setActiveReportRun(null);setView(item.label);setMobileOpen(false)}}><item.icon/><span>{item.label}</span></button></div>)}</nav><div className="sidebar-bottom"><button className="nav-item"><Settings/><span>Settings</span></button><button className="nav-item" onClick={logout}><LogOut/><span>Sign out</span></button><div className="user-card"><div>{account.name.slice(0, 2).toUpperCase()}</div><span><b>{account.name}</b><small>{account.email}</small></span></div></div></aside>
     <main className="main"><header className="topbar"><button className="menu-button" onClick={()=>setMobileOpen(true)}><Menu/></button><div className="breadcrumb"><span>{activeStoreName}</span><b>/</b><strong>{view}</strong></div><div className="top-actions"><button className="date-button" title="Date filtering is coming next"><CalendarDays/><span>All imported data</span><ChevronDown/></button><button className="icon-button" onClick={openSync} title="Open Shopify sync"><RefreshCw/></button><button className="export-button" onClick={()=>setView("Reports")}><Table2/> Reports</button></div></header>
       <div className="content"><div className="page-heading"><div><span className="eyebrow">ECOMMERCE INTELLIGENCE</span><h1>{view}</h1><p>{view==="Overview"?"A clear view of what your store earned—not just what it sold.":view==="UTM Analysis"?"Understand which traffic sources create profitable customers.":view==="Profit & Loss"?"Your ecommerce income statement, based on all imported Shopify data.":`Manage and analyse your ${view.toLowerCase()}.`}</p></div><div className="freshness"><span className={freshness?.latestStatus === "failed" ? "sync-dot syncing" : "sync-dot"}/><div><small>{freshnessHeading}</small><b>{freshnessDetail}</b></div></div></div>
-        {view==="Overview"?<Overview/>:view==="Profit & Loss"?<ProfitLoss savedPreset={pnlPreset}/>:view==="Sales"?<Sales/>:view==="UTM Analysis"?<UTMAnalysis/>:view==="Products"?<Products openCosts={(sku) => { setCostSku(sku); setView("Costs"); }}/>:view==="Customers"?<Customers/>:view==="Costs"?<Costs focusSku={costSku}/>:view==="Expenses"?<Expenses/>:view==="Reports"?<Reports openReport={(target, preset) => { setPnlPreset(preset ?? "all_imported"); setView(target); }}/>:view==="Connections"?<Connections/>:<Generic view={view}/>}</div>
+        {view==="Overview"?<Overview reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Profit & Loss"?<ProfitLoss savedPreset={pnlPreset} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Sales"?<Sales reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="UTM Analysis"?<UTMAnalysis reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Products"?<Products reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} openCosts={(sku) => { setCostSku(sku); setView("Costs"); }}/>:view==="Customers"?<Customers reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Costs"?<Costs focusSku={costSku}/>:view==="Expenses"?<Expenses/>:view==="Reports"?<Reports openReport={(target, preset, runId) => { setPnlPreset(preset); setActiveReportRun({ id: runId, view: target }); setView(target); }}/>:view==="Connections"?<Connections/>:<Generic view={view}/>}</div>
     </main>
   </div>;
 }

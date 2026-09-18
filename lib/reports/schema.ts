@@ -69,3 +69,34 @@ export function parseUpdateReport(value: unknown): ValidationResult<UpdateReport
   }
   return { ok: false, error: "Choose a valid report update" };
 }
+
+
+type FinishReportRun = {
+  runId: string;
+  status: "completed" | "failed";
+  rowCount: number | null;
+  errorMessage: string | null;
+};
+
+export function parseStartReportRun(value: unknown): ValidationResult<{ reportId: string }> {
+  if (!isRecord(value) || typeof value.reportId !== "string" || !uuidPattern.test(value.reportId)) {
+    return { ok: false, error: "A valid report id is required" };
+  }
+  return { ok: true, value: { reportId: value.reportId } };
+}
+
+export function parseFinishReportRun(value: unknown): ValidationResult<FinishReportRun> {
+  if (!isRecord(value) || typeof value.runId !== "string" || !uuidPattern.test(value.runId)) {
+    return { ok: false, error: "A valid report run id is required" };
+  }
+  if (value.status !== "completed" && value.status !== "failed") {
+    return { ok: false, error: "Choose a valid report run status" };
+  }
+  const rowCount = value.rowCount === undefined || value.rowCount === null ? null : value.rowCount;
+  if (rowCount !== null && (!Number.isInteger(rowCount) || rowCount < 0)) {
+    return { ok: false, error: "Row count must be a positive whole number" };
+  }
+  const errorMessage = optionalText(value.errorMessage, 500);
+  if (errorMessage === undefined) return { ok: false, error: "Keep the run error under 500 characters" };
+  return { ok: true, value: { runId: value.runId, status: value.status, rowCount, errorMessage } };
+}
