@@ -31,6 +31,7 @@
 - [x] Apply the payment-fee migration to the connected Supabase project and verify its columns, RLS policies, and database advisors.
 - [x] Add effective-dated per-unit/per-order product shipping overrides with store-level fulfilment fallback and deploy the tenant-protected schema.
 - [x] Group dashboard reporting dates by the Shopify store timezone while retaining UTC source timestamps.
+- [x] Add a shared, versioned runtime schema for saved-report create/update payloads with regression tests.
 
 ### Active build order
 
@@ -403,6 +404,7 @@ Normalize every ad source into shared daily dimensions while retaining source-sp
 - [x] Create `saved_reports` with owner, organization, store scope, report type, name, description, and access settings.
 - [x] Store relative date presets separately from resolved run dates.
 - [x] Support private and organization-shared reports.
+- [x] Validate saved-report definitions and updates through a shared versioned runtime schema.
 - [x] Add favourite actions; add duplicate, rename, and archive actions.
 - [ ] Record report version and last successful run.
 - [ ] Create starter templates for P&L, daily channel spend, product profitability, new customer acquisition, and Klaviyo campaigns.

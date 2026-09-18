@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
+import { parseCreateReport, parseUpdateReport, REPORT_SCHEMA_VERSION } from "@/lib/reports/schema";
 
-const reportTypes = new Set(["overview", "pnl", "sales", "products", "customers", "utm"]);
-const visibilities = new Set(["private", "organization"]);
 const reportFields = "id,name,description,report_type,visibility,is_favorite,configuration,updated_at,created_at,archived_at";
-const datePresets = new Set(["all_imported", "latest_30_days", "latest_90_days"]);
 
 async function context() {
   const supabase = await createClient();
@@ -38,15 +36,10 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const result = await context();
   if (result.error) return result.error;
+  const parsed = parseCreateReport(await request.json().catch(() => null));
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+  const { name, description, reportType, visibility, datePreset } = parsed.value;
   const { supabase, userId, membership, store } = result;
-  const input = await request.json().catch(() => null) as { name?: string; description?: string; reportType?: string; visibility?: string; datePreset?: string } | null;
-  const name = input?.name?.trim() ?? "";
-  const description = input?.description?.trim() || null;
-  const reportType = input?.reportType?.trim() ?? "";
-  const visibility = input?.visibility?.trim() ?? "private";
-  const datePreset = input?.datePreset?.trim() ?? "all_imported";
-  if (!name || name.length > 120) return NextResponse.json({ error: "Enter a report name of up to 120 characters" }, { status: 400 });
-  if (!reportTypes.has(reportType) || !visibilities.has(visibility) || !datePresets.has(datePreset)) return NextResponse.json({ error: "Choose a valid report type and sharing setting" }, { status: 400 });
   const { data, error } = await supabase.from("saved_reports").insert({
     organization_id: membership.organization_id,
     store_id: store?.id ?? null,
@@ -55,7 +48,7 @@ export async function POST(request: Request) {
     description,
     report_type: reportType,
     visibility,
-    configuration: { datePreset },
+    configuration: { schemaVersion: REPORT_SCHEMA_VERSION, datePreset },
   }).select(reportFields).single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ report: data }, { status: 201 });
@@ -64,11 +57,9 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   const result = await context();
   if (result.error) return result.error;
-  const input = await request.json().catch(() => null) as {
-    id?: string; action?: "favorite" | "rename" | "archive" | "restore" | "duplicate";
-    isFavorite?: boolean; name?: string; description?: string; visibility?: string;
-  } | null;
-  if (!input?.id) return NextResponse.json({ error: "Report id is required" }, { status: 400 });
+  const parsed = parseUpdateReport(await request.json().catch(() => null));
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+  const input = parsed.value;
 
   const { supabase, userId, membership, store } = result;
   if (input.action === "duplicate") {
@@ -88,15 +79,10 @@ export async function PATCH(request: Request) {
   if (input.action === "archive") update.archived_at = new Date().toISOString();
   else if (input.action === "restore") update.archived_at = null;
   else if (input.action === "rename") {
-    const name = input.name?.trim() ?? "";
-    const visibility = input.visibility?.trim() ?? "";
-    if (!name || name.length > 120) return NextResponse.json({ error: "Enter a report name of up to 120 characters" }, { status: 400 });
-    if (visibility && !visibilities.has(visibility)) return NextResponse.json({ error: "Choose a valid sharing setting" }, { status: 400 });
-    update.name = name;
-    update.description = input.description?.trim() || null;
-    if (visibility) update.visibility = visibility;
-  } else if (typeof input.isFavorite === "boolean") update.is_favorite = input.isFavorite;
-  else return NextResponse.json({ error: "Choose a report update" }, { status: 400 });
+    update.name = input.name;
+    update.description = input.description;
+    if (input.visibility) update.visibility = input.visibility;
+  } else if (input.action === "favorite") update.is_favorite = input.isFavorite;
 
   const { data, error } = await supabase.from("saved_reports").update(update).eq("id", input.id).eq("organization_id", membership.organization_id).select(reportFields).maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

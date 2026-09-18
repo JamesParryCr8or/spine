@@ -16,6 +16,7 @@ import { calculateProfitAndLoss } from '../lib/analytics/profit-and-loss.ts';
 import { normalizeAttribution, normalizeUtmSource } from '../lib/analytics/utm-attribution.ts';
 import { shopifySyncWindow, shopifyUpdatedAtQuery } from '../lib/shopify/sync-window.ts';
 import { reportingPeriods } from '../lib/analytics/reporting-periods.ts';
+import { parseCreateReport, parseUpdateReport, REPORT_SCHEMA_VERSION } from '../lib/reports/schema.ts';
 import goldenStore from './fixtures/golden-store-pnl.json' with { type: 'json' };
 
 const success = () => Response.json({ data: { orders: ['order-1'] } });
@@ -311,4 +312,44 @@ test('reporting periods split inclusive ranges across calendar boundaries', () =
 test('reporting periods cap wide daily ranges to the latest visible columns', () => {
   const periods = reportingPeriods('2026-01-01', '2026-02-01', 'daily', 3);
   assert.deepEqual(periods.map((period) => period.start), ['2026-01-30', '2026-01-31', '2026-02-01']);
+});
+
+
+test('saved report definitions normalize trusted fields and reject invalid payloads', () => {
+  assert.equal(REPORT_SCHEMA_VERSION, 1);
+  assert.deepEqual(parseCreateReport({
+    name: '  Weekly P&L  ',
+    description: '  Finance review  ',
+    reportType: 'pnl',
+    visibility: 'organization',
+    datePreset: 'latest_30_days',
+  }), {
+    ok: true,
+    value: {
+      name: 'Weekly P&L',
+      description: 'Finance review',
+      reportType: 'pnl',
+      visibility: 'organization',
+      datePreset: 'latest_30_days',
+    },
+  });
+  assert.deepEqual(parseCreateReport({ name: 'Unsafe', reportType: 'physical_table' }), {
+    ok: false,
+    error: 'Choose a valid report type, period, and sharing setting',
+  });
+  assert.equal(parseCreateReport({ name: 'A'.repeat(121), reportType: 'pnl' }).ok, false);
+});
+
+test('saved report updates require UUIDs and allow only known actions', () => {
+  const id = '123e4567-e89b-42d3-a456-426614174000';
+  assert.deepEqual(parseUpdateReport({ id, isFavorite: true }), {
+    ok: true,
+    value: { id, action: 'favorite', isFavorite: true },
+  });
+  assert.deepEqual(parseUpdateReport({ id, action: 'rename', name: '  Margin watch  ', visibility: 'private' }), {
+    ok: true,
+    value: { id, action: 'rename', name: 'Margin watch', description: null, visibility: 'private' },
+  });
+  assert.equal(parseUpdateReport({ id, action: 'publish' }).ok, false);
+  assert.equal(parseUpdateReport({ id: 'not-a-uuid', action: 'archive' }).ok, false);
 });
