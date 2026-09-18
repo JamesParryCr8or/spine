@@ -45,6 +45,7 @@
 - [x] Add period-aware channel mix, top-product, customer-split, and known-cost Overview widgets.
 - [x] Add period-preserving drilldowns from Overview KPI cards, chart points, and summary widgets into their detailed reports.
 - [x] Add saved Overview widget visibility and ordering controls.
+- [x] Add timezone-aware Sales breakdowns by date, channel, new/repeat customer, and product; country and discount-code ingestion remain next.
 
 ### Active build order
 
