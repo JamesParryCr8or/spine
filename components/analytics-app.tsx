@@ -556,6 +556,7 @@ type UtmData = { hasData: boolean; currency: string; timezone: string; attributi
 function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: string; initialRange?: DrilldownContext }) {
   const finishReportRun = useReportRun(reportRunId);
   const [data, setData] = useState<UtmData | null>(null);
+  const [profitData, setProfitData] = useState<PnlData | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [source, setSource] = useState("all");
@@ -570,10 +571,25 @@ function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: string; init
     const params = new URLSearchParams({ attribution: attributionModel });
     if (fromDate) params.set("from", fromDate);
     if (toDate) params.set("to", toDate);
-    fetch(`/api/analytics/utm?${params}`).then(async (response) => response.ok ? response.json() : null).then((payload: UtmData | null) => { setData(payload); finishReportRun(payload ? "completed" : "failed", payload?.rows.length ?? null); }).catch(() => { setData(null); finishReportRun("failed", null, "UTM data could not be loaded"); }).finally(() => setLoading(false));
+    const pnlParams = new URLSearchParams();
+    if (fromDate) pnlParams.set("from", fromDate);
+    if (toDate) pnlParams.set("to", toDate);
+    Promise.all([
+      fetch(`/api/analytics/utm?${params}`).then(async (response) => response.ok ? response.json() as Promise<UtmData> : null),
+      fetch(`/api/analytics/pnl${pnlParams.size ? `?${pnlParams}` : ""}`).then(async (response) => response.ok ? response.json() as Promise<PnlData> : null),
+    ]).then(([payload, profit]) => { setData(payload); setProfitData(profit); finishReportRun(payload ? "completed" : "failed", payload?.rows.length ?? null); }).catch(() => { setData(null); setProfitData(null); finishReportRun("failed", null, "UTM data could not be loaded"); }).finally(() => setLoading(false));
   }, [attributionModel, fromDate, toDate, finishReportRun]);
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: data?.currency || "GBP", maximumFractionDigits: 0 });
-  const metrics = data ? [["Net sales", formatter.format(data.totals.sales), `${data.rows.length.toLocaleString()} normalized groups`], ["Attributed orders", data.totals.attributedOrders.toLocaleString(), `${data.totals.orders.toLocaleString()} valid orders total`], ["New-customer sales", formatter.format(data.totals.newCustomerSales), attributionModel === "last_touch" ? "Last-touch customer journey" : "First-touch customer journey"], ["Average order value", formatter.format(data.totals.averageOrderValue), `${data.totals.customers.toLocaleString()} identified customers`], ["Revenue per customer", data.totals.revenuePerCustomer === null ? "—" : formatter.format(data.totals.revenuePerCustomer), "Identified customers only"], ["Profit and ROAS", "—", "Available after campaign spend mapping"]] : [["Net sales", "£204,050", "79% of net sales"], ["Attributed orders", "319", "All valid orders shown"], ["New customer sales", "£146,920", "72% of attributed"], ["Average order value", "£640", "Across valid orders"], ["Revenue per customer", "£820", "Identified customers"], ["Profit and ROAS", "—", "Map campaign spend"]];
+  const contributionReady = Boolean(profitData?.availability.marketingSpend && profitData.availability.shippingCosts && profitData.availability.handlingCosts);
+  const metrics = data ? [
+    ["Attributed orders", data.totals.attributedOrders.toLocaleString(), `${data.totals.orders.toLocaleString()} valid orders total`],
+    ["Net sales", formatter.format(data.totals.sales), `${data.rows.length.toLocaleString()} normalized groups`],
+    ["New-customer sales", formatter.format(data.totals.newCustomerSales), attributionModel === "last_touch" ? "Last-touch customer journey" : "First-touch customer journey"],
+    ["Gross profit", profitData?.hasData ? formatter.format(profitData.metrics.grossProfit) : "—", profitData?.metrics.missingCostLines ? `${profitData.metrics.missingCostLines.toLocaleString()} lines need costs` : "Selected-period product costs"],
+    ["Contribution margin", contributionReady && profitData ? formatter.format(profitData.metrics.contributionMargin) : "—", contributionReady && profitData?.metrics.contributionMarginPercentage !== null ? `${(profitData.metrics.contributionMarginPercentage * 100).toFixed(1)}% of net product sales` : "Complete marketing, shipping and handling costs"],
+    ["Average order value", formatter.format(data.totals.averageOrderValue), `${data.totals.customers.toLocaleString()} identified customers`],
+    ["Revenue per customer", data.totals.revenuePerCustomer === null ? "—" : formatter.format(data.totals.revenuePerCustomer), "Identified customers only"],
+  ] : [["Attributed orders", "319", "All valid orders shown"], ["Net sales", "£204,050", "79% of net sales"], ["New-customer sales", "£146,920", "72% of attributed"], ["Gross profit", "—", "Add product costs"], ["Contribution margin", "—", "Complete direct costs"], ["Average order value", "£640", "Across valid orders"], ["Revenue per customer", "£820", "Identified customers"]];
   const rows = data?.hasData ? data.rows : utms.map(([source, medium, campaign, sales, orders, aov]) => ({ channel: "Attributed", source, medium, campaign, content: "—", term: "—", landingPage: "Unknown", customerType: "New", sales: Number(String(sales).replace(/[^0-9.-]/g, "")), orders: Number(orders), customers: Number(orders), newCustomerSales: 0, averageOrderValue: Number(aov.replace(/[^0-9]/g, "")), revenuePerCustomer: null }));
   const sources = [...new Set(rows.map((row) => row.source || "Unknown"))].sort();
   const mediums = [...new Set(rows.map((row) => row.medium || "Unknown"))].sort();
