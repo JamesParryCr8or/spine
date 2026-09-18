@@ -55,6 +55,7 @@
 - [x] Add a tested UTM naming normalizer and campaign URL builder that preserves existing landing-page parameters and fragments.
 - [x] Save the current UTM date range, attribution model, comparison, and dimension filters as a reusable report definition.
 - [x] Export the current UTM drilldown as a formatted XLSX workbook with numeric currency and percentage cells.
+- [x] Audit connector credential creation, rotation, deletion, and Shopify scope updates without storing secret values.
 
 ### Active build order
 
@@ -119,7 +120,7 @@ The product should answer these questions quickly:
 - [ ] Create separate development and production Supabase projects.
 - [x] Use only a publishable Supabase key in the browser; keep secret/service-role credentials server-side.
 - [x] Store third-party connector tokens in Supabase Vault behind ownership-checked server functions.
-- [ ] Add structured secret-access logging without logging secret values.
+- [x] Add structured secret-access logging without logging secret values.
 
 ### New application workspace
 
