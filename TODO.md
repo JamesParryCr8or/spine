@@ -43,6 +43,7 @@
 - [x] Add Overview date-range selection with equal-length previous-period absolute and percentage KPI comparisons.
 - [x] Add selectable daily, weekly, monthly, quarterly, and annual Overview revenue/cost/profit trends.
 - [x] Add period-aware channel mix, top-product, customer-split, and known-cost Overview widgets.
+- [x] Add period-preserving drilldowns from Overview KPI cards, chart points, and summary widgets into their detailed reports.
 
 ### Active build order
 
@@ -307,7 +308,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [x] Show percentage and absolute change against the selected comparison period.
 - [x] Add revenue, cost, and profit trend charts with selectable granularity.
 - [x] Add channel mix, top products, customer split, and cost breakdown widgets.
-- [ ] Let users drill from a KPI or chart point into the underlying report.
+- [x] Let users drill from a KPI or chart point into the underlying report, preserving the selected dashboard or chart period.
 - [ ] Add a configurable dashboard widget layout after the fixed MVP dashboard is proven.
 
 ### Income statement / P&L
