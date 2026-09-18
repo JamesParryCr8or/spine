@@ -35,6 +35,7 @@
 - [x] Add database-backed saved-report definition versions and immutable revision history.
 - [x] Clear all foreign-key index findings reported by the Supabase performance advisor.
 - [x] Track saved-report executions against their exact definition version and record truthful success/failure outcomes.
+- [x] Expose saved-report run history, sanitized failures, row counts, definition versions, and retry actions in the report library.
 
 ### Active build order
 

@@ -16,13 +16,13 @@ async function context() {
 export async function GET(request: Request) {
   const result = await context();
   if (result.error) return result.error;
-  const reportId = new URL(request.url).searchParams.get("reportId");
-  if (!reportId) return NextResponse.json({ error: "Report id is required" }, { status: 400 });
+  const parsed = parseStartReportRun({ reportId: new URL(request.url).searchParams.get("reportId") });
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
   const { data, error } = await result.supabase
     .from("saved_report_runs")
     .select("id,report_id,definition_version,status,row_count,error_message,started_at,completed_at")
     .eq("organization_id", result.organizationId)
-    .eq("report_id", reportId)
+    .eq("report_id", parsed.value.reportId)
     .order("started_at", { ascending: false })
     .limit(20);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
