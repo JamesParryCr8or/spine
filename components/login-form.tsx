@@ -18,13 +18,63 @@ export function LoginForm({
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [authMethod, setAuthMethod] = useState<"password" | "google" | "magic" | null>(null);
+  const [magicSent, setMagicSent] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
+
+  const callbackUrl = () => `${window.location.origin}/auth/confirm?next=${encodeURIComponent("/protected")}`;
+
+  const handleGoogleLogin = async () => {
+    setIsLoading(true);
+    setAuthMethod("google");
+    setError(null);
+    setMagicSent(false);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: callbackUrl() },
+      });
+      if (error) throw error;
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : "Google sign-in could not be started.");
+      setIsLoading(false);
+      setAuthMethod(null);
+    }
+  };
+
+  const handleMagicLink = async () => {
+    if (!email.trim()) {
+      setError("Enter your email address first.");
+      return;
+    }
+    setIsLoading(true);
+    setAuthMethod("magic");
+    setError(null);
+    setMagicSent(false);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email.trim(),
+        options: { emailRedirectTo: callbackUrl() },
+      });
+      if (error) throw error;
+      setMagicSent(true);
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : "We could not send a sign-in link.");
+    } finally {
+      setIsLoading(false);
+      setAuthMethod(null);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+    setAuthMethod("password");
     setError(null);
+    setMagicSent(false);
 
     try {
       const supabase = createClient();
@@ -39,6 +89,7 @@ export function LoginForm({
       setError(error instanceof Error ? error.message : "We could not sign you in. Please try again.");
     } finally {
       setIsLoading(false);
+      setAuthMethod(null);
     }
   };
 
@@ -49,6 +100,10 @@ export function LoginForm({
         <h2>Sign in to your workspace</h2>
         <p>See the complete picture behind your ecommerce performance.</p>
       </div>
+      <Button type="button" className="auth-google" disabled={isLoading} onClick={() => void handleGoogleLogin()}>
+        <span className="auth-google-mark">G</span><span>{isLoading && authMethod === "google" ? "Opening Google…" : "Continue with Google"}</span>
+      </Button>
+      <div className="auth-divider"><span>or continue with email</span></div>
       <form onSubmit={handleLogin}>
         <div className="auth-fields">
           <div className="auth-field">
@@ -86,8 +141,12 @@ export function LoginForm({
             </div>
           </div>
           {error && <p className="auth-error" role="alert">{error}</p>}
+          {magicSent && <p className="auth-success" role="status">Check your inbox for a secure sign-in link.</p>}
           <Button type="submit" className="auth-submit" disabled={isLoading}>
-            <span>{isLoading ? "Signing you in…" : "Sign in"}</span>{!isLoading&&<ArrowRight />}
+            <span>{isLoading && authMethod === "password" ? "Signing you in…" : "Sign in with password"}</span>{!(isLoading && authMethod === "password")&&<ArrowRight />}
+          </Button>
+          <Button type="button" className="auth-magic" disabled={isLoading} onClick={() => void handleMagicLink()}>
+            <Mail aria-hidden="true"/><span>{isLoading && authMethod === "magic" ? "Sending link…" : "Email me a sign-in link"}</span>
           </Button>
         </div>
         <div className="auth-signup">New to Cr8or Data? <Link href="/auth/sign-up">Create an account</Link></div>

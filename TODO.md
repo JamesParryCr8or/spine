@@ -63,6 +63,7 @@
 - [x] Add validated starter saved-report templates for income statements, channel spend, product profitability, and new-customer acquisition.
 - [x] Add blended net profit per new customer to Customer analytics with explicit completeness requirements.
 - [x] Audit the foundation checklist against the current auth, tenancy, and CI implementation and split remaining gaps precisely.
+- [x] Add Google OAuth and email magic-link login paths with PKCE callback handling and local-only redirects.
 
 ### Active build order
 
@@ -144,7 +145,8 @@ The product should answer these questions quickly:
 
 ### Authentication
 
-- [ ] Add Supabase Auth with Google and email magic-link sign-in for v1.
+- [x] Implement Google OAuth and email magic-link sign-in flows alongside password access.
+- [ ] Enable the Google provider and production redirect URLs in Supabase, then verify both flows live.
 - [x] Add sign-out, session refresh, account recovery, and protected routes.
 - [x] Create user profile records without using editable user metadata for authorization.
 - [x] Create an organization, owner membership, and initial store automatically during account onboarding.
