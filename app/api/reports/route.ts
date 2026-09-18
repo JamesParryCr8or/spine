@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { parseCreateReport, parseUpdateReport, REPORT_SCHEMA_VERSION } from "@/lib/reports/schema";
 
-const reportFields = "id,name,description,report_type,visibility,is_favorite,configuration,updated_at,created_at,archived_at";
+const reportFields = "id,name,description,report_type,visibility,is_favorite,configuration,definition_version,updated_at,created_at,archived_at";
 
 async function context() {
   const supabase = await createClient();

@@ -32,6 +32,7 @@
 - [x] Add effective-dated per-unit/per-order product shipping overrides with store-level fulfilment fallback and deploy the tenant-protected schema.
 - [x] Group dashboard reporting dates by the Shopify store timezone while retaining UTC source timestamps.
 - [x] Add a shared, versioned runtime schema for saved-report create/update payloads with regression tests.
+- [x] Add database-backed saved-report definition versions and immutable revision history.
 
 ### Active build order
 
@@ -407,6 +408,8 @@ Normalize every ad source into shared daily dimensions while retaining source-sp
 - [x] Validate saved-report definitions and updates through a shared versioned runtime schema.
 - [x] Add favourite actions; add duplicate, rename, and archive actions.
 - [ ] Record report version and last successful run.
+  - [x] Record and display the report definition version with immutable revision history.
+  - [ ] Record the last successful execution after report loading is unified behind a run lifecycle.
 - [ ] Create starter templates for P&L, daily channel spend, product profitability, new customer acquisition, and Klaviyo campaigns.
 
 ### Visual report builder
