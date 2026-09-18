@@ -557,6 +557,10 @@ function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: string; init
   const finishReportRun = useReportRun(reportRunId);
   const [data, setData] = useState<UtmData | null>(null);
   const [profitData, setProfitData] = useState<PnlData | null>(null);
+  const [comparisonData, setComparisonData] = useState<UtmData | null>(null);
+  const [profitTrends, setProfitTrends] = useState<{ current: Array<{ label: string; value: number }>; previous: Array<{ label: string; value: number }> }>({ current: [], previous: [] });
+  const [trendMetric, setTrendMetric] = useState<"sales" | "orders" | "customers" | "profit">("sales");
+  const [trendLoading, setTrendLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [source, setSource] = useState("all");
@@ -579,6 +583,40 @@ function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: string; init
       fetch(`/api/analytics/pnl${pnlParams.size ? `?${pnlParams}` : ""}`).then(async (response) => response.ok ? response.json() as Promise<PnlData> : null),
     ]).then(([payload, profit]) => { setData(payload); setProfitData(profit); finishReportRun(payload ? "completed" : "failed", payload?.rows.length ?? null); }).catch(() => { setData(null); setProfitData(null); finishReportRun("failed", null, "UTM data could not be loaded"); }).finally(() => setLoading(false));
   }, [attributionModel, fromDate, toDate, finishReportRun]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      if (!data?.period) { setComparisonData(null); setProfitTrends({ current: [], previous: [] }); return; }
+      const start = new Date(`${data.period.start}T00:00:00Z`);
+      const end = new Date(`${data.period.end}T00:00:00Z`);
+      const days = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+      const previousEnd = new Date(start); previousEnd.setUTCDate(previousEnd.getUTCDate() - 1);
+      const previousStart = new Date(previousEnd); previousStart.setUTCDate(previousStart.getUTCDate() - days + 1);
+      const previousFrom = previousStart.toISOString().slice(0, 10);
+      const previousTo = previousEnd.toISOString().slice(0, 10);
+      const currentPeriods = reportingPeriods(data.period.start, data.period.end, "monthly", 12);
+      const previousPeriods = reportingPeriods(previousFrom, previousTo, "monthly", 12);
+      setTrendLoading(true);
+      Promise.all([
+        fetch(`/api/analytics/utm?attribution=${attributionModel}&from=${previousFrom}&to=${previousTo}`, { signal: controller.signal }).then(async (response) => response.ok ? response.json() as Promise<UtmData> : null),
+        Promise.all(currentPeriods.map(async (period) => {
+          const response = await fetch(`/api/analytics/pnl?from=${period.start}&to=${period.end}`, { signal: controller.signal });
+          if (!response.ok) return { label: period.label, value: 0 };
+          const payload = await response.json() as PnlData;
+          return { label: period.label, value: payload.metrics.netProfit ?? payload.metrics.profitAfterMarketingSpend };
+        })),
+        Promise.all(previousPeriods.map(async (period) => {
+          const response = await fetch(`/api/analytics/pnl?from=${period.start}&to=${period.end}`, { signal: controller.signal });
+          if (!response.ok) return { label: period.label, value: 0 };
+          const payload = await response.json() as PnlData;
+          return { label: period.label, value: payload.metrics.netProfit ?? payload.metrics.profitAfterMarketingSpend };
+        })),
+      ]).then(([comparison, currentProfit, previousProfit]) => { setComparisonData(comparison); setProfitTrends({ current: currentProfit, previous: previousProfit }); }).catch((error) => { if (error instanceof Error && error.name !== "AbortError") { setComparisonData(null); setProfitTrends({ current: [], previous: [] }); } }).finally(() => { if (!controller.signal.aborted) setTrendLoading(false); });
+    }, 0);
+    return () => { window.clearTimeout(timeout); controller.abort(); };
+  }, [attributionModel, data?.period?.start, data?.period?.end]);
+
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: data?.currency || "GBP", maximumFractionDigits: 0 });
   const contributionReady = Boolean(profitData?.availability.marketingSpend && profitData.availability.shippingCosts && profitData.availability.handlingCosts);
   const metrics = data ? [
@@ -597,13 +635,20 @@ function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: string; init
   const landingPages = [...new Set(rows.map((row) => row.landingPage))].sort();
   const customerTypes = [...new Set(rows.map((row) => row.customerType))].sort();
   const visibleRows = rows.filter((row) => `${row.channel} ${row.source} ${row.medium} ${row.campaign} ${row.content} ${row.term} ${row.landingPage}`.toLowerCase().includes(search.trim().toLowerCase()) && (source === "all" || row.source === source) && (medium === "all" || row.medium === medium) && (campaign === "all" || row.campaign === campaign) && (landingPage === "all" || row.landingPage === landingPage) && (customerType === "all" || row.customerType === customerType));
-  const trendMaximum = Math.max(...(data?.trends.map((trend) => trend.sales) ?? []), 1);
+  const currentUtmTrends = data?.trends.slice(-12) ?? [];
+  const previousUtmTrends = comparisonData?.trends.slice(-12) ?? [];
+  const trendLabels = trendMetric === "profit" ? profitTrends.current.map((trend) => trend.label) : currentUtmTrends.map((trend) => trend.period);
+  const utmTrendValue = (trend: UtmData["trends"][number]) => trendMetric === "sales" ? trend.sales : trendMetric === "orders" ? trend.orders : trend.customers;
+  const currentTrendValues = trendMetric === "profit" ? profitTrends.current.map((trend) => trend.value) : currentUtmTrends.map(utmTrendValue);
+  const previousTrendValues = trendMetric === "profit" ? profitTrends.previous.map((trend) => trend.value) : previousUtmTrends.map(utmTrendValue);
+  const trendMaximum = Math.max(...currentTrendValues.map((value) => Math.max(value, 0)), ...previousTrendValues.map((value) => Math.max(value, 0)), 1);
+  const formatTrendValue = (value: number) => trendMetric === "sales" || trendMetric === "profit" ? formatter.format(value) : value.toLocaleString();
   const exportUtm = () => downloadCsv("utm-analysis.csv", [["Report", "UTM analysis"], ["Attribution model", attributionModel === "last_touch" ? "Last touch" : "First touch"], ["Period", data?.period ? `${data.period.start} to ${data.period.end}` : "No imported orders"], ["Timezone", data?.timezone || "UTC"], ["Currency", data?.currency || "GBP"], ["Filters", [search.trim() ? `Search: ${search.trim()}` : "", source !== "all" ? `Source: ${source}` : "", medium !== "all" ? `Medium: ${medium}` : "", campaign !== "all" ? `Campaign: ${campaign}` : "", landingPage !== "all" ? `Landing page: ${landingPage}` : "", customerType !== "all" ? `Customer type: ${customerType}` : ""].filter(Boolean).join(" · ") || "None"], ["Generated at", new Date().toISOString()], [], ["Channel", "Source", "Medium", "Campaign", "Content", "Term", "Landing page", "Customer type", "Net sales", "Orders", "Customers", "Average order value", "Revenue per customer", "New-customer sales"], ...visibleRows.map((row) => [row.channel, row.source, row.medium, row.campaign, row.content, row.term, row.landingPage, row.customerType, row.sales, row.orders, row.customers, row.averageOrderValue, row.revenuePerCustomer ?? "", row.newCustomerSales])]);
   const diagnosticItems = data ? [["No attribution record", data.diagnostics.missingAttribution], ["No UTM parameters", data.diagnostics.missingUtm], ["No landing page", data.diagnostics.missingLandingPage], ["No referrer", data.diagnostics.missingReferrer]] as const : [];
   return <>
     {loading ? <div className="data-loading">Loading Shopify attribution…</div> : data && !data.hasData ? <div className="connection-notice"><Info/><div><strong>Shopify attribution will appear after an order sync</strong><span>This report uses the selected Shopify customer journey model.</span></div></div> : null}
     <section className="metric-grid compact">{metrics.map(([label, value, hint]) => <article className="metric-card" key={label}><div className="metric-head"><span>{label}</span></div><strong>{value}</strong><div className="metric-foot"><span>{hint}</span></div></article>)}</section>
-    {data?.trends.length ? <section className="panel chart-panel"><div className="panel-head"><div><span className="eyebrow">MONTHLY TREND</span><h2>Sales and new-customer sales</h2></div><div className="legend"><span className="blue-dot"/>Net sales <span className="green-dot"/>New-customer sales</div></div><div className="chart-wrap"><div className="y-axis"><span>{formatter.format(trendMaximum)}</span><span>{formatter.format(trendMaximum / 2)}</span><span>{formatter.format(trendMaximum / 4)}</span><span>{formatter.format(0)}</span></div><div className="bar-chart">{data.trends.map((trend) => <div className="bar-group" key={trend.period} title={`${trend.orders.toLocaleString()} orders · ${trend.customers.toLocaleString()} customers`}><div className="bars"><i className="revenue" style={{height:`${trend.sales / trendMaximum * 100}%`}}/><i className="profit" style={{height:`${trend.newCustomerSales / trendMaximum * 100}%`}}/></div><span>{trend.period}</span></div>)}</div></div></section> : null}
+    {trendLabels.length ? <section className="panel chart-panel"><div className="panel-head"><div><span className="eyebrow">MONTHLY TREND</span><h2>{trendMetric === "sales" ? "Net sales" : trendMetric === "orders" ? "Orders" : trendMetric === "customers" ? "Customers" : "Profit"} versus previous period</h2></div><div className="feature-actions"><div className="legend"><span className="blue-dot"/>Current <span className="green-dot"/>Previous period</div><select aria-label="UTM trend metric" value={trendMetric} onChange={(event) => setTrendMetric(event.target.value as "sales" | "orders" | "customers" | "profit")}><option value="sales">Net sales</option><option value="orders">Orders</option><option value="customers">Customers</option><option value="profit">Profit</option></select></div></div>{trendLoading ? <div className="data-loading">Calculating period comparison…</div> : <div className="chart-wrap"><div className="y-axis"><span>{formatTrendValue(trendMaximum)}</span><span>{formatTrendValue(trendMaximum / 2)}</span><span>{formatTrendValue(trendMaximum / 4)}</span><span>{formatTrendValue(0)}</span></div><div className="bar-chart">{trendLabels.map((label, index) => <div className="bar-group" key={`${label}-${index}`} title={`Current ${formatTrendValue(currentTrendValues[index] ?? 0)} · Previous ${formatTrendValue(previousTrendValues[index] ?? 0)}`}><div className="bars"><i className="revenue" style={{height:`${Math.max(currentTrendValues[index] ?? 0, 0) / trendMaximum * 100}%`}}/><i className="profit" style={{height:`${Math.max(previousTrendValues[index] ?? 0, 0) / trendMaximum * 100}%`}}/></div><span>{label}</span></div>)}</div></div>}</section> : null}
     {data && diagnosticItems.some(([, diagnostic]) => diagnostic.orders > 0) ? <section className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">ATTRIBUTION COVERAGE</span><h2>Unattributed-sales diagnostic</h2></div><span className="report-note">An order can appear in more than one gap when Shopify did not record several journey fields.</span></div><div className="report-summary">{diagnosticItems.map(([label, diagnostic]) => <div key={label}><span>{label}</span><strong>{diagnostic.orders.toLocaleString()} orders</strong><small>{formatter.format(diagnostic.sales)} net sales</small></div>)}</div></section> : null}
     <section className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">{attributionModel === "last_touch" ? "LAST-TOUCH ATTRIBUTION" : "FIRST-TOUCH ATTRIBUTION"}</span><h2>Sales by UTM</h2></div><div className="feature-actions"><span className="report-note">{attributionModel === "last_touch" ? "Each order is represented once by its final Shopify-tracked visit." : "Each order is represented once by its first Shopify-tracked visit."}</span><button className="export-button" disabled={!rows.length} onClick={exportUtm}><Download/> Export CSV</button></div></div>
       <div className="filter-row"><div className="search"><Search/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search UTM dimensions..."/></div><select aria-label="UTM source" value={source} onChange={(event) => setSource(event.target.value)}><option value="all">All sources</option>{sources.map((value) => <option key={value} value={value}>{value}</option>)}</select><select aria-label="UTM medium" value={medium} onChange={(event) => setMedium(event.target.value)}><option value="all">All media</option>{mediums.map((value) => <option key={value} value={value}>{value}</option>)}</select><select aria-label="UTM campaign" value={campaign} onChange={(event) => setCampaign(event.target.value)}><option value="all">All campaigns</option>{campaigns.map((value) => <option key={value} value={value}>{value}</option>)}</select><select aria-label="Landing page" value={landingPage} onChange={(event) => setLandingPage(event.target.value)}><option value="all">All landing pages</option>{landingPages.map((value) => <option key={value} value={value}>{value}</option>)}</select><select aria-label="Customer type" value={customerType} onChange={(event) => setCustomerType(event.target.value)}><option value="all">All customers</option>{customerTypes.map((value) => <option key={value} value={value}>{value}</option>)}</select><select aria-label="Attribution model" value={attributionModel} onChange={(event) => setAttributionModel(event.target.value as "first_touch" | "last_touch")}><option value="last_touch">Last-touch attribution</option><option value="first_touch">First-touch attribution</option></select><label>From<input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)}/></label><label>To<input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)}/></label>{(fromDate || toDate) && <button onClick={() => { setFromDate(""); setToDate(""); }}>All imported data</button>}</div>

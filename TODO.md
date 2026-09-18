@@ -48,6 +48,7 @@
 - [x] Add timezone-aware Sales breakdowns by date, channel, new/repeat customer, and product.
 - [x] Import Shopify order country and discount codes, then expose both as Sales breakdown dimensions.
 - [x] Complete the UTM KPI layer with selected-period gross profit and contribution margin from the reconciled P&L.
+- [x] Add selectable monthly UTM sales, order, customer, and profit trends with previous-period overlays.
 
 ### Active build order
 
@@ -338,7 +339,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 
 - [x] Build a dedicated UTM analytics screen using Shopify order and customer-journey attribution data.
 - [x] Add KPI cards for attributed orders, net sales, new-customer sales, gross profit, contribution margin, AOV, and revenue per customer.
-- [ ] Add trend charts for sales, orders, customers, and profit with period comparison.
+- [x] Add trend charts for sales, orders, customers, and profit with equal-length previous-period comparison.
 - [x] Add a drilldown table for source → medium → campaign → content → term.
 - [x] Let users switch between available first-touch and last-touch attribution views and explain the selected model.
 - [x] Preserve imported raw UTM values while creating report-time normalized values for case, whitespace, common aliases, and missing parameters.
