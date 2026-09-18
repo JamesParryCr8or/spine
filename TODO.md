@@ -45,7 +45,8 @@
 - [x] Add period-aware channel mix, top-product, customer-split, and known-cost Overview widgets.
 - [x] Add period-preserving drilldowns from Overview KPI cards, chart points, and summary widgets into their detailed reports.
 - [x] Add saved Overview widget visibility and ordering controls.
-- [x] Add timezone-aware Sales breakdowns by date, channel, new/repeat customer, and product; country and discount-code ingestion remain next.
+- [x] Add timezone-aware Sales breakdowns by date, channel, new/repeat customer, and product.
+- [x] Import Shopify order country and discount codes, then expose both as Sales breakdown dimensions.
 
 ### Active build order
 
@@ -327,7 +328,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 
 ### Sales and orders
 
-- [ ] Add sales breakdown by date, country, channel, discount code, new/repeat status, and product.
+- [x] Add sales breakdown by date, country, channel, discount code, new/repeat status, and product.
 - [x] Add a searchable order table with financial-status and refund filters.
 - [x] Add an order detail drawer showing source totals, product costs, refunds, and gross profit.
 - [ ] Add saved column layouts and filters later.

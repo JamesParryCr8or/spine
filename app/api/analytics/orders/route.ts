@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 
 type OrderRow = {
   id: string; customer_id: string | null; order_name: string; processed_at: string | null;
-  financial_status: string | null; fulfillment_status: string | null; source_name: string | null;
+  financial_status: string | null; fulfillment_status: string | null; source_name: string | null; country_code: string | null; discount_codes: string[];
   net_product_sales: string | number; shipping_revenue: string | number; total_sales: string | number; currency: string;
 };
 type BreakdownRow = { label: string; orders: number; units: number; sales: number };
@@ -53,7 +53,7 @@ export async function GET(request: Request) {
   for (let offset = 0; ; offset += pageSize) {
     let query = supabase
       .from("shopify_orders")
-      .select("id,customer_id,order_name,processed_at,financial_status,fulfillment_status,source_name,net_product_sales,shipping_revenue,total_sales,currency")
+      .select("id,customer_id,order_name,processed_at,financial_status,fulfillment_status,source_name,country_code,discount_codes,net_product_sales,shipping_revenue,total_sales,currency")
       .eq("store_id", store.id)
       .eq("currency", store.currency)
       .eq("test", false);
@@ -89,8 +89,8 @@ export async function GET(request: Request) {
   for (const line of lineRows) unitsByOrder.set(line.order_id, (unitsByOrder.get(line.order_id) ?? 0) + line.current_quantity);
   const customerIndexByOrder = new Map(attributionRows.map((row) => [row.order_id, row.customer_order_index]));
 
-  const dateMap = new Map<string, BreakdownRow>(), channelMap = new Map<string, BreakdownRow>(), customerMap = new Map<string, BreakdownRow>(), productMap = new Map<string, BreakdownRow>();
-  const dateSeen = new Map<string, Set<string>>(), channelSeen = new Map<string, Set<string>>(), customerSeen = new Map<string, Set<string>>(), productSeen = new Map<string, Set<string>>();
+  const dateMap = new Map<string, BreakdownRow>(), channelMap = new Map<string, BreakdownRow>(), customerMap = new Map<string, BreakdownRow>(), productMap = new Map<string, BreakdownRow>(), countryMap = new Map<string, BreakdownRow>(), discountMap = new Map<string, BreakdownRow>();
+  const dateSeen = new Map<string, Set<string>>(), channelSeen = new Map<string, Set<string>>(), customerSeen = new Map<string, Set<string>>(), productSeen = new Map<string, Set<string>>(), countrySeen = new Map<string, Set<string>>(), discountSeen = new Map<string, Set<string>>();
   for (const order of orderRows) {
     const units = unitsByOrder.get(order.id) ?? 0;
     const sales = Number(order.net_product_sales) - (refundsByOrder.get(order.id) ?? 0);
@@ -101,6 +101,9 @@ export async function GET(request: Request) {
     addBreakdown(dateMap, date, order.id, units, sales, dateSeen);
     addBreakdown(channelMap, channel, order.id, units, sales, channelSeen);
     addBreakdown(customerMap, customerType, order.id, units, sales, customerSeen);
+    addBreakdown(countryMap, order.country_code || "Unknown country", order.id, units, sales, countrySeen);
+    const discountCodes = order.discount_codes.length ? order.discount_codes : ["No discount code"];
+    for (const code of discountCodes) addBreakdown(discountMap, code, order.id, units / discountCodes.length, sales / discountCodes.length, discountSeen);
   }
   for (const line of lineRows) {
     const label = line.variant_title ? `${line.title} · ${line.variant_title}` : line.title;
@@ -118,6 +121,8 @@ export async function GET(request: Request) {
       date: sorted(dateMap, true),
       channel: sorted(channelMap),
       customerType: sorted(customerMap),
+      country: sorted(countryMap),
+      discountCode: sorted(discountMap),
       product: sorted(productMap).slice(0, 100),
     },
     orders: orderRows.slice(0, 250).map((order) => ({ ...order, refunded: refundsByOrder.get(order.id) ?? 0 })),
