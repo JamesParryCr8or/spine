@@ -12,6 +12,8 @@ type MetaAccount = {
 type MetaInsight = {
   account_id?: string;
   account_name?: string;
+  campaign_id?: string;
+  campaign_name?: string;
   date_start?: string;
   date_stop?: string;
   spend?: string;
@@ -50,9 +52,9 @@ async function importMetaInsights({ supabase, userId, account, accessToken, look
   since.setUTCMonth(since.getUTCMonth() - lookbackMonths);
   const range = { since: since.toISOString().slice(0, 10), until: until.toISOString().slice(0, 10) };
   const params = new URLSearchParams({
-    level: "account",
+    level: "campaign",
     time_increment: "1",
-    fields: "account_id,account_name,date_start,date_stop,spend,impressions,clicks",
+    fields: "account_id,account_name,campaign_id,campaign_name,date_start,date_stop,spend,impressions,clicks",
     time_range: JSON.stringify(range),
     limit: "1000",
   });
@@ -67,13 +69,15 @@ async function importMetaInsights({ supabase, userId, account, accessToken, look
   }
   if (next) throw new Error("Meta returned more reporting pages than Spine can safely import in one run. Please reconnect with a token limited to the reporting period you need.");
 
-  const rows = insights
-    .filter((insight) => insight.date_start && insight.date_stop)
+  const campaignRows = insights
+    .filter((insight) => insight.date_start && insight.date_stop && insight.campaign_id && insight.campaign_name)
     .map((insight) => ({
       organization_id: membership.organization_id,
       store_id: store.id,
       account_id: insight.account_id ?? account.id,
       account_name: insight.account_name ?? account.name ?? null,
+      campaign_id: insight.campaign_id!,
+      campaign_name: insight.campaign_name!,
       date_start: insight.date_start!,
       date_stop: insight.date_stop!,
       spend: numeric(insight.spend),
@@ -82,11 +86,27 @@ async function importMetaInsights({ supabase, userId, account, accessToken, look
       currency: account.currency ?? store.currency,
       synced_at: new Date().toISOString(),
     }));
+  const accountDays = new Map<string, (typeof campaignRows)[number]>();
+  for (const row of campaignRows) {
+    const key = `${row.account_id}\u0000${row.date_start}`;
+    const current = accountDays.get(key);
+    if (current) {
+      current.spend += row.spend;
+      current.impressions += row.impressions;
+      current.clicks += row.clicks;
+      if (row.date_stop > current.date_stop) current.date_stop = row.date_stop;
+    } else accountDays.set(key, { ...row });
+  }
+  const rows = [...accountDays.values()].map((row) => ({ organization_id: row.organization_id, store_id: row.store_id, account_id: row.account_id, account_name: row.account_name, date_start: row.date_start, date_stop: row.date_stop, spend: row.spend, impressions: row.impressions, clicks: row.clicks, currency: row.currency, synced_at: row.synced_at }));
+  for (let start = 0; start < campaignRows.length; start += 250) {
+    const { error } = await supabase.from("meta_campaign_insights_daily").upsert(campaignRows.slice(start, start + 250), { onConflict: "store_id,account_id,campaign_id,date_start" });
+    if (error) throw new Error(error.message);
+  }
   for (let start = 0; start < rows.length; start += 250) {
     const { error } = await supabase.from("meta_ad_insights_daily").upsert(rows.slice(start, start + 250), { onConflict: "store_id,account_id,date_start" });
     if (error) throw new Error(error.message);
   }
-  return { importedDays: rows.length, range, currency: account.currency ?? store.currency };
+  return { importedDays: rows.length, importedCampaignDays: campaignRows.length, range, currency: account.currency ?? store.currency };
 }
 
 export async function GET() {
@@ -106,8 +126,11 @@ export async function GET() {
     if (membership) {
       const { data: store } = await supabase.from("stores").select("id").eq("organization_id", membership.organization_id).limit(1).maybeSingle();
       if (store) {
-        const { data: latest, count } = await supabase.from("meta_ad_insights_daily").select("date_start,synced_at", { count: "exact" }).eq("store_id", store.id).order("date_start", { ascending: false }).limit(1);
-        sync = { importedDays: count ?? 0, latestDate: latest?.[0]?.date_start ?? null, syncedAt: latest?.[0]?.synced_at ?? null };
+        const [{ data: latest, count }, { count: campaignDays }] = await Promise.all([
+          supabase.from("meta_ad_insights_daily").select("date_start,synced_at", { count: "exact" }).eq("store_id", store.id).order("date_start", { ascending: false }).limit(1),
+          supabase.from("meta_campaign_insights_daily").select("id", { count: "exact", head: true }).eq("store_id", store.id),
+        ]);
+        sync = { importedDays: count ?? 0, importedCampaignDays: campaignDays ?? 0, latestDate: latest?.[0]?.date_start ?? null, syncedAt: latest?.[0]?.synced_at ?? null };
       }
     }
   }

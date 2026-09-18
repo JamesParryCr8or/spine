@@ -51,6 +51,7 @@
 - [x] Add selectable monthly UTM sales, order, customer, and profit trends with previous-period overlays.
 - [x] Add previous-period/year, landing-page, country, product, and customer-type UTM filters.
 - [x] Add exact refunds and effective-dated COGS plus reconciled shared-cost allocations to every UTM group.
+- [x] Import campaign-level Meta spend, map campaigns to normalized UTM groups with tenant-protected settings, and calculate mapped ROAS, MER, CAC, and profit.
 
 ### Active build order
 
@@ -349,8 +350,9 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [x] Add filters for comparison period, landing page, country, product, and new/repeat customer.
 - [x] Show revenue, refunds, COGS, marketing cost, contribution profit, AOV, and customer mix for every UTM grouping.
 - [x] Prevent order revenue from being counted more than once by selecting one model-specific attribution record per order and aggregating from the valid-order set.
-- [ ] Add a mapping interface to connect UTM campaigns to Meta/Google/custom spend when names do not match exactly.
-- [ ] Calculate ROAS, MER, CAC, and profit after spend is mapped; label metrics unavailable without traffic or spend data.
+- [x] Add a mapping interface to connect imported Meta campaigns to UTM groups when names do not match exactly.
+- [ ] Extend campaign mapping to Google Ads and custom spend sources after those connectors are available.
+- [x] Calculate ROAS, MER, CAC, and profit after Meta spend is mapped; label metrics unavailable without traffic, spend, or required cost data.
 - [x] Add an unattributed-sales diagnostic showing orders missing attribution records, UTMs, landing pages, or referrers.
 - [ ] Allow users to save the UTM view as a report and export the current drilldown to CSV, XLSX, or Google Sheets.
 - [ ] Add optional UTM naming rules and a campaign URL builder after the analysis workflow is stable.

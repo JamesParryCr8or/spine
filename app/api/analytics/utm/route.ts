@@ -5,13 +5,15 @@ import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { normalizeAttribution } from "@/lib/analytics/utm-attribution";
 import { createClient } from "@/lib/supabase/server";
 import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
-import { convertDatedAmount, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
+import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 
 type Order = { id: string; customer_id: string | null; net_product_sales: string; processed_at: string | null; currency: string; country_code: string | null; exchange_rate: number };
 type Line = { order_id: string; title: string; variant_title: string | null; variant_gid: string | null; sku: string | null; current_quantity: number };
 type Variant = { id: string; shopify_gid: string; sku: string | null; shopify_unit_cost: string | null };
 type Refund = { order_id: string; total_refunded: string };
 type Attribution = { order_id: string; source: string | null; utm_source: string | null; utm_medium: string | null; utm_campaign: string | null; utm_content: string | null; utm_term: string | null; landing_page: string | null; referrer_url: string | null; customer_order_index: number | null };
+type CampaignMapping = { external_campaign_id: string; utm_source: string; utm_medium: string; utm_campaign: string };
+type CampaignInsight = { campaign_id: string; date_start: string; spend: string; currency: string };
 type Diagnostic = { orders: number; sales: number };
 
 const chunks = <T,>(items: T[], size: number) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, index * size + size));
@@ -152,7 +154,49 @@ export async function GET(request: Request) {
     if (!attribution.referrer_url?.trim()) { diagnostics.missingReferrer.orders += 1; diagnostics.missingReferrer.sales += sales; }
   }
 
-  const rows = [...groups.values()].map(({ customerIds, ...group }) => ({ ...group, customers: customerIds.size, revenuePerCustomer: customerIds.size ? group.sales / customerIds.size : null, averageOrderValue: group.orders ? group.sales / group.orders : 0 })).sort((left, right) => right.sales - left.sales);
+  const rangeStart = filteredOrderRows[0]?.processed_at?.slice(0, 10) ?? null;
+  const rangeEnd = filteredOrderRows.at(-1)?.processed_at?.slice(0, 10) ?? null;
+  const mappingQuery = supabase.from("campaign_mappings").select("external_campaign_id,utm_source,utm_medium,utm_campaign").eq("store_id", store.id).eq("platform", "meta");
+  let insightQuery = supabase.from("meta_campaign_insights_daily").select("campaign_id,date_start,spend,currency").eq("store_id", store.id);
+  if (rangeStart) insightQuery = insightQuery.gte("date_start", rangeStart);
+  if (rangeEnd) insightQuery = insightQuery.lte("date_start", rangeEnd);
+  const [mappingResult, insightResult] = await Promise.all([mappingQuery, insightQuery]);
+  const mappingError = mappingResult.error ?? insightResult.error;
+  if (mappingError) return NextResponse.json({ error: mappingError.message }, { status: 500 });
+  const mappingByCampaign = new Map(((mappingResult.data ?? []) as CampaignMapping[]).map((mapping) => [mapping.external_campaign_id, mapping]));
+  const campaignSpendCoverage = createCurrencyConversionCoverage(store.currency);
+  const spendByTarget = new Map<string, number>();
+  let mappedSpend = 0;
+  let unmappedSpend = 0;
+  const mappedCampaigns = new Set<string>();
+  const importedCampaigns = new Set<string>();
+  for (const insight of (insightResult.data ?? []) as CampaignInsight[]) {
+    importedCampaigns.add(insight.campaign_id);
+    const exchangeRate = resolveDatedExchangeRate(exchangeRates, insight.currency, store.currency, insight.date_start);
+    if (!campaignSpendCoverage.include(insight.currency, exchangeRate)) continue;
+    const spend = convertDatedAmount(monetary(insight.spend), exchangeRate ?? 1, store.currency);
+    const mapping = mappingByCampaign.get(insight.campaign_id);
+    if (!mapping) { unmappedSpend += spend; continue; }
+    const target = [mapping.utm_source.trim().toLowerCase(), mapping.utm_medium.trim().toLowerCase(), mapping.utm_campaign.trim().toLowerCase()].join("\u0000");
+    spendByTarget.set(target, (spendByTarget.get(target) ?? 0) + spend);
+    mappedSpend += spend;
+    mappedCampaigns.add(insight.campaign_id);
+  }
+  const baseRows = [...groups.values()].map(({ customerIds, ...group }) => ({ ...group, customers: customerIds.size, revenuePerCustomer: customerIds.size ? group.sales / customerIds.size : null, averageOrderValue: group.orders ? group.sales / group.orders : 0 }));
+  const salesByTarget = new Map<string, number>();
+  for (const row of baseRows) {
+    const target = [row.source.trim().toLowerCase(), row.medium.trim().toLowerCase(), row.campaign.trim().toLowerCase()].join("\u0000");
+    salesByTarget.set(target, (salesByTarget.get(target) ?? 0) + Math.max(row.sales - row.refunds, 0));
+  }
+  let allocatedSpend = 0;
+  const rows = baseRows.map((row) => {
+    const target = [row.source.trim().toLowerCase(), row.medium.trim().toLowerCase(), row.campaign.trim().toLowerCase()].join("\u0000");
+    const targetSpend = spendByTarget.get(target);
+    const targetSales = salesByTarget.get(target) ?? 0;
+    const marketingCost = targetSpend === undefined ? null : targetSales > 0 ? targetSpend * Math.max(row.sales - row.refunds, 0) / targetSales : 0;
+    if (marketingCost !== null) allocatedSpend += marketingCost;
+    return { ...row, marketingCost };
+  }).sort((left, right) => right.sales - left.sales);
   const identifiedCustomers = new Set(filteredOrderRows.flatMap((order) => order.customer_id ? [order.customer_id] : []));
   const totals = rows.reduce((total, group) => ({ sales: total.sales + group.sales, refunds: total.refunds + group.refunds, cogs: total.cogs + group.cogs, missingCostUnits: total.missingCostUnits + group.missingCostUnits, orders: total.orders + group.orders, newCustomerSales: total.newCustomerSales + group.newCustomerSales }), { sales: 0, refunds: 0, cogs: 0, missingCostUnits: 0, orders: 0, newCustomerSales: 0 });
   return NextResponse.json({
@@ -162,6 +206,7 @@ export async function GET(request: Request) {
     currencyCoverage: currencyCoverage.summary(),
     attributionModel,
     filterOptions,
+    mappingCoverage: { importedCampaigns: importedCampaigns.size, mappedCampaigns: mappedCampaigns.size, mappedSpend, allocatedSpend, unmappedSpend, currencyCoverage: campaignSpendCoverage.summary() },
     period: filteredOrderRows.length ? { start: filteredOrderRows[0].processed_at?.slice(0, 10), end: filteredOrderRows.at(-1)?.processed_at?.slice(0, 10) } : null,
     totals: { ...totals, attributedOrders: filteredOrderRows.length - diagnostics.missingAttribution.orders, customers: identifiedCustomers.size, averageOrderValue: totals.orders ? totals.sales / totals.orders : 0, revenuePerCustomer: identifiedCustomers.size ? totals.sales / identifiedCustomers.size : null },
     diagnostics,
