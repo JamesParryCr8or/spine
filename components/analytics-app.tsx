@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { reportingPeriods, type ReportingGranularity, type ReportingPeriod } from "@/lib/analytics/reporting-periods";
 import {
   ArrowDownRight, ArrowUpRight, BarChart3, CalendarDays, ChevronDown,
   CircleDollarSign, Database, Download, Eye, EyeOff, ExternalLink, FileBarChart, Info, KeyRound, LayoutDashboard,
@@ -172,6 +173,8 @@ type PnlData = {
   availability: { marketingSpend: boolean; transactionFees: boolean; shippingCosts: boolean; handlingCosts: boolean; operatingExpenses: boolean; netProfit: boolean };
   period: { start: string; end: string } | null;
 };
+type PnlPeriodData = { period: ReportingPeriod; data: PnlData };
+type PnlRow = { section: string; label: string; value: (data: PnlData) => string };
 
 function ProfitLoss({ savedPreset }: { savedPreset?: "all_imported" | "latest_30_days" | "latest_90_days" }) {
   const [pnl, setPnl] = useState<PnlData | null>(null);
@@ -180,6 +183,12 @@ function ProfitLoss({ savedPreset }: { savedPreset?: "all_imported" | "latest_30
   const [loading, setLoading] = useState(true);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [granularity, setGranularity] = useState<ReportingGranularity>("monthly");
+  const [periodData, setPeriodData] = useState<PnlPeriodData[]>([]);
+  const [periodLoading, setPeriodLoading] = useState(false);
+  const [viewMode, setViewMode] = useState<"table" | "chart">("table");
+  const [showComparison, setShowComparison] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const appliedSavedPreset = useRef<string | null>(null);
   useEffect(() => {
     const params = new URLSearchParams();
@@ -223,6 +232,21 @@ function ProfitLoss({ savedPreset }: { savedPreset?: "all_imported" | "latest_30
     return () => window.clearTimeout(timeout);
   }, [savedPreset, pnl?.period?.end]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      if (!pnl?.period || !pnl.hasData) { setPeriodData([]); return; }
+      const periods = reportingPeriods(pnl.period.start, pnl.period.end, granularity, 12);
+      setPeriodLoading(true);
+      Promise.all(periods.map(async (period) => {
+        if (period.start === pnl.period?.start && period.end === pnl.period?.end) return { period, data: pnl };
+        const response = await fetch("/api/analytics/pnl?from=" + period.start + "&to=" + period.end, { signal: controller.signal });
+        return response.ok ? { period, data: await response.json() as PnlData } : null;
+      })).then((results) => setPeriodData(results.filter((result): result is PnlPeriodData => result !== null))).catch((error) => { if (error instanceof Error && error.name !== "AbortError") setPeriodData([]); }).finally(() => { if (!controller.signal.aborted) setPeriodLoading(false); });
+    }, 0);
+    return () => { window.clearTimeout(timeout); controller.abort(); };
+  }, [granularity, pnl]);
+
   const hasLiveData = Boolean(pnl?.hasData);
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: pnl?.currency || "GBP", maximumFractionDigits: 0 });
   const signed = (amount: number) => amount < 0 ? `-${formatter.format(Math.abs(amount))}` : formatter.format(amount);
@@ -253,6 +277,35 @@ function ProfitLoss({ savedPreset }: { savedPreset?: "all_imported" | "latest_30
     ["Contribution margin", pnl.availability.marketingSpend && pnl.availability.shippingCosts && pnl.availability.handlingCosts ? signed(pnl.metrics.contributionMargin) : "Add marketing, shipping, and handling costs"],
     ["Net profit", pnl.availability.netProfit && pnl.metrics.netProfit !== null ? signed(pnl.metrics.netProfit) : "Complete cost coverage to calculate"],
   ] : demoRows;
+  const sections = ["Sales", "Product costs", "Marketing", "Transaction costs", "Shipping and handling", "Custom expenses", "Contribution and net profit"];
+  const pnlRows: PnlRow[] = [
+    { section: "Sales", label: "Gross sales", value: (data) => signed(data.metrics.grossSales) },
+    { section: "Sales", label: "Discounts", value: (data) => signed(-data.metrics.discounts) },
+    { section: "Sales", label: "Returns and refunds", value: (data) => signed(-data.metrics.refunds) },
+    { section: "Sales", label: "Net product sales", value: (data) => signed(data.metrics.netProductSales - data.metrics.refunds) },
+    { section: "Sales", label: "Shipping revenue", value: (data) => signed(data.metrics.shippingRevenue) },
+    { section: "Sales", label: "Total sales", value: (data) => signed(data.metrics.totalSales) },
+    { section: "Sales", label: "Tax collected (excluded)", value: (data) => signed(data.metrics.tax) },
+    { section: "Sales", label: "Duties collected (excluded)", value: (data) => signed(data.metrics.duties) },
+    { section: "Product costs", label: "Product COGS", value: (data) => signed(-data.metrics.cogs) },
+    { section: "Product costs", label: "Gross profit", value: (data) => signed(data.metrics.grossProfit) },
+    { section: "Marketing", label: "Meta Ads marketing spend", value: (data) => data.availability.marketingSpend ? signed(-data.metrics.marketingSpend) : "Not imported" },
+    { section: "Transaction costs", label: "Shopify payment fees", value: (data) => data.availability.transactionFees ? signed(-data.metrics.transactionFees) : "Not available" },
+    { section: "Shipping and handling", label: "Store fulfilment fallback", value: (data) => signed(-data.metrics.shippingFallbackCosts) },
+    { section: "Shipping and handling", label: "Variant shipping overrides", value: (data) => signed(-data.metrics.variantShippingCosts) },
+    { section: "Shipping and handling", label: "Merchant shipping and fulfilment", value: (data) => data.availability.shippingCosts ? signed(-data.metrics.merchantShippingCosts) : "Coverage needed" },
+    { section: "Shipping and handling", label: "Handling and pick/pack", value: (data) => data.availability.handlingCosts ? signed(-data.metrics.handlingCosts) : "Coverage needed" },
+    { section: "Custom expenses", label: "Fixed operating costs", value: (data) => signed(-data.metrics.fixedOperatingExpenses) },
+    { section: "Custom expenses", label: "Variable operating costs", value: (data) => signed(-data.metrics.variableOperatingExpenses) },
+    { section: "Custom expenses", label: "Operating expenses", value: (data) => signed(-data.metrics.operatingExpenses) },
+    { section: "Contribution and net profit", label: "Profit after known costs", value: (data) => signed(data.metrics.profitAfterKnownCosts) },
+    { section: "Contribution and net profit", label: "Contribution margin before shipping", value: (data) => data.availability.marketingSpend ? signed(data.metrics.contributionMarginBeforeShipping) : "Marketing needed" },
+    { section: "Contribution and net profit", label: "Contribution margin", value: (data) => data.availability.marketingSpend && data.availability.shippingCosts && data.availability.handlingCosts ? signed(data.metrics.contributionMargin) : "Coverage needed" },
+    { section: "Contribution and net profit", label: "Net profit", value: (data) => data.availability.netProfit && data.metrics.netProfit !== null ? signed(data.metrics.netProfit) : "Coverage needed" },
+  ];
+  const displayPeriods: PnlPeriodData[] = periodData.length ? periodData : pnl?.period ? [{ period: { ...pnl.period, label: pnl.period.start + " to " + pnl.period.end }, data: pnl }] : [];
+  const displayedColumns = showComparison && comparison?.hasData ? [...displayPeriods, { period: { start: comparison.period?.start ?? "", end: comparison.period?.end ?? "", label: "Previous period" }, data: comparison }] : displayPeriods;
+  const chartMaximum = Math.max(...displayPeriods.flatMap(({ data }) => [Math.abs(data.metrics.netProductSales - data.metrics.refunds), Math.abs(data.metrics.grossProfit), Math.abs(data.metrics.netProfit ?? 0)]), 1);
   const summary = pnl ? [
     ["NET PRODUCT SALES", formatter.format(pnl.metrics.netProductSales - pnl.metrics.refunds), `${pnl.metrics.orders.toLocaleString()} orders`],
     ["GROSS PROFIT", formatter.format(pnl.metrics.grossProfit), pnl.metrics.grossMargin === null ? "Cost coverage needed" : `${(pnl.metrics.grossMargin * 100).toFixed(1)}% margin`],
@@ -274,14 +327,20 @@ function ProfitLoss({ savedPreset }: { savedPreset?: "all_imported" | "latest_30
 
   const exportPnl = () => {
     if (!pnl) return;
+    const visibleRows = sections.flatMap((section) => collapsedSections.has(section) ? [] : [
+      [section, ...displayedColumns.map(() => "")],
+      ...pnlRows.filter((row) => row.section === section).map((row) => [row.label, ...displayedColumns.map((column) => row.value(column.data))]),
+    ]);
     downloadCsv("profit-and-loss.csv", [
       ["Report", "Profit & Loss"],
-      ["Period", pnl.period ? `${pnl.period.start} to ${pnl.period.end}` : "No imported orders"],
+      ["Period", pnl.period ? pnl.period.start + " to " + pnl.period.end : "No imported orders"],
+      ["Granularity", granularity],
+      ["Comparison overlay", showComparison ? "Previous period" : "Off"],
       ["Currency", pnl.currency],
       ["Generated at", new Date().toISOString()],
       [],
-      ["Metric", "Amount"],
-      ...liveRows.map(([label, value]) => [label, value]),
+      ["Metric", ...displayedColumns.map((column) => column.period.label)],
+      ...visibleRows,
     ]);
   };
 
@@ -292,6 +351,33 @@ function ProfitLoss({ savedPreset }: { savedPreset?: "all_imported" | "latest_30
     const first = new Date(last); first.setUTCDate(first.getUTCDate() - days + 1);
     setFromDate(first.toISOString().slice(0, 10)); setToDate(end);
   };
+
+  const toggleSection = (section: string) => setCollapsedSections((current) => {
+    const next = new Set(current);
+    if (next.has(section)) next.delete(section); else next.add(section);
+    return next;
+  });
+
+  if (pnl && (viewMode === "table" || viewMode === "chart")) return <>
+    <section className="filter-row pnl-period">
+      <label>From<input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></label>
+      <label>To<input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} /></label>
+      <select aria-label="P&L granularity" value={granularity} onChange={(event) => setGranularity(event.target.value as ReportingGranularity)}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select>
+      <div className="segmented"><button className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>Table</button><button className={viewMode === "chart" ? "active" : ""} onClick={() => setViewMode("chart")}>Chart</button></div>
+      <label className="comparison-toggle"><input type="checkbox" checked={showComparison} onChange={(event) => setShowComparison(event.target.checked)}/> Previous period</label>
+      <button disabled={!pnl.period} onClick={() => applyLatestDays(30)}>Latest 30 days</button><button disabled={!pnl.period} onClick={() => applyLatestDays(90)}>Latest 90 days</button>
+      {(fromDate || toDate) && <button onClick={() => { setFromDate(""); setToDate(""); }}>All imported data</button>}
+    </section>
+    {loading || periodLoading ? <div className="data-loading">Calculating reconciled periods…</div> : null}
+    {!pnl.hasData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to build your income statement</strong><span>Your period views will populate after the first sync.</span></div></div> : null}
+    {pnl.hasData ? <div className="connection-notice"><Info/><div><strong>{reconciliationIssues.length ? "Reconciliation status: provisional" : "Reconciliation status: complete"}</strong><span>{reconciliationIssues.length ? reconciliationIssues.join(" · ") : "All required cost inputs are covered for this period."}</span></div></div> : null}
+    {pnl.hasData ? <><div className="report-export"><button className="export-button" onClick={exportPnl}><Download/> Export visible P&amp;L CSV</button></div><details className="metric-dictionary"><summary>Metric definitions</summary><dl><div><dt>Total sales</dt><dd>Net product sales plus customer shipping revenue. Tax and duties are shown separately.</dd></div><div><dt>Gross profit</dt><dd>Net product sales after refunds, less effective-dated product costs.</dd></div><div><dt>Net profit</dt><dd>Available after marketing, shipping, handling, product-cost, and operating-cost coverage is complete.</dd></div></dl></details></> : null}
+    <section className="panel report-panel"><div className="report-summary">{summary.map(([label, value, hint]) => <div key={label}><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>)}</div>
+      {viewMode === "chart" && displayPeriods.length ? <div className="pnl-chart"><div className="panel-head"><div><span className="eyebrow">PROFIT TREND</span><h2>Revenue, gross profit, and net profit</h2></div><div className="legend"><span className="blue-dot"/>Net sales <span className="green-dot"/>Gross profit <span className="orange-dot"/>Net profit</div></div><div className="chart-wrap"><div className="y-axis"><span>{formatter.format(chartMaximum)}</span><span>{formatter.format(chartMaximum / 2)}</span><span>{formatter.format(chartMaximum / 4)}</span><span>{formatter.format(0)}</span></div><div className="bar-chart">{displayPeriods.map(({ period, data }) => <div className="bar-group" key={period.start + "-" + period.end}><div className="bars"><i className="revenue" style={{height:(Math.abs(data.metrics.netProductSales - data.metrics.refunds) / chartMaximum * 100) + "%"}}/><i className="profit" style={{height:(Math.abs(data.metrics.grossProfit) / chartMaximum * 100) + "%"}}/><i className="spend" style={{height:(Math.abs(data.metrics.netProfit ?? 0) / chartMaximum * 100) + "%"}}/></div><span>{period.label}</span></div>)}</div></div></div> : null}
+      {viewMode === "table" ? <div className="table-scroll"><table className="data-table pnl-table period-table"><thead><tr><th>Income statement</th>{displayedColumns.map((column, index) => <th key={column.period.start + "-" + column.period.end + "-" + index}>{column.period.label}</th>)}</tr></thead><tbody>{sections.map((section) => [<tr className="pnl-section" key={section + "-heading"}><td colSpan={displayedColumns.length + 1}><button onClick={() => toggleSection(section)}><ChevronDown className={collapsedSections.has(section) ? "collapsed" : ""}/>{section}</button></td></tr>, ...(collapsedSections.has(section) ? [] : pnlRows.filter((row) => row.section === section).map((row) => <tr className={row.label.includes("profit") || row.label.includes("margin") || row.label === "Total sales" ? "total" : ""} key={section + "-" + row.label}><td><span className="indent">{row.label}</span></td>{displayedColumns.map((column, index) => <td key={row.label + "-" + index}>{row.value(column.data)}</td>)}</tr>))])}</tbody></table></div> : null}
+      <div className="table-footer"><span>{periodData.length >= 12 ? "Showing the latest 12 " + granularity + " periods" : displayPeriods.length + " " + granularity + " period" + (displayPeriods.length === 1 ? "" : "s")}</span><span>{showComparison ? "Previous-period overlay on" : "Comparison overlay off"}</span></div>
+    </section>
+  </>;
 
   return <>{comparison?.hasData && pnl?.hasData ? <section className="cost-grid live pnl-comparison"><div><strong>{change(pnl.metrics.netProductSales, comparison.metrics.netProductSales) === null ? "—" : `${change(pnl.metrics.netProductSales, comparison.metrics.netProductSales)!.toFixed(1)}%`}</strong><span>Net product sales vs previous period</span></div><div><strong>{change(pnl.metrics.grossProfit, comparison.metrics.grossProfit) === null ? "—" : `${change(pnl.metrics.grossProfit, comparison.metrics.grossProfit)!.toFixed(1)}%`}</strong><span>Gross profit vs previous period</span></div><div><strong>{pnl.metrics.orders - comparison.metrics.orders >= 0 ? "+" : ""}{(pnl.metrics.orders - comparison.metrics.orders).toLocaleString()}</strong><span>Orders vs previous period</span></div></section> : null}{yearComparison?.hasData && pnl?.hasData ? <section className="cost-grid live pnl-comparison"><div><strong>{change(pnl.metrics.netProductSales, yearComparison.metrics.netProductSales) === null ? "—" : `${change(pnl.metrics.netProductSales, yearComparison.metrics.netProductSales)!.toFixed(1)}%`}</strong><span>Net product sales vs previous year</span></div><div><strong>{change(pnl.metrics.grossProfit, yearComparison.metrics.grossProfit) === null ? "—" : `${change(pnl.metrics.grossProfit, yearComparison.metrics.grossProfit)!.toFixed(1)}%`}</strong><span>Gross profit vs previous year</span></div><div><strong>{pnl.metrics.orders - yearComparison.metrics.orders >= 0 ? "+" : ""}{(pnl.metrics.orders - yearComparison.metrics.orders).toLocaleString()}</strong><span>Orders vs previous year</span></div></section> : null}<section className="filter-row pnl-period"><label>From<input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></label><label>To<input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} /></label><button disabled={!pnl?.period} onClick={() => applyLatestDays(30)}>Latest 30 days</button><button disabled={!pnl?.period} onClick={() => applyLatestDays(90)}>Latest 90 days</button>{(fromDate || toDate) && <button onClick={() => { setFromDate(""); setToDate(""); }}>All imported data</button>}</section>{loading ? <div className="data-loading">Calculating your income statement…</div> : !hasLiveData && pnl ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to build your income statement</strong><span>The preview will be replaced with reconciled sales and cost data after your first sync.</span></div></div> : null}{hasLiveData ? <div className="connection-notice"><Info/><div><strong>How this P&amp;L is calculated</strong><span>Total sales are net product sales plus shipping revenue. Gross profit is Shopify net product sales, less refunds and effective-dated product costs. Tax and duties are shown for reconciliation but excluded from profit. Operating expenses include your fixed, per-order, per-unit, and revenue-rate rules. Actual Shopify payment fees take priority; matching gateway rules estimate missing fees. Imported Meta Ads spend is deducted when it overlaps the selected period. Fulfilment, handling, and pick/pack rules provide the remaining direct costs.</span></div></div> : null}{hasLiveData && pnl!.metrics.missingCostLines > 0 ? <div className="connection-notice"><Info/><div><strong>{pnl!.metrics.missingCostLines} order lines are missing a product cost</strong><span>Gross profit is provisional until you add an effective-dated product cost for these variants.</span></div></div> : null}{hasLiveData && pnl!.metrics.unallocatedOperatingCosts > 0 ? <div className="connection-notice"><Info/><div><strong>{pnl!.metrics.unallocatedOperatingCosts} operating costs still need an allocation rule</strong><span>The P&amp;L excludes these costs because their currency or effective dates need attention.</span></div></div> : null}{hasLiveData ? <><div className="report-export"><button className="export-button" onClick={exportPnl}><Download/> Export P&amp;L CSV</button></div><details className="metric-dictionary"><summary>Metric definitions</summary><dl><div><dt>Total sales</dt><dd>Net product sales plus customer shipping revenue. Tax and duties are shown separately.</dd></div><div><dt>Gross profit</dt><dd>Net product sales after refunds, less effective-dated product costs. It is marked provisional when a line has no cost.</dd></div><div><dt>Profit after known costs</dt><dd>Gross profit less payment fees, merchant shipping, handling, pick/pack, fixed operating costs, and variable operating costs available to Spine.</dd></div><div><dt>Profit after marketing spend</dt><dd>Profit after known costs less imported Meta Ads spend in the selected period.</dd></div><div><dt>Net profit</dt><dd>Available only after marketing, merchant shipping, handling, product costs, and operating-cost coverage are complete.</dd></div></dl></details></> : null}<section className="panel report-panel"><div className="report-summary">{summary.map(([label, value, hint])=><div key={label}><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>)}</div><div className="table-scroll"><table className="data-table pnl-table"><thead><tr><th>Income statement</th><th>{hasLiveData ? pnl?.period ? `${pnl.period.start} to ${pnl.period.end}` : "Selected period" : "Apr 2026"}</th>{!hasLiveData&&months.slice(1).map(month=><th key={month}>{month} 2026</th>)}</tr></thead><tbody>{liveRows.map((row,index)=><tr className={totalRows.has(index)?"total":""} key={row[0]}>{row.map((cell,i)=><td key={`${cell}-${i}`}>{i===0 && !totalRows.has(index)?<span className="indent">{cell}</span>:cell}</td>)}</tr>)}</tbody></table></div></section></>;
 }

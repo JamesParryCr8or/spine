@@ -15,6 +15,7 @@ import { convertCurrency, sumSingleCurrency } from '../lib/analytics/money.ts';
 import { calculateProfitAndLoss } from '../lib/analytics/profit-and-loss.ts';
 import { normalizeAttribution, normalizeUtmSource } from '../lib/analytics/utm-attribution.ts';
 import { shopifySyncWindow, shopifyUpdatedAtQuery } from '../lib/shopify/sync-window.ts';
+import { reportingPeriods } from '../lib/analytics/reporting-periods.ts';
 import goldenStore from './fixtures/golden-store-pnl.json' with { type: 'json' };
 
 const success = () => Response.json({ data: { orders: ['order-1'] } });
@@ -285,4 +286,22 @@ test('Shopify incremental sync overlaps the last completion and fixes its upper 
 test('resumed Shopify sync preserves its original window', () => {
   const window = shopifySyncWindow({ existingRun: { sync_mode: 'incremental', window_start: '2026-09-01T00:00:00.000Z', window_end: '2026-09-08T00:00:00.000Z' }, latestCompletedAt: '2026-09-17T00:00:00.000Z', now: new Date('2026-09-20T00:00:00.000Z') });
   assert.deepEqual(window, { mode: 'incremental', start: '2026-09-01T00:00:00.000Z', end: '2026-09-08T00:00:00.000Z' });
+});
+
+
+test('reporting periods split inclusive ranges across calendar boundaries', () => {
+  assert.deepEqual(reportingPeriods('2026-01-30', '2026-03-02', 'monthly'), [
+    { start: '2026-01-30', end: '2026-01-31', label: 'Jan 2026' },
+    { start: '2026-02-01', end: '2026-02-28', label: 'Feb 2026' },
+    { start: '2026-03-01', end: '2026-03-02', label: 'Mar 2026' },
+  ]);
+  assert.deepEqual(reportingPeriods('2026-12-30', '2027-01-02', 'annual'), [
+    { start: '2026-12-30', end: '2026-12-31', label: '2026' },
+    { start: '2027-01-01', end: '2027-01-02', label: '2027' },
+  ]);
+});
+
+test('reporting periods cap wide daily ranges to the latest visible columns', () => {
+  const periods = reportingPeriods('2026-01-01', '2026-02-01', 'daily', 3);
+  assert.deepEqual(periods.map((period) => period.start), ['2026-01-30', '2026-01-31', '2026-02-01']);
 });

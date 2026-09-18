@@ -296,11 +296,11 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 ### Income statement / P&L
 
 - [x] Build the income statement layout inspired by the supplied reference, backed by imported Shopify sales and COGS data.
-- [ ] Add collapsible sections for sales, COGS, marketing, transaction costs, shipping/handling, custom expenses, contribution margin, and net profit.
-- [ ] Display periods as columns and financial lines as rows.
-- [ ] Add monthly, weekly, daily, quarterly, and annual views.
+- [x] Add collapsible sections for sales, COGS, marketing, transaction costs, shipping/handling, custom expenses, contribution margin, and net profit.
+- [x] Display reconciled periods as columns and financial lines as rows, capped to the latest 12 visible periods for readability.
+- [x] Add monthly, weekly, daily, quarterly, and annual views.
 - [x] Add previous-period and previous-year comparisons.
-- [ ] Add chart/table toggle and optional comparison overlay.
+- [x] Add chart/table toggle and optional previous-period comparison overlay.
 - [x] Show P&L formula explanations and source coverage for included and unavailable cost inputs.
 - [x] Add reconciliation status and missing-cost warnings above the table.
 - [x] Export exactly the visible P&L configuration.
