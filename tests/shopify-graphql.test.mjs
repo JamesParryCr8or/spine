@@ -18,6 +18,7 @@ import { shopifySyncWindow, shopifyUpdatedAtQuery } from '../lib/shopify/sync-wi
 import { reportingPeriods } from '../lib/analytics/reporting-periods.ts';
 import { parseExchangeRate, parseExchangeRateId } from '../lib/settings/exchange-rate-schema.ts';
 import { createCurrencyCoverage } from '../lib/analytics/currency-coverage.ts';
+import { convertDatedAmount, resolveDatedExchangeRate } from '../lib/analytics/exchange-rate.ts';
 import { parseCreateReport, parseFinishReportRun, parseStartReportRun, parseUpdateReport, REPORT_SCHEMA_VERSION } from '../lib/reports/schema.ts';
 import goldenStore from './fixtures/golden-store-pnl.json' with { type: 'json' };
 
@@ -373,10 +374,17 @@ test('saved report run payloads bind executions to valid identifiers and termina
 test('currency coverage excludes foreign-currency orders and reports every excluded currency', () => {
   const coverage = createCurrencyCoverage('gbp');
   assert.equal(coverage.include('GBP'), true);
-  assert.equal(coverage.include('usd'), false);
+  assert.equal(coverage.include('usd', 0.79), true);
   assert.equal(coverage.include('EUR'), false);
   assert.equal(coverage.include('USD'), false);
-  assert.deepEqual(coverage.summary(), { reportingCurrency: 'GBP', includedOrders: 1, excludedOrders: 3, excludedCurrencies: [{ currency: 'EUR', orders: 1 }, { currency: 'USD', orders: 2 }] });
+  assert.deepEqual(coverage.summary(), {
+    reportingCurrency: 'GBP',
+    includedOrders: 2,
+    convertedOrders: 1,
+    excludedOrders: 2,
+    convertedCurrencies: [{ currency: 'USD', orders: 1 }],
+    excludedCurrencies: [{ currency: 'EUR', orders: 1 }, { currency: 'USD', orders: 1 }],
+  });
 });
 
 
@@ -388,4 +396,17 @@ test('exchange-rate definitions normalize currencies and retain fixed decimal te
   assert.equal(parseExchangeRate({ baseCurrency: 'GBP', quoteCurrency: 'GBP', rate: '1', effectiveDate: '2026-09-18' }).ok, false);
   assert.equal(parseExchangeRate({ baseCurrency: 'USD', quoteCurrency: 'GBP', rate: '-1', effectiveDate: '2026-09-18' }).ok, false);
   assert.equal(parseExchangeRateId('not-an-id').ok, false);
+});
+
+
+test('dated exchange rates select the latest non-future source-to-reporting rate', () => {
+  const rates = [
+    { base_currency: 'USD', quote_currency: 'GBP', rate: '0.75', effective_date: '2026-01-01' },
+    { base_currency: 'USD', quote_currency: 'GBP', rate: '0.80', effective_date: '2026-06-01' },
+    { base_currency: 'USD', quote_currency: 'GBP', rate: '0.90', effective_date: '2027-01-01' },
+  ];
+  assert.equal(resolveDatedExchangeRate(rates, 'usd', 'GBP', '2026-08-14T12:00:00Z'), 0.8);
+  assert.equal(resolveDatedExchangeRate(rates, 'USD', 'GBP', '2025-12-31T23:59:59Z'), null);
+  assert.equal(resolveDatedExchangeRate(rates, 'GBP', 'GBP', '2025-01-01'), 1);
+  assert.equal(convertDatedAmount(12.345, 0.8, 'GBP'), 9.88);
 });

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
 import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
+import { convertDatedAmount, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 import { calculateAcquisitionMetrics } from "@/lib/analytics/acquisition";
 import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
 import { reportingDateKey, reportingMonthKey } from "@/lib/analytics/reporting-range";
@@ -16,6 +17,7 @@ type Order = {
   shipping_revenue: string;
   total_sales: string;
   currency: string;
+  exchange_rate: number;
 };
 
 function isoDate(date: Date) {
@@ -52,6 +54,14 @@ export async function GET() {
     .single();
   if (storeError || !store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
+  const { data: exchangeRateRows, error: exchangeRateError } = await supabase
+    .from("exchange_rates")
+    .select("base_currency,quote_currency,rate,effective_date")
+    .eq("store_id", store.id)
+    .eq("quote_currency", store.currency)
+    .order("effective_date", { ascending: true });
+  if (exchangeRateError) return NextResponse.json({ error: exchangeRateError.message }, { status: 500 });
+  const exchangeRates = (exchangeRateRows ?? []) as DatedExchangeRate[];
   const orders: Order[] = [];
   const currencyCoverage = createCurrencyCoverage(store.currency);
   const pageSize = 1000;
@@ -66,8 +76,11 @@ export async function GET() {
       .order("processed_at", { ascending: true })
       .range(from, from + pageSize - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    const page = (data ?? []) as Order[];
-    for (const order of page) if (currencyCoverage.include(order.currency)) orders.push(order);
+    const page = (data ?? []) as Array<Omit<Order, "exchange_rate">>;
+    for (const order of page) {
+      const exchangeRate = resolveDatedExchangeRate(exchangeRates, order.currency, store.currency, order.processed_at ?? "");
+      if (currencyCoverage.include(order.currency, exchangeRate)) orders.push({ ...order, exchange_rate: exchangeRate ?? 1 });
+    }
     if (page.length < pageSize) break;
   }
 
@@ -94,10 +107,10 @@ export async function GET() {
     if (!order.processed_at) continue;
     const key = reportingMonthKey(order.processed_at, timezone);
     const period = periods.get(key);
-    const gross = Number(order.gross_sales) || 0;
-    const discount = Number(order.discounts) || 0;
-    const net = Number(order.net_product_sales) || 0;
-    const shipping = Number(order.shipping_revenue) || 0;
+    const gross = convertDatedAmount(Number(order.gross_sales) || 0, order.exchange_rate, store.currency);
+    const discount = convertDatedAmount(Number(order.discounts) || 0, order.exchange_rate, store.currency);
+    const net = convertDatedAmount(Number(order.net_product_sales) || 0, order.exchange_rate, store.currency);
+    const shipping = convertDatedAmount(Number(order.shipping_revenue) || 0, order.exchange_rate, store.currency);
     grossSales += gross;
     discounts += discount;
     netSales += net;

@@ -4,13 +4,14 @@ import { costKey, monetary, resolveEffectiveCost, type EffectiveCost } from "@/l
 import { allocatePeriodCost, operatingCostBucket } from "@/lib/analytics/cost-allocation";
 import { selectEffectiveShippingCost, type ProductShippingCost } from "@/lib/analytics/shipping-cost";
 import { proportionalAllocations } from "@/lib/analytics/proportional-allocation";
-import { actualTransactionFees, estimatedTransactionFee, selectEffectivePaymentFeeRule, type EffectivePaymentFeeRule, type ShopifyTransactionFee } from "@/lib/analytics/transaction-fees";
+import { estimatedTransactionFee, selectEffectivePaymentFeeRule, type EffectivePaymentFeeRule, type ShopifyTransactionFee } from "@/lib/analytics/transaction-fees";
 import { allocateOrderRefund } from "@/lib/analytics/refund-allocation";
 import { calculateProductProfit } from "@/lib/analytics/product-profit";
 import { createClient } from "@/lib/supabase/server";
 import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
+import { convertDatedAmount, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 
-type Order = { id: string; processed_at: string | null; currency: string };
+type Order = { id: string; processed_at: string | null; currency: string; exchange_rate: number };
 type Line = { order_id: string; shopify_gid: string; variant_gid: string | null; sku: string | null; title: string; variant_title: string | null; current_quantity: number; net_sales: string; discounts: string };
 type RefundLine = { line_item_gid: string; subtotal: string };
 type Refund = { order_id: string; total_refunded: string };
@@ -19,7 +20,7 @@ type Product = { id: string; title: string };
 type CustomCost = { category: string; amount: string; currency: string; cadence: "one_off" | "daily" | "weekly" | "monthly" | "annual"; allocation_basis: "fixed" | "orders" | "units" | "revenue"; effective_from: string; effective_to: string | null };
 type ShippingCostRow = ProductShippingCost & { currency: string };
 type MetaInsight = { spend: string };
-type Transaction = ShopifyTransactionFee & { gateway: string | null; amount: string; processed_at_shopify: string | null; created_at_shopify: string };
+type Transaction = ShopifyTransactionFee & { order_id: string; gateway: string | null; amount: string; processed_at_shopify: string | null; created_at_shopify: string };
 type PaymentFeeRuleRow = { gateway: string; percentage_rate: string; fixed_fee: string; tax_rate: string; minimum_fee: string; currency: string; effective_from: string; effective_to: string | null };
 
 type ProductProfit = { key: string; product: string; variant: string; sku: string | null; units: number; revenue: number; discounts: number; refunds: number; cogs: number; missingCostUnits: number; shippingCosts: number; handlingCosts: number; trend: Map<string, { period: string; units: number; revenue: number; refunds: number }> };
@@ -47,6 +48,9 @@ export async function GET(request: Request) {
   const { data: store } = await supabase.from("stores").select("id,currency").eq("organization_id", membership.organization_id).limit(1).single();
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
+  const { data: exchangeRateRows, error: exchangeRateError } = await supabase.from("exchange_rates").select("base_currency,quote_currency,rate,effective_date").eq("store_id", store.id).eq("quote_currency", store.currency).order("effective_date", { ascending: true });
+  if (exchangeRateError) return NextResponse.json({ error: exchangeRateError.message }, { status: 500 });
+  const exchangeRates = (exchangeRateRows ?? []) as DatedExchangeRate[];
   const orderRows: Order[] = [];
   const currencyCoverage = createCurrencyCoverage(store.currency);
   const pageSize = 1000;
@@ -62,8 +66,11 @@ export async function GET(request: Request) {
     if (toDate) query = query.lte("processed_at", `${toDate}T23:59:59.999Z`);
     const { data, error } = await query.order("processed_at", { ascending: true }).range(from, from + pageSize - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    const page = (data ?? []) as Order[];
-    for (const order of page) if (currencyCoverage.include(order.currency)) orderRows.push(order);
+    const page = (data ?? []) as Array<Omit<Order, "exchange_rate">>;
+    for (const order of page) {
+      const exchangeRate = resolveDatedExchangeRate(exchangeRates, order.currency, store.currency, order.processed_at ?? "");
+      if (currencyCoverage.include(order.currency, exchangeRate)) orderRows.push({ ...order, exchange_rate: exchangeRate ?? 1 });
+    }
     if (page.length < pageSize) break;
   }
   const orderIds = orderRows.map((order) => order.id);
@@ -72,7 +79,7 @@ export async function GET(request: Request) {
   const [lineResults, refundResults, transactionResults, variantResult, productResult, costResult, shippingCostResult, customCostResult, paymentFeeRuleResult] = await Promise.all([
     Promise.all(orderChunks.map((ids) => supabase.from("shopify_order_lines").select("order_id,shopify_gid,variant_gid,sku,title,variant_title,current_quantity,net_sales,discounts").in("order_id", ids))),
     Promise.all(orderChunks.map((ids) => supabase.from("shopify_refunds").select("order_id,total_refunded").in("order_id", ids))),
-    Promise.all(orderChunks.map((ids) => supabase.from("shopify_transactions").select("fee_amount,fee_tax,currency,status,gateway,amount,processed_at_shopify,created_at_shopify").in("order_id", ids))),
+    Promise.all(orderChunks.map((ids) => supabase.from("shopify_transactions").select("order_id,fee_amount,fee_tax,currency,status,gateway,amount,processed_at_shopify,created_at_shopify").in("order_id", ids))),
     supabase.from("shopify_variants").select("id,product_id,shopify_gid,sku,shopify_unit_cost").eq("store_id", store.id),
     supabase.from("shopify_products").select("id,title").eq("store_id", store.id),
     supabase.from("product_costs").select("variant_id,sku,amount,effective_from,effective_to,source").eq("store_id", store.id),
@@ -94,18 +101,30 @@ export async function GET(request: Request) {
     refundRows.push(...page);
     if (page.length < pageSize) break;
   }
+  const orderById = new Map(orderRows.map((order) => [order.id, order]));
+  const lineByGid = new Map(lines.map((line) => [line.shopify_gid, line]));
   const explicitRefundsByLine = new Map<string, number>();
-  for (const refund of refundRows) explicitRefundsByLine.set(refund.line_item_gid, (explicitRefundsByLine.get(refund.line_item_gid) ?? 0) + monetary(refund.subtotal));
+  for (const refund of refundRows) {
+    const line = lineByGid.get(refund.line_item_gid);
+    const order = line ? orderById.get(line.order_id) : null;
+    if (!order) continue;
+    const amount = convertDatedAmount(monetary(refund.subtotal), order.exchange_rate, store.currency);
+    explicitRefundsByLine.set(refund.line_item_gid, (explicitRefundsByLine.get(refund.line_item_gid) ?? 0) + amount);
+  }
   const totalRefundsByOrder = new Map<string, number>();
-  for (const refund of refunds) totalRefundsByOrder.set(refund.order_id, (totalRefundsByOrder.get(refund.order_id) ?? 0) + monetary(refund.total_refunded));
+  for (const refund of refunds) {
+    const order = orderById.get(refund.order_id);
+    if (!order) continue;
+    const amount = convertDatedAmount(monetary(refund.total_refunded), order.exchange_rate, store.currency);
+    totalRefundsByOrder.set(refund.order_id, (totalRefundsByOrder.get(refund.order_id) ?? 0) + amount);
+  }
   const refundsByLine = new Map<string, number>();
   for (const order of orderRows) {
     const orderLines = lines.filter((line) => line.order_id === order.id);
-    const allocations = allocateOrderRefund(totalRefundsByOrder.get(order.id) ?? 0, orderLines.map((line) => ({ key: line.shopify_gid, netSales: monetary(line.net_sales), explicitRefund: explicitRefundsByLine.get(line.shopify_gid) ?? 0 })));
+    const allocations = allocateOrderRefund(totalRefundsByOrder.get(order.id) ?? 0, orderLines.map((line) => ({ key: line.shopify_gid, netSales: convertDatedAmount(monetary(line.net_sales), order.exchange_rate, store.currency), explicitRefund: explicitRefundsByLine.get(line.shopify_gid) ?? 0 })));
     for (const [lineId, amount] of allocations) refundsByLine.set(lineId, amount);
   }
 
-  const orderById = new Map(orderRows.map((order) => [order.id, order]));
   const variants = (variantResult.data ?? []) as Variant[];
   const variantsByGid = new Map(variants.map((variant) => [variant.shopify_gid, variant]));
   const variantsBySku = new Map(variants.filter((variant) => variant.sku).map((variant) => [variant.sku!.trim().toLowerCase(), variant]));
@@ -150,13 +169,13 @@ export async function GET(request: Request) {
     const costs = variant ? costsByKey.get(`variant:${variant.id}`) ?? costsByKey.get(`sku:${variant.sku?.trim().toLowerCase()}`) ?? [] : costsByKey.get(`sku:${line.sku?.trim().toLowerCase()}`) ?? [];
     const unitCost = resolveEffectiveCost(costs, order.processed_at.slice(0, 10), variant?.shopify_unit_cost === null || variant?.shopify_unit_cost === undefined ? null : monetary(variant.shopify_unit_cost));
     current.units += quantity;
-    current.revenue += monetary(line.net_sales);
-    current.discounts += monetary(line.discounts);
+    current.revenue += convertDatedAmount(monetary(line.net_sales), order.exchange_rate, store.currency);
+    current.discounts += convertDatedAmount(monetary(line.discounts), order.exchange_rate, store.currency);
     current.refunds += refundsByLine.get(line.shopify_gid) ?? 0;
     const trendPeriod = order.processed_at.slice(0, 7);
     const trend = current.trend.get(trendPeriod) ?? { period: trendPeriod, units: 0, revenue: 0, refunds: 0 };
     trend.units += quantity;
-    trend.revenue += monetary(line.net_sales);
+    trend.revenue += convertDatedAmount(monetary(line.net_sales), order.exchange_rate, store.currency);
     trend.refunds += refundsByLine.get(line.shopify_gid) ?? 0;
     current.trend.set(trendPeriod, trend);
     if (unitCost === null) current.missingCostUnits += quantity;
@@ -184,7 +203,9 @@ export async function GET(request: Request) {
     for (const line of eligibleLines) {
       const key = profitKeyByLine.get(line);
       if (!key) continue;
-      revenueWeights.set(key, (revenueWeights.get(key) ?? 0) + Math.max(monetary(line.net_sales) - (refundsByLine.get(line.shopify_gid) ?? 0), 0));
+      const order = orderById.get(line.order_id);
+      const revenue = order ? convertDatedAmount(monetary(line.net_sales), order.exchange_rate, store.currency) : 0;
+      revenueWeights.set(key, (revenueWeights.get(key) ?? 0) + Math.max(revenue - (refundsByLine.get(line.shopify_gid) ?? 0), 0));
       unitWeights.set(key, (unitWeights.get(key) ?? 0) + Math.max(line.current_quantity, 0));
     }
     const revenueTotal = [...revenueWeights.values()].reduce((total, value) => total + value, 0);
@@ -215,7 +236,10 @@ export async function GET(request: Request) {
         activeDays: dayCountInclusive(from, to),
         orderCount: eligibleOrderIds.size,
         unitCount: eligibleLines.reduce((total, line) => total + Math.max(line.current_quantity, 0), 0),
-        revenue: eligibleLines.reduce((total, line) => total + monetary(line.net_sales), 0),
+        revenue: eligibleLines.reduce((total, line) => {
+          const order = orderById.get(line.order_id);
+          return total + (order ? convertDatedAmount(monetary(line.net_sales), order.exchange_rate, store.currency) : 0);
+        }, 0),
         oneOffInRange: cost.effective_from >= rangeStart && cost.effective_from <= rangeEnd,
       });
       allocateAcrossProducts(allocated, cost.allocation_basis === "fixed" ? scopedLines : eligibleLines, bucket === "shipping" ? "shippingCosts" : "handlingCosts");
@@ -236,9 +260,17 @@ export async function GET(request: Request) {
   const revenueWeights = new Map([...profits].map(([key, product]) => [key, Math.max(product.revenue - product.refunds, 0)]));
   const marketingAllocations = proportionalAllocations(marketingSpend, revenueWeights);
   const paymentFeeRules = ((paymentFeeRuleResult.data ?? []) as PaymentFeeRuleRow[]).map((rule): EffectivePaymentFeeRule => ({ gateway: rule.gateway, currency: rule.currency, effectiveFrom: rule.effective_from, effectiveTo: rule.effective_to, percentageRate: monetary(rule.percentage_rate), fixedFee: monetary(rule.fixed_fee), taxRate: monetary(rule.tax_rate), minimumFee: monetary(rule.minimum_fee) }));
-  const transactionFees = actualTransactionFees(transactions, store.currency) + transactions.filter((transaction) => transaction.status === "SUCCESS" && transaction.currency === store.currency && monetary(transaction.fee_amount) + monetary(transaction.fee_tax) === 0).reduce((total, transaction) => {
-    const rule = selectEffectivePaymentFeeRule(paymentFeeRules, transaction.gateway, transaction.currency, transaction.processed_at_shopify ?? transaction.created_at_shopify);
-    return total + (rule ? estimatedTransactionFee(monetary(transaction.amount), rule) : 0);
+  const transactionFees = transactions.filter((transaction) => transaction.status === "SUCCESS").reduce((total, transaction) => {
+    const order = orderById.get(transaction.order_id);
+    if (!order) return total;
+    const occurredAt = transaction.processed_at_shopify ?? transaction.created_at_shopify;
+    const transactionRate = resolveDatedExchangeRate(exchangeRates, transaction.currency, store.currency, occurredAt);
+    if (!transactionRate) return total;
+    const actualFee = monetary(transaction.fee_amount) + monetary(transaction.fee_tax);
+    if (actualFee > 0) return total + convertDatedAmount(actualFee, transactionRate, store.currency);
+    const rule = selectEffectivePaymentFeeRule(paymentFeeRules, transaction.gateway, store.currency, occurredAt);
+    const convertedAmount = convertDatedAmount(monetary(transaction.amount), transactionRate, store.currency);
+    return total + (rule ? estimatedTransactionFee(convertedAmount, rule) : 0);
   }, 0);
   const transactionFeeAllocations = proportionalAllocations(transactionFees, revenueWeights);
 

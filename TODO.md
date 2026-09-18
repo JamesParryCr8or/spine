@@ -190,9 +190,9 @@ Shopify is the primary sales and catalog source. Other sources enrich Shopify ra
 - [ ] Handle guest checkouts and customer merges without double-counting customers.
 - [ ] Support multi-currency orders and Shopify Markets without silently mixing currencies.
   - [x] Exclude non-reporting-currency orders from financial totals and show counts by source currency.
-  - [ ] Convert orders with explicit dated exchange rates before consolidated reporting.
+  - [x] Convert orders with explicit dated exchange rates before consolidated reporting.
     - [x] Add owner/admin-managed dated exchange rates from source currency into the store reporting currency.
-    - [ ] Apply matching historical rates consistently to orders, refunds, fees, and attribution metrics.
+    - [x] Apply matching historical rates consistently to orders, refunds, fees, and attribution metrics.
 - [x] Add reconciliation tests against Shopify order totals for fixed sample periods.
 
 ## Phase 3 — Cost and expense engine

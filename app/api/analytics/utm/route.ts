@@ -5,8 +5,9 @@ import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { normalizeAttribution } from "@/lib/analytics/utm-attribution";
 import { createClient } from "@/lib/supabase/server";
 import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
+import { convertDatedAmount, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 
-type Order = { id: string; customer_id: string | null; net_product_sales: string; processed_at: string | null; currency: string };
+type Order = { id: string; customer_id: string | null; net_product_sales: string; processed_at: string | null; currency: string; exchange_rate: number };
 type Attribution = { order_id: string; source: string | null; utm_source: string | null; utm_medium: string | null; utm_campaign: string | null; utm_content: string | null; utm_term: string | null; landing_page: string | null; referrer_url: string | null; customer_order_index: number | null };
 type Diagnostic = { orders: number; sales: number };
 
@@ -31,6 +32,9 @@ export async function GET(request: Request) {
   const { data: store } = await supabase.from("stores").select("id,currency,timezone").eq("organization_id", membership.organization_id).limit(1).single();
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
+  const { data: exchangeRateRows, error: exchangeRateError } = await supabase.from("exchange_rates").select("base_currency,quote_currency,rate,effective_date").eq("store_id", store.id).eq("quote_currency", store.currency).order("effective_date", { ascending: true });
+  if (exchangeRateError) return NextResponse.json({ error: exchangeRateError.message }, { status: 500 });
+  const exchangeRates = (exchangeRateRows ?? []) as DatedExchangeRate[];
   const pageSize = 1000;
   const orderRows: Order[] = [];
   const currencyCoverage = createCurrencyCoverage(store.currency);
@@ -40,8 +44,11 @@ export async function GET(request: Request) {
     if (toDate) query = query.lt("processed_at", reportingRangeToUtc(toDate, toDate, store.timezone || "UTC").endExclusive);
     const { data, error } = await query.order("processed_at", { ascending: true }).range(from, from + pageSize - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    const page = (data ?? []) as Order[];
-    for (const order of page) if (currencyCoverage.include(order.currency)) orderRows.push(order);
+    const page = (data ?? []) as Array<Omit<Order, "exchange_rate">>;
+    for (const order of page) {
+      const exchangeRate = resolveDatedExchangeRate(exchangeRates, order.currency, store.currency, order.processed_at ?? "");
+      if (currencyCoverage.include(order.currency, exchangeRate)) orderRows.push({ ...order, exchange_rate: exchangeRate ?? 1 });
+    }
     if (page.length < pageSize) break;
   }
 
@@ -62,7 +69,7 @@ export async function GET(request: Request) {
     if (!order.processed_at) continue;
     const attribution = attributionByOrder.get(order.id) ?? null;
     const normalized = normalizeAttribution(attribution ? { source: attribution.source, utmSource: attribution.utm_source, utmMedium: attribution.utm_medium, utmCampaign: attribution.utm_campaign, utmContent: attribution.utm_content, utmTerm: attribution.utm_term, referrerUrl: attribution.referrer_url } : null);
-    const sales = monetary(order.net_product_sales);
+    const sales = convertDatedAmount(monetary(order.net_product_sales), order.exchange_rate, store.currency);
     const customerType = !order.customer_id ? "Guest" : attribution?.customer_order_index === 1 ? "New" : "Repeat";
     const landingPage = cleanLandingPage(attribution?.landing_page ?? null);
     const key = [normalized.channel, normalized.source, normalized.medium, normalized.campaign, normalized.content, normalized.term, landingPage, customerType].join("\u0000");

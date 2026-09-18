@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
 import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
+import { convertDatedAmount, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
 
 type Order = {
@@ -11,6 +12,7 @@ type Order = {
   net_product_sales: string;
   shipping_revenue: string;
   currency: string;
+  exchange_rate: number;
 };
 
 const money = (value: string | null | undefined) => Number(value ?? 0);
@@ -26,6 +28,9 @@ export async function GET() {
   const { data: store } = await supabase.from("stores").select("id,currency").eq("organization_id", membership.organization_id).limit(1).single();
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
+  const { data: exchangeRateRows, error: exchangeRateError } = await supabase.from("exchange_rates").select("base_currency,quote_currency,rate,effective_date").eq("store_id", store.id).eq("quote_currency", store.currency).order("effective_date", { ascending: true });
+  if (exchangeRateError) return NextResponse.json({ error: exchangeRateError.message }, { status: 500 });
+  const exchangeRates = (exchangeRateRows ?? []) as DatedExchangeRate[];
   const orders: Order[] = [];
   const currencyCoverage = createCurrencyCoverage(store.currency);
   const pageSize = 1000;
@@ -40,8 +45,11 @@ export async function GET() {
       .order("processed_at", { ascending: true })
       .range(from, from + pageSize - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    const page = (data ?? []) as Order[];
-    for (const order of page) if (currencyCoverage.include(order.currency)) orders.push(order);
+    const page = (data ?? []) as Array<Omit<Order, "exchange_rate">>;
+    for (const order of page) {
+      const exchangeRate = resolveDatedExchangeRate(exchangeRates, order.currency, store.currency, order.processed_at ?? "");
+      if (currencyCoverage.include(order.currency, exchangeRate)) orders.push({ ...order, exchange_rate: exchangeRate ?? 1 });
+    }
     if (page.length < pageSize) break;
   }
   const ordersByCustomer = new Map<string, Order[]>();
@@ -49,7 +57,7 @@ export async function GET() {
   let guestOrders = 0;
   let guestSales = 0;
   for (const order of orders) {
-    const sales = money(order.net_product_sales) + money(order.shipping_revenue);
+    const sales = convertDatedAmount(money(order.net_product_sales) + money(order.shipping_revenue), order.exchange_rate, store.currency);
     if (!order.customer_id) {
       guestOrders += 1;
       guestSales += sales;
@@ -82,7 +90,7 @@ export async function GET() {
       if (period < 0 || period > 11) continue;
       const current = cohort.periods.get(period) ?? { customerIds: new Set<string>(), revenue: 0 };
       current.customerIds.add(customerId);
-      current.revenue += money(order.net_product_sales) + money(order.shipping_revenue);
+      current.revenue += convertDatedAmount(money(order.net_product_sales) + money(order.shipping_revenue), order.exchange_rate, store.currency);
       cohort.periods.set(period, current);
     }
     cohortRows.set(cohortKey, cohort);
@@ -106,7 +114,7 @@ export async function GET() {
     }));
   for (const customerOrders of customers) {
     customerOrders.forEach((order) => {
-      const sales = money(order.net_product_sales) + money(order.shipping_revenue);
+      const sales = convertDatedAmount(money(order.net_product_sales) + money(order.shipping_revenue), order.exchange_rate, store.currency);
       const key = monthFor(order.processed_at);
       const month = key ? months.get(key) ?? { key, newCustomerOrders: 0, newCustomerSales: 0, repeatCustomerOrders: 0, repeatCustomerSales: 0 } : null;
       if (customerClasses.get(order.id) === "new") {
