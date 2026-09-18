@@ -61,6 +61,7 @@
 - [x] Preview custom-spend imports, show batch history, and roll back imports while restoring overwritten rows.
 - [x] Add a manual field-mapping screen for custom-spend CSV files with non-standard headers.
 - [x] Add validated starter saved-report templates for income statements, channel spend, product profitability, and new-customer acquisition.
+- [x] Add blended net profit per new customer to Customer analytics with explicit completeness requirements.
 
 ### Active build order
 
@@ -302,7 +303,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [x] Blended CAC using imported Meta spend divided by first-observed Shopify customers in the imported window.
 - [x] Blended MER using Shopify net product sales divided by matching-currency imported Meta spend.
 - [x] New-customer ROAS using first-observed Shopify order sales divided by blended Meta spend, explicitly labelled as a blended imported-window basis.
-- [ ] Profit per new customer.
+- [x] Blended period net profit per new customer, shown only when cost coverage is complete.
 - [x] Repeat order and repeat revenue percentages.
 - [ ] Customer lifetime value cohorts after the core P&L is reconciled.
 
