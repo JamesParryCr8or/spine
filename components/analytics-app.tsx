@@ -589,7 +589,7 @@ function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: string; init
       setMappingData(payload); setMappingError("");
     } catch (reason) { setMappingData(null); setMappingError(reason instanceof Error ? reason.message : "Could not load campaign mappings"); }
   }, []);
-  useEffect(() => { void loadMappings(); }, [loadMappings]);
+  useEffect(() => { const timeout = window.setTimeout(() => void loadMappings(), 0); return () => window.clearTimeout(timeout); }, [loadMappings]);
   useEffect(() => {
     const params = new URLSearchParams({ attribution: attributionModel });
     if (fromDate) params.set("from", fromDate);
