@@ -18,7 +18,7 @@ export function parseExchangeRate(value: unknown): ValidationResult<{ baseCurren
   }
   if (!decimalPattern.test(rate) || Number(rate) <= 0) return { ok: false, error: "Enter a positive exchange rate with up to 10 decimal places" };
   if (!datePattern.test(effectiveDate) || Number.isNaN(Date.parse(`${effectiveDate}T00:00:00Z`))) return { ok: false, error: "Choose a valid effective date" };
-  if (notes === undefined || notes.length > 500) return { ok: false, error: "Keep exchange-rate notes under 500 characters" };
+  if (notes === undefined || (notes !== null && notes.length > 500)) return { ok: false, error: "Keep exchange-rate notes under 500 characters" };
   return { ok: true, value: { baseCurrency, quoteCurrency, rate, effectiveDate, notes } };
 }
 
