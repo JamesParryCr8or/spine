@@ -38,7 +38,7 @@ export async function POST(request: Request) {
   if (result.error) return result.error;
   const parsed = parseCreateReport(await request.json().catch(() => null));
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
-  const { name, description, reportType, visibility, datePreset } = parsed.value;
+  const { name, description, reportType, visibility, datePreset, utmFilters } = parsed.value;
   const { supabase, userId, membership, store } = result;
   const { data, error } = await supabase.from("saved_reports").insert({
     organization_id: membership.organization_id,
@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     description,
     report_type: reportType,
     visibility,
-    configuration: { schemaVersion: REPORT_SCHEMA_VERSION, datePreset },
+    configuration: { schemaVersion: REPORT_SCHEMA_VERSION, datePreset, ...(utmFilters ? { utmFilters } : {}) },
   }).select(reportFields).single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ report: data }, { status: 201 });

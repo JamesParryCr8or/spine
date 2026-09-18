@@ -53,6 +53,7 @@
 - [x] Add exact refunds and effective-dated COGS plus reconciled shared-cost allocations to every UTM group.
 - [x] Import campaign-level Meta spend, map campaigns to normalized UTM groups with tenant-protected settings, and calculate mapped ROAS, MER, CAC, and profit.
 - [x] Add a tested UTM naming normalizer and campaign URL builder that preserves existing landing-page parameters and fragments.
+- [x] Save the current UTM date range, attribution model, comparison, and dimension filters as a reusable report definition.
 
 ### Active build order
 
@@ -355,7 +356,8 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [ ] Extend campaign mapping to Google Ads and custom spend sources after those connectors are available.
 - [x] Calculate ROAS, MER, CAC, and profit after Meta spend is mapped; label metrics unavailable without traffic, spend, or required cost data.
 - [x] Add an unattributed-sales diagnostic showing orders missing attribution records, UTMs, landing pages, or referrers.
-- [ ] Allow users to save the UTM view as a report and export the current drilldown to CSV, XLSX, or Google Sheets.
+- [x] Allow users to save the current UTM filters as a report and reopen the same view; keep CSV export available for the current drilldown.
+- [ ] Add XLSX and Google Sheets export destinations for saved and current UTM reports.
 - [x] Add optional UTM naming rules and a campaign URL builder after the analysis workflow is stable.
 
 ### Product profitability

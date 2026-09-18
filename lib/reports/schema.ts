@@ -10,12 +10,15 @@ export type ReportDatePreset = (typeof reportDatePresets)[number];
 
 type ValidationResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
+type UtmReportFilters = { fromDate: string; toDate: string; source: string; medium: string; campaign: string; landingPage: string; customerType: string; country: string; product: string; comparisonMode: "previous_period" | "previous_year"; attributionModel: "first_touch" | "last_touch" };
+
 type CreateReport = {
   name: string;
   description: string | null;
   reportType: ReportType;
   visibility: ReportVisibility;
   datePreset: ReportDatePreset;
+  utmFilters?: UtmReportFilters;
 };
 
 type UpdateReport =
@@ -33,18 +36,35 @@ const optionalText = (value: unknown, maximum: number) => {
   return normalized.length <= maximum ? normalized || null : undefined;
 };
 
+function parseUtmFilters(value: unknown): UtmReportFilters | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) return undefined;
+  const text = (key: string, maximum = 255) => typeof value[key] === "string" && value[key].trim().length <= maximum ? value[key].trim() : undefined;
+  const fromDate = text("fromDate", 10), toDate = text("toDate", 10);
+  const source = text("source"), medium = text("medium"), campaign = text("campaign"), landingPage = text("landingPage", 2048), customerType = text("customerType"), country = text("country"), product = text("product");
+  const comparisonMode = value.comparisonMode ?? "previous_period";
+  const attributionModel = value.attributionModel ?? "last_touch";
+  if ([fromDate, toDate, source, medium, campaign, landingPage, customerType, country, product].some((item) => item === undefined)) return undefined;
+  if ((fromDate && !/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) || (toDate && !/^\d{4}-\d{2}-\d{2}$/.test(toDate))) return undefined;
+  if (comparisonMode !== "previous_period" && comparisonMode !== "previous_year") return undefined;
+  if (attributionModel !== "first_touch" && attributionModel !== "last_touch") return undefined;
+  return { fromDate: fromDate!, toDate: toDate!, source: source!, medium: medium!, campaign: campaign!, landingPage: landingPage!, customerType: customerType!, country: country!, product: product!, comparisonMode, attributionModel };
+}
+
 export function parseCreateReport(value: unknown): ValidationResult<CreateReport> {
   if (!isRecord(value)) return { ok: false, error: "Use a valid report definition" };
   const name = typeof value.name === "string" ? value.name.trim() : "";
   const description = optionalText(value.description, 500);
   const visibility = value.visibility ?? "private";
   const datePreset = value.datePreset ?? "all_imported";
+  const utmFilters = parseUtmFilters(value.utmFilters);
   if (!name || name.length > 120) return { ok: false, error: "Enter a report name of up to 120 characters" };
   if (description === undefined) return { ok: false, error: "Keep the report description under 500 characters" };
   if (!isMember(reportTypes, value.reportType) || !isMember(reportVisibilities, visibility) || !isMember(reportDatePresets, datePreset)) {
     return { ok: false, error: "Choose a valid report type, period, and sharing setting" };
   }
-  return { ok: true, value: { name, description, reportType: value.reportType, visibility, datePreset } };
+  if (utmFilters === undefined || (value.reportType !== "utm" && utmFilters !== null)) return { ok: false, error: "Use valid UTM report filters only with a UTM report" };
+  return { ok: true, value: { name, description, reportType: value.reportType, visibility, datePreset, ...(utmFilters ? { utmFilters } : {}) } };
 }
 
 export function parseUpdateReport(value: unknown): ValidationResult<UpdateReport> {
