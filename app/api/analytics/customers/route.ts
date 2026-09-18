@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 import { convertDatedAmount, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
+import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 
 type Order = {
   id: string;
@@ -17,7 +18,12 @@ type Order = {
 
 const money = (value: string | null | undefined) => Number(value ?? 0);
 
-export async function GET() {
+export async function GET(request: Request) {
+  const params = new URL(request.url).searchParams;
+  const fromDate = params.get("from") ?? "";
+  const toDate = params.get("to") ?? "";
+  const isDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+  if ((fromDate && !isDate(fromDate)) || (toDate && !isDate(toDate)) || (fromDate && toDate && fromDate > toDate)) return NextResponse.json({ error: "Use a valid start and end date" }, { status: 400 });
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
   const userId = claims?.claims?.sub;
@@ -35,15 +41,16 @@ export async function GET() {
   const currencyCoverage = createCurrencyCoverage(store.currency);
   const pageSize = 1000;
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("shopify_orders")
       .select("id,customer_id,processed_at,net_product_sales,shipping_revenue,currency")
       .eq("store_id", store.id)
       .eq("test", false)
       .is("cancelled_at", null)
-      .not("processed_at", "is", null)
-      .order("processed_at", { ascending: true })
-      .range(from, from + pageSize - 1);
+      .not("processed_at", "is", null);
+    if (fromDate) query = query.gte("processed_at", reportingRangeToUtc(fromDate, fromDate, store.timezone || "UTC").start);
+    if (toDate) query = query.lt("processed_at", reportingRangeToUtc(toDate, toDate, store.timezone || "UTC").endExclusive);
+    const { data, error } = await query.order("processed_at", { ascending: true }).range(from, from + pageSize - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const page = (data ?? []) as Array<Omit<Order, "exchange_rate">>;
     for (const order of page) {
@@ -53,7 +60,17 @@ export async function GET() {
     if (page.length < pageSize) break;
   }
   const ordersByCustomer = new Map<string, Order[]>();
-  const customerClasses = classifyCustomerOrders(orders.map((order) => ({ id: order.id, customerId: order.customer_id, processedAt: order.processed_at })));
+  const classificationOrders: Array<{ id: string; customerId: string | null; processedAt: string | null }> = [];
+  for (let from = 0; ; from += pageSize) {
+    let historyQuery = supabase.from("shopify_orders").select("id,customer_id,processed_at").eq("store_id", store.id).eq("test", false).is("cancelled_at", null).not("processed_at", "is", null);
+    if (toDate) historyQuery = historyQuery.lt("processed_at", reportingRangeToUtc(toDate, toDate, store.timezone || "UTC").endExclusive);
+    const { data, error } = await historyQuery.order("processed_at", { ascending: true }).range(from, from + pageSize - 1);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const page = data ?? [];
+    classificationOrders.push(...page.map((order) => ({ id: order.id, customerId: order.customer_id, processedAt: order.processed_at })));
+    if (page.length < pageSize) break;
+  }
+  const customerClasses = classifyCustomerOrders(classificationOrders);
   let guestOrders = 0;
   let guestSales = 0;
   for (const order of orders) {

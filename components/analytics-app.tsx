@@ -39,13 +39,6 @@ const demoMetrics = [
   { label: "Net profit", value: "£92,917", delta: "+18.2%", positive: true, hint: "35.9% margin" },
 ];
 
-const channels = [
-  { name: "Meta Ads", spend: "£12,480", revenue: "£91,240", roas: "7.3x", share: 79, color: "#7357ff" },
-  { name: "Google Ads", spend: "£8,320", revenue: "£58,730", roas: "7.1x", share: 62, color: "#18b981" },
-  { name: "Klaviyo", spend: "£1,240", revenue: "£38,910", roas: "31.4x", share: 43, color: "#ff9f43" },
-  { name: "Organic", spend: "—", revenue: "£44,206", roas: "—", share: 48, color: "#37a3ff" },
-];
-
 const utms = [
   ["facebook", "paid_social", "summer_scaling", "£64,820", "92", "£704", "6.8x"],
   ["google", "cpc", "brand_uk", "£41,340", "71", "£582", "9.2x"],
@@ -104,6 +97,9 @@ function Overview({ reportRunId }: { reportRunId?: string }) {
   const [comparisonData, setComparisonData] = useState<OverviewData | null>(null);
   const [pnlSummary, setPnlSummary] = useState<PnlData | null>(null);
   const [pnlComparison, setPnlComparison] = useState<PnlData | null>(null);
+  const [overviewProducts, setOverviewProducts] = useState<ProductData | null>(null);
+  const [overviewCustomers, setOverviewCustomers] = useState<CustomerData | null>(null);
+  const [overviewUtm, setOverviewUtm] = useState<UtmData | null>(null);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [granularity, setGranularity] = useState<ReportingGranularity>("monthly");
@@ -125,17 +121,26 @@ function Overview({ reportRunId }: { reportRunId?: string }) {
       const previousStart = new Date(previousEnd); previousStart.setUTCDate(previousStart.getUTCDate() - days + 1);
       comparisonSuffix = `?from=${previousStart.toISOString().slice(0, 10)}&to=${previousEnd.toISOString().slice(0, 10)}`;
     }
+    const utmSuffix = params.size ? `?attribution=last_touch&${params}` : "?attribution=last_touch";
     Promise.all([
       fetch(`/api/analytics/overview${suffix}`).then(async (response) => response.ok ? response.json() as Promise<OverviewData> : null),
       fetch(`/api/analytics/pnl${suffix}`).then(async (response) => response.ok ? response.json() as Promise<PnlData> : null),
       comparisonSuffix ? fetch(`/api/analytics/overview${comparisonSuffix}`).then(async (response) => response.ok ? response.json() as Promise<OverviewData> : null) : Promise.resolve(null),
       comparisonSuffix ? fetch(`/api/analytics/pnl${comparisonSuffix}`).then(async (response) => response.ok ? response.json() as Promise<PnlData> : null) : Promise.resolve(null),
+      fetch(`/api/analytics/products${suffix}`).then(async (response) => response.ok ? response.json() as Promise<ProductData> : null),
+      fetch(`/api/analytics/customers${suffix}`).then(async (response) => response.ok ? response.json() as Promise<CustomerData> : null),
+      fetch(`/api/analytics/utm${utmSuffix}`).then(async (response) => response.ok ? response.json() as Promise<UtmData> : null),
     ])
-      .then(([overview, pnl, comparison, previousPnl]) => {
+      .then(([overview, pnl, comparison, previousPnl, productsData, customersData, utmData]) => {
         setLiveData(overview); setPnlSummary(pnl); setComparisonData(comparison); setPnlComparison(previousPnl);
+        setOverviewProducts(productsData); setOverviewCustomers(customersData); setOverviewUtm(utmData);
         finishReportRun(overview ? "completed" : "failed", overview?.metrics.orders ?? null);
       })
-      .catch(() => { setLiveData(null); setPnlSummary(null); setComparisonData(null); setPnlComparison(null); finishReportRun("failed", null, "Overview data could not be loaded"); })
+      .catch(() => {
+        setLiveData(null); setPnlSummary(null); setComparisonData(null); setPnlComparison(null);
+        setOverviewProducts(null); setOverviewCustomers(null); setOverviewUtm(null);
+        finishReportRun("failed", null, "Overview data could not be loaded");
+      })
       .finally(() => setLoading(false));
   }, [finishReportRun, fromDate, toDate]);
 
@@ -194,6 +199,29 @@ function Overview({ reportRunId }: { reportRunId?: string }) {
   const chartCosts = trendSeries.length ? trendSeries.map((point) => point.costs) : hasLiveData ? liveData!.months.map((month) => month.shippingRevenue) : spend;
   const chartProfit = trendSeries.length ? trendSeries.map((point) => point.profit) : hasLiveData ? liveData!.months.map((month) => month.grossSales) : profit;
   const chartMaximum = Math.max(...chartRevenue, ...chartCosts, ...chartProfit, 1);
+  const channelPalette = ["#7357ff", "#18b981", "#ff9f43", "#37a3ff", "#e85d75"];
+  const channelMap = new Map<string, { sales: number; orders: number }>();
+  for (const row of overviewUtm?.rows ?? []) {
+    const current = channelMap.get(row.channel) ?? { sales: 0, orders: 0 };
+    current.sales += row.sales; current.orders += row.orders; channelMap.set(row.channel, current);
+  }
+  const channelRows = [...channelMap.entries()].map(([channel, values]) => ({ channel, ...values })).sort((left, right) => right.sales - left.sales).slice(0, 5);
+  const channelSales = channelRows.reduce((total, row) => total + row.sales, 0);
+  const topProducts = overviewProducts?.products.slice(0, 5) ?? [];
+  const customerSplit = overviewCustomers ? [
+    { label: "New", sales: overviewCustomers.metrics.newCustomerSales, orders: overviewCustomers.metrics.newCustomerOrders },
+    { label: "Repeat", sales: overviewCustomers.metrics.repeatCustomerSales, orders: overviewCustomers.metrics.repeatCustomerOrders },
+    { label: "Guest", sales: overviewCustomers.metrics.guestSales, orders: overviewCustomers.metrics.guestOrders },
+  ] : [];
+  const customerSales = customerSplit.reduce((total, row) => total + row.sales, 0);
+  const costBreakdown = pnlSummary ? [
+    { label: "Product COGS", amount: pnlSummary.metrics.cogs },
+    { label: "Marketing", amount: pnlSummary.metrics.marketingSpend },
+    { label: "Payment fees", amount: pnlSummary.metrics.transactionFees },
+    { label: "Shipping & handling", amount: pnlSummary.metrics.merchantShippingCosts + pnlSummary.metrics.handlingCosts },
+    { label: "Operating expenses", amount: pnlSummary.metrics.operatingExpenses },
+  ].filter((row) => row.amount > 0) : [];
+  const totalKnownCosts = costBreakdown.reduce((total, row) => total + row.amount, 0);
   const exportOverview = () => {
     if (!liveData?.hasData) return;
     downloadCsv("shopify-overview.csv", [
@@ -242,9 +270,12 @@ function Overview({ reportRunId }: { reportRunId?: string }) {
         <div className="health-ring"><div><strong>{hasLiveData ? liveData!.metrics.orders.toLocaleString() : "86"}</strong><span>{hasLiveData ? "orders" : "Good"}</span></div></div>
         {hasLiveData ? <ul className="health-list"><li><span className="status success"/>Shopify orders imported <b>{liveData!.metrics.orders.toLocaleString()}</b></li><li><span className="status success"/>Data window <b>{liveData!.range.start} – {liveData!.range.end}</b></li><li><span className={liveData!.meta?.importedDays ? "status success" : "status warn"}/>Marketing spend <b>{liveData!.meta?.importedDays ? `${liveData!.meta.importedDays.toLocaleString()} Meta days · ${liveData!.meta.start} – ${liveData!.meta.end}` : "Not connected"}</b></li></ul> : <ul className="health-list"><li><span className="status success"/>Shopify synced <b>2m ago</b></li><li><span className="status success"/>Ad accounts connected <b>2 of 2</b></li><li><span className="status warn"/>Missing product costs <b>14 SKUs</b></li></ul>}
       </article>
-      <article className="panel channel-panel"><div className="panel-head"><div><span className="eyebrow">ACQUISITION</span><h2>Channel performance</h2></div><button className="text-button">View UTM report <ArrowUpRight/></button></div>
-        {hasLiveData ? <div className="cost-empty"><Megaphone/><strong>Attribution is ready in the UTM report</strong><span>Connect campaign spend before Spine can calculate ROAS and channel cost.</span></div> : <div className="channel-table"><div className="channel-row header"><span>Channel</span><span>Spend</span><span>Shopify revenue</span><span>ROAS</span><span>Revenue mix</span></div>{channels.map(channel => <div className="channel-row" key={channel.name}><span className="channel-name"><i style={{background:channel.color}}/>{channel.name}</span><span>{channel.spend}</span><strong>{channel.revenue}</strong><span>{channel.roas}</span><span className="mix"><i style={{width:`${channel.share}%`, background:channel.color}}/></span></div>)}</div>}
+      <article className="panel channel-panel"><div className="panel-head"><div><span className="eyebrow">ACQUISITION</span><h2>Channel mix</h2></div><span className="report-note">Last-touch Shopify revenue</span></div>
+        {channelRows.length ? <div className="channel-table"><div className="channel-row header"><span>Channel</span><span>Orders</span><span>Revenue</span><span>Share</span><span>Revenue mix</span></div>{channelRows.map((channel, index) => { const share = channelSales ? channel.sales / channelSales * 100 : 0; const color = channelPalette[index % channelPalette.length]; return <div className="channel-row" key={channel.channel}><span className="channel-name"><i style={{background:color}}/>{channel.channel}</span><span>{channel.orders.toLocaleString()}</span><strong>{formatter.format(channel.sales)}</strong><span>{share.toFixed(1)}%</span><span className="mix"><i style={{width:`${share}%`, background:color}}/></span></div>; })}</div> : <div className="cost-empty"><Megaphone/><strong>No attributed orders in this period</strong><span>Run Shopify attribution sync to populate channel mix.</span></div>}
       </article>
+      <article className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">PRODUCTS</span><h2>Top products by net revenue</h2></div><span className="report-note">Contribution profit includes allocated costs.</span></div>{topProducts.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Product</th><th>Units</th><th>Net revenue</th><th>Contribution profit</th></tr></thead><tbody>{topProducts.map((product) => <tr key={product.key}><td><strong>{product.product}</strong><small>{product.variant}</small></td><td>{product.units.toLocaleString()}</td><td>{formatter.format(product.netRevenue)}</td><td>{product.missingCostUnits ? "Costs missing" : formatter.format(product.contributionProfit)}</td></tr>)}</tbody></table></div> : <div className="cost-empty"><Package/><strong>No product sales in this period</strong></div>}</article>
+      <article className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">CUSTOMERS</span><h2>Customer sales split</h2></div></div>{customerSplit.length ? <div className="report-summary">{customerSplit.map((row) => <div key={row.label}><span>{row.label}</span><strong>{formatter.format(row.sales)}</strong><small>{row.orders.toLocaleString()} orders · {customerSales ? (row.sales / customerSales * 100).toFixed(1) : "0.0"}%</small></div>)}</div> : <div className="cost-empty"><Users/><strong>No customer sales in this period</strong></div>}</article>
+      <article className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">COSTS</span><h2>Known cost breakdown</h2></div><strong>{formatter.format(totalKnownCosts)}</strong></div>{costBreakdown.length ? <div className="report-summary">{costBreakdown.map((row) => <div key={row.label}><span>{row.label}</span><strong>{formatter.format(row.amount)}</strong><small>{totalKnownCosts ? (row.amount / totalKnownCosts * 100).toFixed(1) : "0.0"}% of known costs</small></div>)}</div> : <div className="cost-empty"><WalletCards/><strong>No cost data in this period</strong></div>}</article>
       <article className="panel activity-panel"><div className="panel-head"><div><span className="eyebrow">NEXT STEPS</span><h2>{hasLiveData ? "Complete your profit picture" : "Profit opportunities"}</h2></div></div>
         {hasLiveData ? <><div className="opportunity"><span className="opp-icon purple"><WalletCards/></span><div><strong>Add effective-dated product costs</strong><p>Product profitability becomes more precise as cost coverage improves.</p></div></div><div className="opportunity"><span className="opp-icon green"><Megaphone/></span><div><strong>Review your UTM analysis</strong><p>See the sources, mediums, and campaigns attached to imported orders.</p></div></div><div className="opportunity"><span className="opp-icon orange"><CircleDollarSign/></span><div><strong>Connect marketing spend</strong><p>ROAS and final net profit need trusted campaign spend and merchant shipping costs.</p></div></div></> : <><div className="opportunity"><span className="opp-icon purple"><Sparkles/></span><div><strong>14 products need costs</strong><p>£8,420 revenue has unknown margin.</p></div><button>Add costs</button></div><div className="opportunity"><span className="opp-icon green"><TrendingUp/></span><div><strong>Google Brand is outperforming</strong><p>ROAS improved 22% this period.</p></div><button>Explore</button></div><div className="opportunity"><span className="opp-icon orange"><Megaphone/></span><div><strong>Campaign naming mismatch</strong><p>3 campaigns need UTM mapping.</p></div><button>Fix</button></div></>}
       </article>

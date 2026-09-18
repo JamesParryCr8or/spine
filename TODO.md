@@ -42,6 +42,7 @@
 - [x] Standardize CSV export metadata across live report tables, including filters, reporting period, timezone, currency, and generation time.
 - [x] Add Overview date-range selection with equal-length previous-period absolute and percentage KPI comparisons.
 - [x] Add selectable daily, weekly, monthly, quarterly, and annual Overview revenue/cost/profit trends.
+- [x] Add period-aware channel mix, top-product, customer-split, and known-cost Overview widgets.
 
 ### Active build order
 
@@ -305,7 +306,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [x] Add live KPI cards for sales, gross profit, marketing cost, contribution margin, net profit, orders, units, AOV, blended CAC, blended MER, and new-customer ROAS.
 - [x] Show percentage and absolute change against the selected comparison period.
 - [x] Add revenue, cost, and profit trend charts with selectable granularity.
-- [ ] Add channel mix, top products, customer split, and cost breakdown widgets.
+- [x] Add channel mix, top products, customer split, and cost breakdown widgets.
 - [ ] Let users drill from a KPI or chart point into the underlying report.
 - [ ] Add a configurable dashboard widget layout after the fixed MVP dashboard is proven.
 

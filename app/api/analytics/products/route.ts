@@ -10,6 +10,7 @@ import { calculateProductProfit } from "@/lib/analytics/product-profit";
 import { createClient } from "@/lib/supabase/server";
 import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
+import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 
 type Order = { id: string; processed_at: string | null; currency: string; exchange_rate: number };
 type Line = { order_id: string; shopify_gid: string; variant_gid: string | null; sku: string | null; title: string; variant_title: string | null; current_quantity: number; net_sales: string; discounts: string };
@@ -62,8 +63,8 @@ export async function GET(request: Request) {
       .is("cancelled_at", null)
       .eq("test", false)
       .not("processed_at", "is", null);
-    if (fromDate) query = query.gte("processed_at", `${fromDate}T00:00:00.000Z`);
-    if (toDate) query = query.lte("processed_at", `${toDate}T23:59:59.999Z`);
+    if (fromDate) query = query.gte("processed_at", reportingRangeToUtc(fromDate, fromDate, store.timezone || "UTC").start);
+    if (toDate) query = query.lt("processed_at", reportingRangeToUtc(toDate, toDate, store.timezone || "UTC").endExclusive);
     const { data, error } = await query.order("processed_at", { ascending: true }).range(from, from + pageSize - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const page = (data ?? []) as Array<Omit<Order, "exchange_rate">>;
