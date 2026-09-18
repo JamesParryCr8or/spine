@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 import { convertDatedAmount, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 
-type Order = { id: string; customer_id: string | null; net_product_sales: string; processed_at: string | null; currency: string; exchange_rate: number };
+type Order = { id: string; customer_id: string | null; net_product_sales: string; processed_at: string | null; currency: string; country_code: string | null; exchange_rate: number };
 type Attribution = { order_id: string; source: string | null; utm_source: string | null; utm_medium: string | null; utm_campaign: string | null; utm_content: string | null; utm_term: string | null; landing_page: string | null; referrer_url: string | null; customer_order_index: number | null };
 type Diagnostic = { orders: number; sales: number };
 
@@ -20,6 +20,8 @@ export async function GET(request: Request) {
   const attributionModel = params.get("attribution") === "first_touch" ? "first_touch" : "last_touch";
   const fromDate = params.get("from") ?? "";
   const toDate = params.get("to") ?? "";
+  const countryFilter = params.get("country")?.trim().toUpperCase() ?? "";
+  const productFilter = params.get("product")?.trim() ?? "";
   const isDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
   if ((fromDate && !isDate(fromDate)) || (toDate && !isDate(toDate)) || (fromDate && toDate && fromDate > toDate)) return NextResponse.json({ error: "Use a valid start and end date" }, { status: 400 });
 
@@ -39,7 +41,7 @@ export async function GET(request: Request) {
   const orderRows: Order[] = [];
   const currencyCoverage = createCurrencyCoverage(store.currency);
   for (let from = 0; ; from += pageSize) {
-    let query = supabase.from("shopify_orders").select("id,customer_id,net_product_sales,processed_at,currency").eq("store_id", store.id).is("cancelled_at", null).eq("test", false).not("processed_at", "is", null);
+    let query = supabase.from("shopify_orders").select("id,customer_id,net_product_sales,processed_at,currency,country_code").eq("store_id", store.id).is("cancelled_at", null).eq("test", false).not("processed_at", "is", null);
     if (fromDate) query = query.gte("processed_at", reportingRangeToUtc(fromDate, fromDate, store.timezone || "UTC").start);
     if (toDate) query = query.lt("processed_at", reportingRangeToUtc(toDate, toDate, store.timezone || "UTC").endExclusive);
     const { data, error } = await query.order("processed_at", { ascending: true }).range(from, from + pageSize - 1);
@@ -52,8 +54,24 @@ export async function GET(request: Request) {
     if (page.length < pageSize) break;
   }
 
-  const attributions: Attribution[] = [];
+  const orderProducts = new Map<string, Set<string>>();
   for (const ids of chunks(orderRows.map((order) => order.id), 500)) {
+    const { data, error } = await supabase.from("shopify_order_lines").select("order_id,title,variant_title").in("order_id", ids);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    for (const line of data ?? []) {
+      const label = line.variant_title ? `${line.title} · ${line.variant_title}` : line.title;
+      const products = orderProducts.get(line.order_id) ?? new Set<string>();
+      products.add(label); orderProducts.set(line.order_id, products);
+    }
+  }
+  const filterOptions = {
+    countries: [...new Set(orderRows.map((order) => order.country_code).filter((value): value is string => Boolean(value)))].sort(),
+    products: [...new Set([...orderProducts.values()].flatMap((products) => [...products]))].sort(),
+  };
+  const filteredOrderRows = orderRows.filter((order) => (!countryFilter || order.country_code === countryFilter) && (!productFilter || orderProducts.get(order.id)?.has(productFilter)));
+
+  const attributions: Attribution[] = [];
+  for (const ids of chunks(filteredOrderRows.map((order) => order.id), 500)) {
     const { data, error } = await supabase.from("shopify_order_attribution").select("order_id,source,utm_source,utm_medium,utm_campaign,utm_content,utm_term,landing_page,referrer_url,customer_order_index").eq("attribution_model", attributionModel).in("order_id", ids);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     attributions.push(...((data ?? []) as Attribution[]));
@@ -65,7 +83,7 @@ export async function GET(request: Request) {
     missingAttribution: { orders: 0, sales: 0 }, missingUtm: { orders: 0, sales: 0 }, missingLandingPage: { orders: 0, sales: 0 }, missingReferrer: { orders: 0, sales: 0 },
   };
 
-  for (const order of orderRows) {
+  for (const order of filteredOrderRows) {
     if (!order.processed_at) continue;
     const attribution = attributionByOrder.get(order.id) ?? null;
     const normalized = normalizeAttribution(attribution ? { source: attribution.source, utmSource: attribution.utm_source, utmMedium: attribution.utm_medium, utmCampaign: attribution.utm_campaign, utmContent: attribution.utm_content, utmTerm: attribution.utm_term, referrerUrl: attribution.referrer_url } : null);
@@ -95,16 +113,17 @@ export async function GET(request: Request) {
   }
 
   const rows = [...groups.values()].map(({ customerIds, ...group }) => ({ ...group, customers: customerIds.size, revenuePerCustomer: customerIds.size ? group.sales / customerIds.size : null, averageOrderValue: group.orders ? group.sales / group.orders : 0 })).sort((left, right) => right.sales - left.sales);
-  const identifiedCustomers = new Set(orderRows.flatMap((order) => order.customer_id ? [order.customer_id] : []));
+  const identifiedCustomers = new Set(filteredOrderRows.flatMap((order) => order.customer_id ? [order.customer_id] : []));
   const totals = rows.reduce((total, group) => ({ sales: total.sales + group.sales, orders: total.orders + group.orders, newCustomerSales: total.newCustomerSales + group.newCustomerSales }), { sales: 0, orders: 0, newCustomerSales: 0 });
   return NextResponse.json({
-    hasData: orderRows.length > 0,
+    hasData: filteredOrderRows.length > 0,
     currency: store.currency,
     timezone: store.timezone || "UTC",
     currencyCoverage: currencyCoverage.summary(),
     attributionModel,
-    period: orderRows.length ? { start: orderRows[0].processed_at?.slice(0, 10), end: orderRows.at(-1)?.processed_at?.slice(0, 10) } : null,
-    totals: { ...totals, attributedOrders: orderRows.length - diagnostics.missingAttribution.orders, customers: identifiedCustomers.size, averageOrderValue: totals.orders ? totals.sales / totals.orders : 0, revenuePerCustomer: identifiedCustomers.size ? totals.sales / identifiedCustomers.size : null },
+    filterOptions,
+    period: filteredOrderRows.length ? { start: filteredOrderRows[0].processed_at?.slice(0, 10), end: filteredOrderRows.at(-1)?.processed_at?.slice(0, 10) } : null,
+    totals: { ...totals, attributedOrders: filteredOrderRows.length - diagnostics.missingAttribution.orders, customers: identifiedCustomers.size, averageOrderValue: totals.orders ? totals.sales / totals.orders : 0, revenuePerCustomer: identifiedCustomers.size ? totals.sales / identifiedCustomers.size : null },
     diagnostics,
     trends: [...trends.values()].sort((left, right) => left.period.localeCompare(right.period)).map(({ customerIds, ...trend }) => ({ ...trend, customers: customerIds.size })),
     rows,
