@@ -44,6 +44,7 @@
 - [x] Add selectable daily, weekly, monthly, quarterly, and annual Overview revenue/cost/profit trends.
 - [x] Add period-aware channel mix, top-product, customer-split, and known-cost Overview widgets.
 - [x] Add period-preserving drilldowns from Overview KPI cards, chart points, and summary widgets into their detailed reports.
+- [x] Add saved Overview widget visibility and ordering controls.
 
 ### Active build order
 
@@ -309,7 +310,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [x] Add revenue, cost, and profit trend charts with selectable granularity.
 - [x] Add channel mix, top products, customer split, and cost breakdown widgets.
 - [x] Let users drill from a KPI or chart point into the underlying report, preserving the selected dashboard or chart period.
-- [ ] Add a configurable dashboard widget layout after the fixed MVP dashboard is proven.
+- [x] Add a configurable dashboard widget layout with saved visibility and ordering preferences.
 
 ### Income statement / P&L
 
