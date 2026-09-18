@@ -65,6 +65,8 @@
 - [x] Audit the foundation checklist against the current auth, tenancy, and CI implementation and split remaining gaps precisely.
 - [x] Add Google OAuth and email magic-link login paths with PKCE callback handling and local-only redirects.
 - [x] Remove hardcoded Supabase browser fallbacks and validate public configuration across browser, server, proxy, tests, and deployment tooling.
+- [x] Audit all 31 public Supabase tables for RLS and ownership-safe update policies; add a reusable structural database test.
+- [ ] Enable Supabase leaked-password protection before external onboarding.
 
 ### Active build order
 
@@ -532,9 +534,9 @@ Normalize every ad source into shared daily dimensions while retaining source-sp
 
 ### Security and privacy
 
-- [ ] Enable RLS on every table in exposed schemas.
+- [x] Enable RLS on every public table and verify coverage against the connected project.
 - [ ] Test cross-organization isolation for every role and route.
-- [ ] Use both `USING` and `WITH CHECK` for ownership-sensitive update policies.
+- [x] Use both `USING` and `WITH CHECK` for every ownership-sensitive update policy.
 - [ ] Keep privileged functions out of exposed schemas and minimize `SECURITY DEFINER` use.
 - [ ] Use security-invoker views where supported.
 - [ ] Never expose Supabase secret/service-role credentials or connector tokens to the browser.
