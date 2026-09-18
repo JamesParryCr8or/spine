@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { monetary } from "@/lib/analytics/effective-cost";
+import { costKey, monetary, resolveEffectiveCost, type EffectiveCost } from "@/lib/analytics/effective-cost";
 import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { normalizeAttribution } from "@/lib/analytics/utm-attribution";
 import { createClient } from "@/lib/supabase/server";
@@ -8,6 +8,9 @@ import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 import { convertDatedAmount, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 
 type Order = { id: string; customer_id: string | null; net_product_sales: string; processed_at: string | null; currency: string; country_code: string | null; exchange_rate: number };
+type Line = { order_id: string; title: string; variant_title: string | null; variant_gid: string | null; sku: string | null; current_quantity: number };
+type Variant = { id: string; shopify_gid: string; sku: string | null; shopify_unit_cost: string | null };
+type Refund = { order_id: string; total_refunded: string };
 type Attribution = { order_id: string; source: string | null; utm_source: string | null; utm_medium: string | null; utm_campaign: string | null; utm_content: string | null; utm_term: string | null; landing_page: string | null; referrer_url: string | null; customer_order_index: number | null };
 type Diagnostic = { orders: number; sales: number };
 
@@ -54,15 +57,49 @@ export async function GET(request: Request) {
     if (page.length < pageSize) break;
   }
 
+  const orderChunks = chunks(orderRows.map((order) => order.id), 500);
+  const [lineResults, refundResults, variantResult, costResult] = await Promise.all([
+    Promise.all(orderChunks.map((ids) => supabase.from("shopify_order_lines").select("order_id,title,variant_title,variant_gid,sku,current_quantity").in("order_id", ids))),
+    Promise.all(orderChunks.map((ids) => supabase.from("shopify_refunds").select("order_id,total_refunded").in("order_id", ids))),
+    supabase.from("shopify_variants").select("id,shopify_gid,sku,shopify_unit_cost").eq("store_id", store.id),
+    supabase.from("product_costs").select("variant_id,sku,amount,effective_from,effective_to,source").eq("store_id", store.id),
+  ]);
+  const relatedError = [...lineResults, ...refundResults, variantResult, costResult].find((result) => result.error)?.error;
+  if (relatedError) return NextResponse.json({ error: relatedError.message }, { status: 500 });
+  const lines = lineResults.flatMap((result) => result.data ?? []) as Line[];
   const orderProducts = new Map<string, Set<string>>();
-  for (const ids of chunks(orderRows.map((order) => order.id), 500)) {
-    const { data, error } = await supabase.from("shopify_order_lines").select("order_id,title,variant_title").in("order_id", ids);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    for (const line of data ?? []) {
-      const label = line.variant_title ? `${line.title} · ${line.variant_title}` : line.title;
-      const products = orderProducts.get(line.order_id) ?? new Set<string>();
-      products.add(label); orderProducts.set(line.order_id, products);
-    }
+  for (const line of lines) {
+    const label = line.variant_title ? `${line.title} · ${line.variant_title}` : line.title;
+    const products = orderProducts.get(line.order_id) ?? new Set<string>();
+    products.add(label); orderProducts.set(line.order_id, products);
+  }
+  const orderById = new Map(orderRows.map((order) => [order.id, order]));
+  const refundsByOrder = new Map<string, number>();
+  for (const refund of refundResults.flatMap((result) => result.data ?? []) as Refund[]) {
+    const order = orderById.get(refund.order_id);
+    if (!order) continue;
+    const amount = convertDatedAmount(monetary(refund.total_refunded), order.exchange_rate, store.currency);
+    refundsByOrder.set(refund.order_id, (refundsByOrder.get(refund.order_id) ?? 0) + amount);
+  }
+  const variants = (variantResult.data ?? []) as Variant[];
+  const variantsByGid = new Map(variants.map((variant) => [variant.shopify_gid, variant]));
+  const variantsBySku = new Map(variants.filter((variant) => variant.sku).map((variant) => [variant.sku!.trim().toLowerCase(), variant]));
+  const costsByKey = new Map<string, EffectiveCost[]>();
+  for (const cost of (costResult.data ?? []) as EffectiveCost[]) {
+    const key = costKey(cost);
+    if (key) costsByKey.set(key, [...(costsByKey.get(key) ?? []), cost]);
+  }
+  const cogsByOrder = new Map<string, number>();
+  const missingCostUnitsByOrder = new Map<string, number>();
+  for (const line of lines) {
+    const order = orderById.get(line.order_id);
+    if (!order?.processed_at) continue;
+    const variant = line.variant_gid ? variantsByGid.get(line.variant_gid) : line.sku ? variantsBySku.get(line.sku.trim().toLowerCase()) : undefined;
+    const costs = variant ? costsByKey.get(`variant:${variant.id}`) ?? costsByKey.get(`sku:${variant.sku?.trim().toLowerCase()}`) ?? [] : costsByKey.get(`sku:${line.sku?.trim().toLowerCase()}`) ?? [];
+    const unitCost = resolveEffectiveCost(costs, order.processed_at.slice(0, 10), variant?.shopify_unit_cost === null || variant?.shopify_unit_cost === undefined ? null : monetary(variant.shopify_unit_cost));
+    const quantity = Math.max(line.current_quantity, 0);
+    if (unitCost === null) missingCostUnitsByOrder.set(line.order_id, (missingCostUnitsByOrder.get(line.order_id) ?? 0) + quantity);
+    else cogsByOrder.set(line.order_id, (cogsByOrder.get(line.order_id) ?? 0) + unitCost * quantity);
   }
   const filterOptions = {
     countries: [...new Set(orderRows.map((order) => order.country_code).filter((value): value is string => Boolean(value)))].sort(),
@@ -77,7 +114,7 @@ export async function GET(request: Request) {
     attributions.push(...((data ?? []) as Attribution[]));
   }
   const attributionByOrder = new Map(attributions.map((attribution) => [attribution.order_id, attribution]));
-  const groups = new Map<string, { channel: string; source: string; medium: string; campaign: string; content: string; term: string; landingPage: string; customerType: string; sales: number; orders: number; newCustomerSales: number; customerIds: Set<string> }>();
+  const groups = new Map<string, { channel: string; source: string; medium: string; campaign: string; content: string; term: string; landingPage: string; customerType: string; sales: number; refunds: number; cogs: number; missingCostUnits: number; orders: number; newCustomerSales: number; customerIds: Set<string> }>();
   const trends = new Map<string, { period: string; sales: number; orders: number; newCustomerSales: number; customerIds: Set<string> }>();
   const diagnostics: Record<"missingAttribution" | "missingUtm" | "missingLandingPage" | "missingReferrer", Diagnostic> = {
     missingAttribution: { orders: 0, sales: 0 }, missingUtm: { orders: 0, sales: 0 }, missingLandingPage: { orders: 0, sales: 0 }, missingReferrer: { orders: 0, sales: 0 },
@@ -91,8 +128,11 @@ export async function GET(request: Request) {
     const customerType = !order.customer_id ? "Guest" : attribution?.customer_order_index === 1 ? "New" : "Repeat";
     const landingPage = cleanLandingPage(attribution?.landing_page ?? null);
     const key = [normalized.channel, normalized.source, normalized.medium, normalized.campaign, normalized.content, normalized.term, landingPage, customerType].join("\u0000");
-    const group = groups.get(key) ?? { ...normalized, landingPage, customerType, sales: 0, orders: 0, newCustomerSales: 0, customerIds: new Set<string>() };
+    const group = groups.get(key) ?? { ...normalized, landingPage, customerType, sales: 0, refunds: 0, cogs: 0, missingCostUnits: 0, orders: 0, newCustomerSales: 0, customerIds: new Set<string>() };
     group.sales += sales;
+    group.refunds += refundsByOrder.get(order.id) ?? 0;
+    group.cogs += cogsByOrder.get(order.id) ?? 0;
+    group.missingCostUnits += missingCostUnitsByOrder.get(order.id) ?? 0;
     group.orders += 1;
     if (customerType === "New") group.newCustomerSales += sales;
     if (order.customer_id) group.customerIds.add(order.customer_id);
@@ -114,7 +154,7 @@ export async function GET(request: Request) {
 
   const rows = [...groups.values()].map(({ customerIds, ...group }) => ({ ...group, customers: customerIds.size, revenuePerCustomer: customerIds.size ? group.sales / customerIds.size : null, averageOrderValue: group.orders ? group.sales / group.orders : 0 })).sort((left, right) => right.sales - left.sales);
   const identifiedCustomers = new Set(filteredOrderRows.flatMap((order) => order.customer_id ? [order.customer_id] : []));
-  const totals = rows.reduce((total, group) => ({ sales: total.sales + group.sales, orders: total.orders + group.orders, newCustomerSales: total.newCustomerSales + group.newCustomerSales }), { sales: 0, orders: 0, newCustomerSales: 0 });
+  const totals = rows.reduce((total, group) => ({ sales: total.sales + group.sales, refunds: total.refunds + group.refunds, cogs: total.cogs + group.cogs, missingCostUnits: total.missingCostUnits + group.missingCostUnits, orders: total.orders + group.orders, newCustomerSales: total.newCustomerSales + group.newCustomerSales }), { sales: 0, refunds: 0, cogs: 0, missingCostUnits: 0, orders: 0, newCustomerSales: 0 });
   return NextResponse.json({
     hasData: filteredOrderRows.length > 0,
     currency: store.currency,

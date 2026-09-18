@@ -50,6 +50,7 @@
 - [x] Complete the UTM KPI layer with selected-period gross profit and contribution margin from the reconciled P&L.
 - [x] Add selectable monthly UTM sales, order, customer, and profit trends with previous-period overlays.
 - [x] Add previous-period/year, landing-page, country, product, and customer-type UTM filters.
+- [x] Add exact refunds and effective-dated COGS plus reconciled shared-cost allocations to every UTM group.
 
 ### Active build order
 
@@ -346,7 +347,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [x] Preserve imported raw UTM values while creating report-time normalized values for case, whitespace, common aliases, and missing parameters.
 - [x] Group attribution clearly as Direct, Organic, Referral, Attributed, or Unknown using documented source, medium, and referrer rules.
 - [x] Add filters for comparison period, landing page, country, product, and new/repeat customer.
-- [ ] Show revenue, refunds, COGS, marketing cost, contribution profit, AOV, and customer mix for every UTM grouping.
+- [x] Show revenue, refunds, COGS, marketing cost, contribution profit, AOV, and customer mix for every UTM grouping.
 - [x] Prevent order revenue from being counted more than once by selecting one model-specific attribution record per order and aggregating from the valid-order set.
 - [ ] Add a mapping interface to connect UTM campaigns to Meta/Google/custom spend when names do not match exactly.
 - [ ] Calculate ROAS, MER, CAC, and profit after spend is mapped; label metrics unavailable without traffic or spend data.
