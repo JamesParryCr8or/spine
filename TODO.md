@@ -36,6 +36,7 @@
 - [x] Clear all foreign-key index findings reported by the Supabase performance advisor.
 - [x] Track saved-report executions against their exact definition version and record truthful success/failure outcomes.
 - [x] Expose saved-report run history, sanitized failures, row counts, definition versions, and retry actions in the report library.
+- [x] Prevent silent cross-currency aggregation across order-backed reports and surface excluded-currency coverage.
 
 ### Active build order
 
@@ -187,6 +188,8 @@ Shopify is the primary sales and catalog source. Other sources enrich Shopify ra
 - [x] Determine new versus repeat customer from first valid order, not from campaign attribution.
 - [ ] Handle guest checkouts and customer merges without double-counting customers.
 - [ ] Support multi-currency orders and Shopify Markets without silently mixing currencies.
+  - [x] Exclude non-reporting-currency orders from financial totals and show counts by source currency.
+  - [ ] Convert orders with explicit dated exchange rates before consolidated reporting.
 - [x] Add reconciliation tests against Shopify order totals for fixed sample periods.
 
 ## Phase 3 — Cost and expense engine

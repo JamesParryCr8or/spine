@@ -17,6 +17,7 @@ export async function GET() {
     .from("shopify_orders")
     .select("id,order_name,processed_at,financial_status,fulfillment_status,source_name,net_product_sales,shipping_revenue,total_sales,currency")
     .eq("store_id", store.id)
+    .eq("currency", store.currency)
     .eq("test", false)
     .order("processed_at", { ascending: false })
     .limit(250);

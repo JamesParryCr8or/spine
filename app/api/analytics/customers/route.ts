@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
 
 type Order = {
@@ -9,6 +10,7 @@ type Order = {
   processed_at: string | null;
   net_product_sales: string;
   shipping_revenue: string;
+  currency: string;
 };
 
 const money = (value: string | null | undefined) => Number(value ?? 0);
@@ -25,11 +27,12 @@ export async function GET() {
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
   const orders: Order[] = [];
+  const currencyCoverage = createCurrencyCoverage(store.currency);
   const pageSize = 1000;
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await supabase
       .from("shopify_orders")
-      .select("id,customer_id,processed_at,net_product_sales,shipping_revenue")
+      .select("id,customer_id,processed_at,net_product_sales,shipping_revenue,currency")
       .eq("store_id", store.id)
       .eq("test", false)
       .is("cancelled_at", null)
@@ -38,7 +41,7 @@ export async function GET() {
       .range(from, from + pageSize - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const page = (data ?? []) as Order[];
-    orders.push(...page);
+    for (const order of page) if (currencyCoverage.include(order.currency)) orders.push(order);
     if (page.length < pageSize) break;
   }
   const ordersByCustomer = new Map<string, Order[]>();
@@ -138,6 +141,7 @@ export async function GET() {
   return NextResponse.json({
     hasData: orders.length > 0,
     currency: store.currency,
+    currencyCoverage: currencyCoverage.summary(),
     metrics: {
       customers: customers.length,
       repeatCustomers,

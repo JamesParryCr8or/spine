@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 import { calculateAcquisitionMetrics } from "@/lib/analytics/acquisition";
 import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
 import { reportingDateKey, reportingMonthKey } from "@/lib/analytics/reporting-range";
@@ -14,6 +15,7 @@ type Order = {
   net_product_sales: string;
   shipping_revenue: string;
   total_sales: string;
+  currency: string;
 };
 
 function isoDate(date: Date) {
@@ -51,11 +53,12 @@ export async function GET() {
   if (storeError || !store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
   const orders: Order[] = [];
+  const currencyCoverage = createCurrencyCoverage(store.currency);
   const pageSize = 1000;
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await supabase
       .from("shopify_orders")
-      .select("id,customer_id,processed_at,gross_sales,discounts,net_product_sales,shipping_revenue,total_sales")
+      .select("id,customer_id,processed_at,gross_sales,discounts,net_product_sales,shipping_revenue,total_sales,currency")
       .eq("store_id", store.id)
       .is("cancelled_at", null)
       .eq("test", false)
@@ -64,7 +67,7 @@ export async function GET() {
       .range(from, from + pageSize - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const page = (data ?? []) as Order[];
-    orders.push(...page);
+    for (const order of page) if (currencyCoverage.include(order.currency)) orders.push(order);
     if (page.length < pageSize) break;
   }
 
@@ -130,6 +133,7 @@ export async function GET() {
   return NextResponse.json({
     hasData: orderCount > 0,
     currency: store.currency,
+    currencyCoverage: currencyCoverage.summary(),
     range: { start: earliestOrderAt ? reportingDateKey(earliestOrderAt, timezone) : isoDate(chartStart), end: latestOrderAt ? reportingDateKey(latestOrderAt, timezone) : latestLocalDate },
     metrics: {
       grossSales,

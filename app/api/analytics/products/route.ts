@@ -8,8 +8,9 @@ import { actualTransactionFees, estimatedTransactionFee, selectEffectivePaymentF
 import { allocateOrderRefund } from "@/lib/analytics/refund-allocation";
 import { calculateProductProfit } from "@/lib/analytics/product-profit";
 import { createClient } from "@/lib/supabase/server";
+import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 
-type Order = { id: string; processed_at: string | null };
+type Order = { id: string; processed_at: string | null; currency: string };
 type Line = { order_id: string; shopify_gid: string; variant_gid: string | null; sku: string | null; title: string; variant_title: string | null; current_quantity: number; net_sales: string; discounts: string };
 type RefundLine = { line_item_gid: string; subtotal: string };
 type Refund = { order_id: string; total_refunded: string };
@@ -47,11 +48,12 @@ export async function GET(request: Request) {
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
   const orderRows: Order[] = [];
+  const currencyCoverage = createCurrencyCoverage(store.currency);
   const pageSize = 1000;
   for (let from = 0; ; from += pageSize) {
     let query = supabase
       .from("shopify_orders")
-      .select("id,processed_at")
+      .select("id,processed_at,currency")
       .eq("store_id", store.id)
       .is("cancelled_at", null)
       .eq("test", false)
@@ -61,7 +63,7 @@ export async function GET(request: Request) {
     const { data, error } = await query.order("processed_at", { ascending: true }).range(from, from + pageSize - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const page = (data ?? []) as Order[];
-    orderRows.push(...page);
+    for (const order of page) if (currencyCoverage.include(order.currency)) orderRows.push(order);
     if (page.length < pageSize) break;
   }
   const orderIds = orderRows.map((order) => order.id);
@@ -251,6 +253,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     hasData: products.length > 0,
     currency: store.currency,
+    currencyCoverage: currencyCoverage.summary(),
     period: orderRows.length ? { start: orderRows[0].processed_at?.slice(0, 10), end: orderRows.at(-1)?.processed_at?.slice(0, 10) } : null,
     products,
   });

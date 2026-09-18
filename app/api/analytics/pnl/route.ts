@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 import { costKey, monetary, resolveEffectiveCost, type EffectiveCost } from "@/lib/analytics/effective-cost";
 import { actualTransactionFees, estimatedTransactionFee, selectEffectivePaymentFeeRule, type EffectivePaymentFeeRule, type ShopifyTransactionFee } from "@/lib/analytics/transaction-fees";
 import { allocatePeriodCost, operatingCostBucket } from "@/lib/analytics/cost-allocation";
@@ -8,7 +9,7 @@ import { selectEffectiveShippingCost, summarizeShippingCoverage, type ProductShi
 import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { calculateProfitAndLoss } from "@/lib/analytics/profit-and-loss";
 
-type Order = { id: string; processed_at: string | null; gross_sales: string; discounts: string; net_product_sales: string; shipping_revenue: string; tax: string; duties: string; total_sales: string };
+type Order = { id: string; processed_at: string | null; gross_sales: string; discounts: string; net_product_sales: string; shipping_revenue: string; tax: string; duties: string; total_sales: string; currency: string };
 type Line = { order_id: string; variant_gid: string | null; sku: string | null; current_quantity: number };
 type Variant = { id: string; shopify_gid: string; sku: string | null; shopify_unit_cost: string | null };
 type Refund = { total_refunded: string };
@@ -50,11 +51,12 @@ export async function GET(request: Request) {
   const dateRange = fromDate && toDate ? reportingRangeToUtc(fromDate, toDate, store.timezone || "UTC") : null;
 
   const includedOrders: Order[] = [];
+  const currencyCoverage = createCurrencyCoverage(store.currency);
   const pageSize = 1000;
   for (let from = 0; ; from += pageSize) {
     let query = supabase
       .from("shopify_orders")
-      .select("id,processed_at,gross_sales,discounts,net_product_sales,shipping_revenue,tax,duties,total_sales")
+      .select("id,processed_at,gross_sales,discounts,net_product_sales,shipping_revenue,tax,duties,total_sales,currency")
       .eq("store_id", store.id)
       .is("cancelled_at", null)
       .eq("test", false)
@@ -67,7 +69,7 @@ export async function GET(request: Request) {
     const { data, error } = await query.order("processed_at", { ascending: true }).range(from, from + pageSize - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const page = (data ?? []) as Order[];
-    includedOrders.push(...page);
+    for (const order of page) if (currencyCoverage.include(order.currency)) includedOrders.push(order);
     if (page.length < pageSize) break;
   }
   const orderIds = includedOrders.map((order) => order.id);
@@ -233,6 +235,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     hasData: includedOrders.length > 0,
     currency: store.currency,
+    currencyCoverage: currencyCoverage.summary(),
     calculatedAt: new Date().toISOString(),
     metrics: { ...totals, refunds, cogs, ...calculated, marketingSpend, transactionFees, merchantShippingCosts, variantShippingCosts, shippingFallbackCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, orders: includedOrders.length, missingCostLines, missingShippingLines: shippingCoverage.missingLines, shippingOverrideLines: shippingCoverage.overrideLines, shippingFallbackLines: shippingCoverage.fallbackLines, shippingFallbackRate: shippingCoverage.fallbackRate, unallocatedOperatingCosts },
     period: rangeStart && rangeEnd ? { start: rangeStart, end: rangeEnd } : null,

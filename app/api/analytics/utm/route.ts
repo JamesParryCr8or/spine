@@ -4,8 +4,9 @@ import { monetary } from "@/lib/analytics/effective-cost";
 import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { normalizeAttribution } from "@/lib/analytics/utm-attribution";
 import { createClient } from "@/lib/supabase/server";
+import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 
-type Order = { id: string; customer_id: string | null; net_product_sales: string; processed_at: string | null };
+type Order = { id: string; customer_id: string | null; net_product_sales: string; processed_at: string | null; currency: string };
 type Attribution = { order_id: string; source: string | null; utm_source: string | null; utm_medium: string | null; utm_campaign: string | null; utm_content: string | null; utm_term: string | null; landing_page: string | null; referrer_url: string | null; customer_order_index: number | null };
 type Diagnostic = { orders: number; sales: number };
 
@@ -32,14 +33,15 @@ export async function GET(request: Request) {
 
   const pageSize = 1000;
   const orderRows: Order[] = [];
+  const currencyCoverage = createCurrencyCoverage(store.currency);
   for (let from = 0; ; from += pageSize) {
-    let query = supabase.from("shopify_orders").select("id,customer_id,net_product_sales,processed_at").eq("store_id", store.id).is("cancelled_at", null).eq("test", false).not("processed_at", "is", null);
+    let query = supabase.from("shopify_orders").select("id,customer_id,net_product_sales,processed_at,currency").eq("store_id", store.id).is("cancelled_at", null).eq("test", false).not("processed_at", "is", null);
     if (fromDate) query = query.gte("processed_at", reportingRangeToUtc(fromDate, fromDate, store.timezone || "UTC").start);
     if (toDate) query = query.lt("processed_at", reportingRangeToUtc(toDate, toDate, store.timezone || "UTC").endExclusive);
     const { data, error } = await query.order("processed_at", { ascending: true }).range(from, from + pageSize - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const page = (data ?? []) as Order[];
-    orderRows.push(...page);
+    for (const order of page) if (currencyCoverage.include(order.currency)) orderRows.push(order);
     if (page.length < pageSize) break;
   }
 
@@ -91,6 +93,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     hasData: orderRows.length > 0,
     currency: store.currency,
+    currencyCoverage: currencyCoverage.summary(),
     attributionModel,
     period: orderRows.length ? { start: orderRows[0].processed_at?.slice(0, 10), end: orderRows.at(-1)?.processed_at?.slice(0, 10) } : null,
     totals: { ...totals, attributedOrders: orderRows.length - diagnostics.missingAttribution.orders, customers: identifiedCustomers.size, averageOrderValue: totals.orders ? totals.sales / totals.orders : 0, revenuePerCustomer: identifiedCustomers.size ? totals.sales / identifiedCustomers.size : null },

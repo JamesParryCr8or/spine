@@ -83,9 +83,12 @@ function useReportRun(reportRunId?: string) {
   }, [reportRunId]);
 }
 
+type CurrencyCoverage = { reportingCurrency: string; includedOrders: number; excludedOrders: number; excludedCurrencies: Array<{ currency: string; orders: number }> };
+
 type OverviewData = {
   hasData: boolean;
   currency: string;
+  currencyCoverage: CurrencyCoverage;
   range: { start: string; end: string };
   metrics: { grossSales: number; discounts: number; netSales: number; shippingRevenue: number; orders: number; unitsSold: number; averageOrderValue: number; marketingSpend: number; newCustomers: number; newCustomerSales: number; blendedCac: number | null; blendedMer: number | null; newCustomerRoas: number | null };
   months: Array<{ key: string; label: string; grossSales: number; discounts: number; netSales: number; shippingRevenue: number; orders: number }>;
@@ -154,7 +157,7 @@ function Overview({ reportRunId }: { reportRunId?: string }) {
   };
 
   return <>
-    {loading ? <div className="data-loading">Loading your Shopify summary…</div> : !hasLiveData && liveData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to start your live dashboard</strong><span>The figures below are a preview. Your own sales and orders will appear after the first sync.</span></div></div> : null}
+    {loading ? <div className="data-loading">Loading your Shopify summary…</div> : !hasLiveData && liveData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to start your live dashboard</strong><span>The figures below are a preview. Your own sales and orders will appear after the first sync.</span></div></div> : null}{liveData?.currencyCoverage.excludedOrders ? <div className="connection-notice"><Info/><div><strong>{liveData.currencyCoverage.excludedOrders.toLocaleString()} orders excluded from financial totals</strong><span>Reporting currency is {liveData.currency}. Excluded: {liveData.currencyCoverage.excludedCurrencies.map((item) => `${item.currency} (${item.orders.toLocaleString()})`).join(", ")}. Add explicit exchange rates before consolidating these orders.</span></div></div> : null}
     {hasLiveData ? <div className="report-export"><button className="export-button" onClick={exportOverview}><Download/> Export overview CSV</button></div> : null}
     <section className="metric-grid">{liveMetrics.map((metric) => <article className="metric-card" key={metric.label}>
       <div className="metric-head"><span>{metric.label}</span><CircleDollarSign /></div>
@@ -183,6 +186,7 @@ function Overview({ reportRunId }: { reportRunId?: string }) {
 type PnlData = {
   hasData: boolean;
   currency: string;
+  currencyCoverage: CurrencyCoverage;
   metrics: { grossSales: number; discounts: number; refunds: number; netProductSales: number; shippingRevenue: number; tax: number; duties: number; totalSales: number; cogs: number; grossProfit: number; grossMargin: number | null; marketingSpend: number; transactionFees: number; merchantShippingCosts: number; variantShippingCosts: number; shippingFallbackCosts: number; handlingCosts: number; fixedOperatingExpenses: number; variableOperatingExpenses: number; operatingExpenses: number; contributionMarginBeforeShipping: number; contributionMarginBeforeShippingPercentage: number | null; contributionMargin: number; contributionMarginPercentage: number | null; profitAfterOperatingCosts: number; profitAfterKnownCosts: number; profitAfterMarketingSpend: number; netProfit: number | null; netMargin: number | null; orders: number; missingCostLines: number; missingShippingLines: number; shippingOverrideLines: number; shippingFallbackLines: number; shippingFallbackRate: number | null; unallocatedOperatingCosts: number };
   availability: { marketingSpend: boolean; transactionFees: boolean; shippingCosts: boolean; handlingCosts: boolean; operatingExpenses: boolean; netProfit: boolean };
   period: { start: string; end: string } | null;
@@ -385,7 +389,7 @@ function ProfitLoss({ savedPreset, reportRunId }: { savedPreset?: "all_imported"
       {(fromDate || toDate) && <button onClick={() => { setFromDate(""); setToDate(""); }}>All imported data</button>}
     </section>
     {loading || periodLoading ? <div className="data-loading">Calculating reconciled periods…</div> : null}
-    {!pnl.hasData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to build your income statement</strong><span>Your period views will populate after the first sync.</span></div></div> : null}
+    {!pnl.hasData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to build your income statement</strong><span>Your period views will populate after the first sync.</span></div></div> : null}{pnl.currencyCoverage.excludedOrders ? <div className="connection-notice"><Info/><div><strong>{pnl.currencyCoverage.excludedOrders.toLocaleString()} orders excluded from this P&amp;L</strong><span>Reporting currency is {pnl.currency}. Excluded: {pnl.currencyCoverage.excludedCurrencies.map((item) => `${item.currency} (${item.orders.toLocaleString()})`).join(", ")}. Spine never combines currencies without an explicit dated exchange rate.</span></div></div> : null}
     {pnl.hasData ? <div className="connection-notice"><Info/><div><strong>{reconciliationIssues.length ? "Reconciliation status: provisional" : "Reconciliation status: complete"}</strong><span>{reconciliationIssues.length ? reconciliationIssues.join(" · ") : "All required cost inputs are covered for this period."}</span></div></div> : null}
     {pnl.hasData ? <><div className="report-export"><button className="export-button" onClick={exportPnl}><Download/> Export visible P&amp;L CSV</button></div><details className="metric-dictionary"><summary>Metric definitions</summary><dl><div><dt>Total sales</dt><dd>Net product sales plus customer shipping revenue. Tax and duties are shown separately.</dd></div><div><dt>Gross profit</dt><dd>Net product sales after refunds, less effective-dated product costs.</dd></div><div><dt>Net profit</dt><dd>Available after marketing, shipping, handling, product-cost, and operating-cost coverage is complete.</dd></div></dl></details></> : null}
     <section className="panel report-panel"><div className="report-summary">{summary.map(([label, value, hint]) => <div key={label}><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>)}</div>

@@ -16,6 +16,7 @@ import { calculateProfitAndLoss } from '../lib/analytics/profit-and-loss.ts';
 import { normalizeAttribution, normalizeUtmSource } from '../lib/analytics/utm-attribution.ts';
 import { shopifySyncWindow, shopifyUpdatedAtQuery } from '../lib/shopify/sync-window.ts';
 import { reportingPeriods } from '../lib/analytics/reporting-periods.ts';
+import { createCurrencyCoverage } from '../lib/analytics/currency-coverage.ts';
 import { parseCreateReport, parseFinishReportRun, parseStartReportRun, parseUpdateReport, REPORT_SCHEMA_VERSION } from '../lib/reports/schema.ts';
 import goldenStore from './fixtures/golden-store-pnl.json' with { type: 'json' };
 
@@ -365,4 +366,14 @@ test('saved report run payloads bind executions to valid identifiers and termina
   });
   assert.equal(parseFinishReportRun({ runId: id, status: 'running' }).ok, false);
   assert.equal(parseFinishReportRun({ runId: id, status: 'failed', rowCount: -1 }).ok, false);
+});
+
+
+test('currency coverage excludes foreign-currency orders and reports every excluded currency', () => {
+  const coverage = createCurrencyCoverage('gbp');
+  assert.equal(coverage.include('GBP'), true);
+  assert.equal(coverage.include('usd'), false);
+  assert.equal(coverage.include('EUR'), false);
+  assert.equal(coverage.include('USD'), false);
+  assert.deepEqual(coverage.summary(), { reportingCurrency: 'GBP', includedOrders: 1, excludedOrders: 3, excludedCurrencies: [{ currency: 'EUR', orders: 1 }, { currency: 'USD', orders: 2 }] });
 });
