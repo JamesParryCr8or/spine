@@ -60,6 +60,7 @@
 - [x] Import tenant-protected daily custom marketing spend from CSV, deduplicate it deterministically, convert currencies by date, and allocate it to matching UTM groups.
 - [x] Preview custom-spend imports, show batch history, and roll back imports while restoring overwritten rows.
 - [x] Add a manual field-mapping screen for custom-spend CSV files with non-standard headers.
+- [x] Add validated starter saved-report templates for income statements, channel spend, product profitability, and new-customer acquisition.
 
 ### Active build order
 
@@ -446,7 +447,8 @@ Normalize every ad source into shared daily dimensions while retaining source-sp
 - [x] Record report version and last successful run.
   - [x] Record and display the report definition version with immutable revision history.
   - [x] Record the last successful execution only after the selected analytics request succeeds.
-- [ ] Create starter templates for P&L, daily channel spend, product profitability, new customer acquisition, and Klaviyo campaigns.
+- [x] Create starter templates for P&L, daily channel spend, product profitability, and new customer acquisition.
+- [ ] Add the Klaviyo campaigns starter template when the Klaviyo report page is available.
 
 ### Visual report builder
 
