@@ -1,4 +1,4 @@
-import { convertCurrency } from "./money";
+import { convertCurrency } from "./money.ts";
 
 export type DatedExchangeRate = {
   base_currency: string;
