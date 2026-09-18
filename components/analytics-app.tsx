@@ -106,6 +106,9 @@ function Overview({ reportRunId }: { reportRunId?: string }) {
   const [pnlComparison, setPnlComparison] = useState<PnlData | null>(null);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [granularity, setGranularity] = useState<ReportingGranularity>("monthly");
+  const [trendData, setTrendData] = useState<PnlPeriodData[]>([]);
+  const [trendLoading, setTrendLoading] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -136,6 +139,24 @@ function Overview({ reportRunId }: { reportRunId?: string }) {
       .finally(() => setLoading(false));
   }, [finishReportRun, fromDate, toDate]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      if (!pnlSummary?.period || !pnlSummary.hasData) { setTrendData([]); return; }
+      const periods = reportingPeriods(pnlSummary.period.start, pnlSummary.period.end, granularity, 12);
+      setTrendLoading(true);
+      Promise.all(periods.map(async (period) => {
+        if (period.start === pnlSummary.period?.start && period.end === pnlSummary.period?.end) return { period, data: pnlSummary };
+        const response = await fetch(`/api/analytics/pnl?from=${period.start}&to=${period.end}`, { signal: controller.signal });
+        return response.ok ? { period, data: await response.json() as PnlData } : null;
+      }))
+        .then((results) => setTrendData(results.filter((result): result is PnlPeriodData => result !== null)))
+        .catch((error) => { if (error instanceof Error && error.name !== "AbortError") setTrendData([]); })
+        .finally(() => { if (!controller.signal.aborted) setTrendLoading(false); });
+    }, 0);
+    return () => { window.clearTimeout(timeout); controller.abort(); };
+  }, [granularity, pnlSummary]);
+
   const hasLiveData = Boolean(liveData?.hasData);
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: liveData?.currency || "GBP", maximumFractionDigits: 0 });
   const comparisonDelta = (current: number | null, previous: number | null | undefined, format: (value: number) => string, fallback: string, lowerIsBetter = false) => {
@@ -163,11 +184,16 @@ function Overview({ reportRunId }: { reportRunId?: string }) {
     { label: "Contribution margin", value: pnlSummary?.availability.marketingSpend && pnlSummary.availability.shippingCosts && pnlSummary.availability.handlingCosts ? formatter.format(pnlSummary.metrics.contributionMargin) : "—", ...moneyDelta(pnlSummary?.availability.marketingSpend && pnlSummary.availability.shippingCosts && pnlSummary.availability.handlingCosts ? pnlSummary.metrics.contributionMargin : null, pnlComparison?.availability.marketingSpend && pnlComparison.availability.shippingCosts && pnlComparison.availability.handlingCosts ? pnlComparison.metrics.contributionMargin : null, "After variable direct costs"), hint: pnlSummary?.availability.shippingCosts && pnlSummary?.availability.handlingCosts ? "Shipping and handling included" : "Complete shipping and handling costs" },
     { label: "Net profit", value: pnlSummary?.availability.netProfit && pnlSummary.metrics.netProfit !== null ? formatter.format(pnlSummary.metrics.netProfit) : "—", ...moneyDelta(pnlSummary?.availability.netProfit ? pnlSummary.metrics.netProfit : null, pnlComparison?.availability.netProfit ? pnlComparison.metrics.netProfit : null, "After known operating costs"), hint: pnlSummary?.availability.netProfit ? `${pnlSummary.metrics.netMargin === null ? "—" : `${(pnlSummary.metrics.netMargin * 100).toFixed(1)}%`} net margin` : "Complete cost coverage" },
   ] : demoMetrics;
-  const chartMonths = hasLiveData ? liveData!.months.map((month) => month.label) : months;
-  const chartRevenue = hasLiveData ? liveData!.months.map((month) => month.netSales) : revenue;
-  const chartProfit = hasLiveData ? liveData!.months.map((month) => month.grossSales) : profit;
-  const chartSpend = hasLiveData ? liveData!.months.map((month) => month.shippingRevenue) : spend;
-  const chartMaximum = Math.max(...chartRevenue, ...chartProfit, ...chartSpend, 1);
+  const trendSeries = trendData.map(({ period, data }) => {
+    const reportRevenue = data.metrics.netProductSales - data.metrics.refunds;
+    const reportProfit = data.metrics.netProfit ?? data.metrics.profitAfterMarketingSpend;
+    return { label: period.label, revenue: reportRevenue, costs: reportRevenue - reportProfit, profit: reportProfit, complete: data.availability.netProfit };
+  });
+  const chartMonths = trendSeries.length ? trendSeries.map((point) => point.label) : hasLiveData ? liveData!.months.map((month) => month.label) : months;
+  const chartRevenue = trendSeries.length ? trendSeries.map((point) => point.revenue) : hasLiveData ? liveData!.months.map((month) => month.netSales) : revenue;
+  const chartCosts = trendSeries.length ? trendSeries.map((point) => point.costs) : hasLiveData ? liveData!.months.map((month) => month.shippingRevenue) : spend;
+  const chartProfit = trendSeries.length ? trendSeries.map((point) => point.profit) : hasLiveData ? liveData!.months.map((month) => month.grossSales) : profit;
+  const chartMaximum = Math.max(...chartRevenue, ...chartCosts, ...chartProfit, 1);
   const exportOverview = () => {
     if (!liveData?.hasData) return;
     downloadCsv("shopify-overview.csv", [
@@ -198,8 +224,8 @@ function Overview({ reportRunId }: { reportRunId?: string }) {
   };
 
   return <>
-    <section className="filter-row pnl-period"><label>From<input type="date" value={fromDate} onChange={(event) => { setLoading(true); setFromDate(event.target.value); }}/></label><label>To<input type="date" value={toDate} onChange={(event) => { setLoading(true); setToDate(event.target.value); }}/></label>{fromDate && toDate ? <span className="report-note">Comparing with the immediately preceding equal-length period.</span> : <span className="report-note">Select both dates to compare the previous period.</span>}{(fromDate || toDate) && <button onClick={() => { setLoading(true); setFromDate(""); setToDate(""); }}>All imported data</button>}</section>
-    {loading ? <div className="data-loading">Loading your Shopify summary…</div> : !hasLiveData && liveData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to start your live dashboard</strong><span>The figures below are a preview. Your own sales and orders will appear after the first sync.</span></div></div> : null}{liveData?.currencyCoverage.convertedOrders ? <div className="connection-notice"><Info/><div><strong>{liveData.currencyCoverage.convertedOrders.toLocaleString()} orders converted to {liveData.currency}</strong><span>Historical rates applied: {liveData.currencyCoverage.convertedCurrencies.map((item) => `${item.currency} (${item.orders.toLocaleString()})`).join(", ")}.</span></div></div> : null}{liveData?.currencyCoverage.excludedOrders ? <div className="connection-notice"><Info/><div><strong>{liveData.currencyCoverage.excludedOrders.toLocaleString()} orders excluded from financial totals</strong><span>Reporting currency is {liveData.currency}. Excluded: {liveData.currencyCoverage.excludedCurrencies.map((item) => `${item.currency} (${item.orders.toLocaleString()})`).join(", ")}. Add explicit exchange rates before consolidating these orders.</span></div></div> : null}{liveData?.marketingCurrencyCoverage.convertedRows ? <div className="connection-notice"><Info/><div><strong>{liveData.marketingCurrencyCoverage.convertedRows.toLocaleString()} advertising spend rows converted to {liveData.currency}</strong><span>Historical rates applied: {liveData.marketingCurrencyCoverage.convertedCurrencies.map((item) => `${item.currency} (${item.rows.toLocaleString()})`).join(", ")}.</span></div></div> : null}{liveData?.marketingCurrencyCoverage.excludedRows ? <div className="connection-notice"><Info/><div><strong>{liveData.marketingCurrencyCoverage.excludedRows.toLocaleString()} advertising spend rows excluded</strong><span>Missing dated rates: {liveData.marketingCurrencyCoverage.excludedCurrencies.map((item) => `${item.currency} (${item.rows.toLocaleString()})`).join(", ")}.</span></div></div> : null}
+    <section className="filter-row pnl-period"><label>From<input type="date" value={fromDate} onChange={(event) => { setLoading(true); setFromDate(event.target.value); }}/></label><label>To<input type="date" value={toDate} onChange={(event) => { setLoading(true); setToDate(event.target.value); }}/></label><select aria-label="Overview trend granularity" value={granularity} onChange={(event) => setGranularity(event.target.value as ReportingGranularity)}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select>{fromDate && toDate ? <span className="report-note">Comparing with the immediately preceding equal-length period.</span> : <span className="report-note">Select both dates to compare the previous period.</span>}{(fromDate || toDate) && <button onClick={() => { setLoading(true); setFromDate(""); setToDate(""); }}>All imported data</button>}</section>
+    {loading || trendLoading ? <div className="data-loading">{loading ? "Loading your Shopify summary…" : "Calculating trend periods…"}</div> : !hasLiveData && liveData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to start your live dashboard</strong><span>The figures below are a preview. Your own sales and orders will appear after the first sync.</span></div></div> : null}{liveData?.currencyCoverage.convertedOrders ? <div className="connection-notice"><Info/><div><strong>{liveData.currencyCoverage.convertedOrders.toLocaleString()} orders converted to {liveData.currency}</strong><span>Historical rates applied: {liveData.currencyCoverage.convertedCurrencies.map((item) => `${item.currency} (${item.orders.toLocaleString()})`).join(", ")}.</span></div></div> : null}{liveData?.currencyCoverage.excludedOrders ? <div className="connection-notice"><Info/><div><strong>{liveData.currencyCoverage.excludedOrders.toLocaleString()} orders excluded from financial totals</strong><span>Reporting currency is {liveData.currency}. Excluded: {liveData.currencyCoverage.excludedCurrencies.map((item) => `${item.currency} (${item.orders.toLocaleString()})`).join(", ")}. Add explicit exchange rates before consolidating these orders.</span></div></div> : null}{liveData?.marketingCurrencyCoverage.convertedRows ? <div className="connection-notice"><Info/><div><strong>{liveData.marketingCurrencyCoverage.convertedRows.toLocaleString()} advertising spend rows converted to {liveData.currency}</strong><span>Historical rates applied: {liveData.marketingCurrencyCoverage.convertedCurrencies.map((item) => `${item.currency} (${item.rows.toLocaleString()})`).join(", ")}.</span></div></div> : null}{liveData?.marketingCurrencyCoverage.excludedRows ? <div className="connection-notice"><Info/><div><strong>{liveData.marketingCurrencyCoverage.excludedRows.toLocaleString()} advertising spend rows excluded</strong><span>Missing dated rates: {liveData.marketingCurrencyCoverage.excludedCurrencies.map((item) => `${item.currency} (${item.rows.toLocaleString()})`).join(", ")}.</span></div></div> : null}
     {hasLiveData ? <div className="report-export"><button className="export-button" onClick={exportOverview}><Download/> Export overview CSV</button></div> : null}
     <section className="metric-grid">{liveMetrics.map((metric) => <article className="metric-card" key={metric.label}>
       <div className="metric-head"><span>{metric.label}</span><CircleDollarSign /></div>
@@ -208,8 +234,9 @@ function Overview({ reportRunId }: { reportRunId?: string }) {
     </article>)}</section>
     <section className="dashboard-grid">
       <article className="panel chart-panel">
-        <div className="panel-head"><div><span className="eyebrow">PERFORMANCE</span><h2>{hasLiveData ? "Shopify sales trend" : "Revenue & profit trend"}</h2></div><div className="legend"><span className="blue-dot"/>{hasLiveData ? "Net sales" : "Revenue"} <span className="green-dot"/>{hasLiveData ? "Gross sales" : "Net profit"} <span className="orange-dot"/>{hasLiveData ? "Shipping revenue" : "Ad spend"}</div></div>
-        <div className="chart-wrap"><div className="y-axis"><span>{hasLiveData ? formatter.format(chartMaximum) : "£300k"}</span><span>{hasLiveData ? formatter.format(chartMaximum / 2) : "£200k"}</span><span>{hasLiveData ? formatter.format(chartMaximum / 4) : "£100k"}</span><span>£0</span></div><div className="bar-chart">{chartMonths.map((month, index) => <div className="bar-group" key={`${month}-${index}`}><div className="bars"><i className="revenue" style={{height:`${(chartRevenue[index] / chartMaximum) * 100}%`}}/><i className="profit" style={{height:`${(chartProfit[index] / chartMaximum) * 100}%`}}/><i className="spend" style={{height:`${(chartSpend[index] / chartMaximum) * 100}%`}}/></div><span>{month}</span></div>)}</div></div>
+        <div className="panel-head"><div><span className="eyebrow">PERFORMANCE</span><h2>{hasLiveData ? "Revenue, costs and profit trend" : "Revenue & profit trend"}</h2></div><div className="legend"><span className="blue-dot"/>Revenue <span className="orange-dot"/>Known costs <span className="green-dot"/>Net profit</div></div>
+        <div className="chart-wrap"><div className="y-axis"><span>{hasLiveData ? formatter.format(chartMaximum) : "£300k"}</span><span>{hasLiveData ? formatter.format(chartMaximum / 2) : "£200k"}</span><span>{hasLiveData ? formatter.format(chartMaximum / 4) : "£100k"}</span><span>£0</span></div><div className="bar-chart">{chartMonths.map((month, index) => <div className="bar-group" key={`${month}-${index}`} title={trendSeries[index] ? `Revenue ${formatter.format(trendSeries[index].revenue)} · Costs ${formatter.format(trendSeries[index].costs)} · ${trendSeries[index].complete ? "Net profit" : "Provisional profit"} ${formatter.format(trendSeries[index].profit)}` : month}><div className="bars"><i className="revenue" style={{height:`${Math.max(chartRevenue[index], 0) / chartMaximum * 100}%`}}/><i className="spend" style={{height:`${Math.max(chartCosts[index], 0) / chartMaximum * 100}%`}}/><i className="profit" style={{height:`${Math.max(chartProfit[index], 0) / chartMaximum * 100}%`}}/></div><span>{month}</span></div>)}</div></div>
+        {trendSeries.some((point) => !point.complete) ? <span className="report-note">Profit is provisional in periods with incomplete cost coverage.</span> : null}
       </article>
       <article className="panel health-panel"><div className="panel-head"><div><span className="eyebrow">DATA HEALTH</span><h2>{hasLiveData ? "Imported store data" : "Store readiness"}</h2></div><span className="score">{hasLiveData ? "LIVE" : "86%"}</span></div>
         <div className="health-ring"><div><strong>{hasLiveData ? liveData!.metrics.orders.toLocaleString() : "86"}</strong><span>{hasLiveData ? "orders" : "Good"}</span></div></div>
