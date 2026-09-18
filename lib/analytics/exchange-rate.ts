@@ -1,5 +1,3 @@
-import { convertCurrency } from "./money.ts";
-
 export type DatedExchangeRate = {
   base_currency: string;
   quote_currency: string;
@@ -28,5 +26,12 @@ export function resolveDatedExchangeRate(
 }
 
 export function convertDatedAmount(amount: number, exchangeRate: number, reportingCurrency: string) {
-  return convertCurrency(amount, exchangeRate, reportingCurrency);
+  if (!Number.isFinite(amount)) throw new Error("Money amount must be finite");
+  if (!Number.isFinite(exchangeRate) || exchangeRate <= 0) throw new Error("Exchange rate must be positive");
+  const threeDecimalCurrencies = new Set(["BHD", "JOD", "KWD", "OMR", "TND"]);
+  const zeroDecimalCurrencies = new Set(["CLP", "JPY", "KRW"]);
+  const currency = reportingCurrency.toUpperCase();
+  const digits = threeDecimalCurrencies.has(currency) ? 3 : zeroDecimalCurrencies.has(currency) ? 0 : 2;
+  const scale = 10 ** digits;
+  return Math.round((amount * exchangeRate + Number.EPSILON) * scale) / scale;
 }
