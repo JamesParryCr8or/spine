@@ -50,7 +50,7 @@ export function parseCustomSpendImport(value: unknown): Result<{ filename: strin
     if (!currency || !/^[A-Z]{3}$/.test(currency)) return { ok: false, error: `Row ${index + 1} needs a three-letter currency` };
     if (!Number.isFinite(numericSpend) || numericSpend < 0 || numericSpend > 1_000_000_000_000) return { ok: false, error: `Row ${index + 1} needs a non-negative spend amount` };
     if ([medium, campaign, account, adGroup, externalId].some((item) => item === undefined)) return { ok: false, error: `Row ${index + 1} contains a value that is too long` };
-    rows.push({ date, source, medium, campaign, spend: numericSpend, currency, account, adGroup, externalId });
+    rows.push({ date, source, medium, campaign, spend: numericSpend, currency, account: account ?? null, adGroup: adGroup ?? null, externalId: externalId ?? null });
   }
   return { ok: true, value: { filename, rows } };
 }
