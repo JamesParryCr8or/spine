@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
+import { calculateAcquisitionMetrics } from "@/lib/analytics/acquisition";
+import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
 
 type Order = {
+  id: string;
+  customer_id: string | null;
   processed_at: string | null;
   gross_sales: string;
   discounts: string;
@@ -50,7 +54,7 @@ export async function GET() {
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await supabase
       .from("shopify_orders")
-      .select("processed_at,gross_sales,discounts,net_product_sales,shipping_revenue,total_sales")
+      .select("id,customer_id,processed_at,gross_sales,discounts,net_product_sales,shipping_revenue,total_sales")
       .eq("store_id", store.id)
       .is("cancelled_at", null)
       .eq("test", false)
@@ -76,6 +80,8 @@ export async function GET() {
   let discounts = 0;
   let netSales = 0;
   let shippingRevenue = 0;
+  let newCustomerSales = 0;
+  const customerClasses = classifyCustomerOrders(orders.map((order) => ({ id: order.id, customerId: order.customer_id, processedAt: order.processed_at })));
 
   for (const order of orders) {
     if (!order.processed_at) continue;
@@ -89,6 +95,7 @@ export async function GET() {
     discounts += discount;
     netSales += net;
     shippingRevenue += shipping;
+    if (customerClasses.get(order.id) === "new") newCustomerSales += net;
     if (period) {
       period.grossSales += gross;
       period.discounts += discount;
@@ -98,9 +105,24 @@ export async function GET() {
     }
   }
 
-  const { data: metaRows } = await supabase.from("meta_ad_insights_daily").select("date_start").eq("store_id", store.id).order("date_start", { ascending: true });
+  let metaQuery = supabase.from("meta_ad_insights_daily").select("date_start,spend,currency").eq("store_id", store.id).eq("currency", store.currency).order("date_start", { ascending: true });
+  if (earliestOrderAt) metaQuery = metaQuery.gte("date_start", earliestOrderAt.slice(0, 10));
+  if (latestOrderAt) metaQuery = metaQuery.lte("date_start", latestOrderAt.slice(0, 10));
+  const { data: metaRows, error: metaError } = await metaQuery;
+  if (metaError) return NextResponse.json({ error: metaError.message }, { status: 500 });
   const orderCount = orders.length;
+  const includedOrderIds = new Set(orders.map((order) => order.id));
+  let unitsSold = 0;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase.from("shopify_order_lines").select("order_id,current_quantity").eq("store_id", store.id).range(from, from + pageSize - 1);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    for (const line of data ?? []) if (includedOrderIds.has(line.order_id)) unitsSold += Math.max(line.current_quantity, 0);
+    if ((data ?? []).length < pageSize) break;
+  }
   const metaDates = (metaRows ?? []).map((row) => row.date_start);
+  const marketingSpend = (metaRows ?? []).reduce((total, row) => total + (Number(row.spend) || 0), 0);
+  const newCustomers = [...customerClasses.values()].filter((classification) => classification === "new").length;
+  const acquisition = calculateAcquisitionMetrics({ netSales, newCustomerSales, marketingSpend, newCustomers });
   return NextResponse.json({
     hasData: orderCount > 0,
     currency: store.currency,
@@ -111,7 +133,12 @@ export async function GET() {
       netSales,
       shippingRevenue,
       orders: orderCount,
+      unitsSold,
       averageOrderValue: orderCount ? netSales / orderCount : 0,
+      marketingSpend,
+      newCustomers,
+      newCustomerSales,
+      ...acquisition,
     },
     months,
     meta: { importedDays: metaDates.length, start: metaDates[0] ?? null, end: metaDates.at(-1) ?? null },

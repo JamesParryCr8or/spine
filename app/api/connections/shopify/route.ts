@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
+import { shopifyGraph } from "@/lib/shopify/graphql";
+import { shopifySyncWindow, shopifyUpdatedAtQuery } from "@/lib/shopify/sync-window";
 
 export const maxDuration = 300;
 
-const SHOPIFY_API_VERSION = "2026-07";
 const REQUIRED_SCOPES = ["read_products", "read_inventory", "read_orders", "read_customers"];
 
-type GraphPayload<T> = { data?: T; errors?: { message: string }[] };
 type Money = { amount: string; currencyCode: string };
 type MoneyBag = { shopMoney: Money; presentmentMoney: Money };
 type Visit = {
@@ -52,17 +52,6 @@ function visitRow(visit: Visit | null, model: "first_touch" | "last_touch", shar
   };
 }
 
-async function shopifyGraph<T>(shop: string, token: string, query: string, variables: Record<string, unknown> = {}) {
-  const response = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
-    method: "POST", headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
-    body: JSON.stringify({ query, variables }), cache: "no-store",
-  });
-  const payload = await response.json().catch(() => ({})) as GraphPayload<T>;
-  if (!response.ok || payload.errors?.length) throw new Error(payload.errors?.map((item) => item.message).join(", ") || `Shopify returned ${response.status}`);
-  if (!payload.data) throw new Error("Shopify returned no data");
-  return payload.data;
-}
-
 export async function GET() {
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
@@ -75,7 +64,7 @@ export async function GET() {
   if (!membershipResult.data) return NextResponse.json({ error: "No workspace is configured" }, { status: 403 });
   const [storeResult, syncResult] = await Promise.all([
     supabase.from("stores").select("name,shopify_domain,currency,reporting_currency,timezone").eq("organization_id", membershipResult.data.organization_id).limit(1).maybeSingle(),
-    supabase.from("sync_runs").select("status,records_processed,warnings,error_message,completed_at,updated_at").eq("source", "shopify").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("sync_runs").select("status,sync_mode,window_start,window_end,pages_processed,records_processed,warnings,error_message,completed_at,updated_at").eq("source", "shopify").order("created_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
   const error = connectionResult.error ?? storeResult.error ?? syncResult.error;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -114,26 +103,24 @@ export async function POST(request: Request) {
     if (scopesError) throw new Error(scopesError.message);
 
     const staleBefore = new Date(Date.now() - 6 * 60 * 1000).toISOString();
-    const { data: existingRun, error: existingRunError } = await supabase
-      .from("sync_runs")
-      .select("id,cursor,records_processed,updated_at")
-      .eq("store_id", store.id)
-      .eq("source", "shopify")
-      .eq("status", "running")
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (existingRunError) throw new Error(existingRunError.message);
+    const [{ data: existingRun, error: existingRunError }, { data: latestCompleted, error: latestCompletedError }] = await Promise.all([
+      supabase.from("sync_runs").select("id,cursor,records_processed,pages_processed,sync_mode,window_start,window_end,updated_at").eq("store_id", store.id).eq("source", "shopify").eq("status", "running").order("updated_at", { ascending: false }).limit(1).maybeSingle(),
+      supabase.from("sync_runs").select("completed_at").eq("store_id", store.id).eq("source", "shopify").eq("status", "completed").order("completed_at", { ascending: false }).limit(1).maybeSingle(),
+    ]);
+    if (existingRunError || latestCompletedError) throw new Error((existingRunError ?? latestCompletedError)!.message);
     if (existingRun && existingRun.updated_at >= staleBefore) {
       return NextResponse.json({ error: "A Shopify import is already running. Leave this page open and refresh the dashboard in a few minutes." }, { status: 409 });
     }
     const resumed = Boolean(existingRun?.cursor);
+    const syncWindow = shopifySyncWindow({ existingRun, latestCompletedAt: latestCompleted?.completed_at ?? null });
+    const { start: windowStart, end: windowEnd, mode: syncMode } = syncWindow;
     const { data: run, error: runError } = existingRun
       ? { data: existingRun, error: null }
-      : await supabase.from("sync_runs").insert({ organization_id: membership.organization_id, store_id: store.id, source: "shopify", resource: "catalog_orders", status: "running", created_by: userId }).select("id,cursor,records_processed,updated_at").single();
+      : await supabase.from("sync_runs").insert({ organization_id: membership.organization_id, store_id: store.id, source: "shopify", resource: "catalog_orders", status: "running", sync_mode: syncMode, window_start: windowStart, window_end: windowEnd, created_by: userId }).select("id,cursor,records_processed,pages_processed,sync_mode,window_start,window_end,updated_at").single();
     if (runError || !run) throw new Error(runError?.message ?? "Could not create sync run");
     runId = run.id;
     const priorRecordsProcessed = run.records_processed ?? 0;
+    const priorPagesProcessed = run.pages_processed ?? 0;
 
     let productCursor: string | null = null;
     let productsProcessed = 0;
@@ -162,7 +149,7 @@ export async function POST(request: Request) {
     let ordersProcessed = 0, orderLinesProcessed = 0, customersProcessed = 0, refundsProcessed = 0, refundLinesProcessed = 0, transactionsProcessed = 0, attributionProcessed = 0;
     const warnings: string[] = [];
     do {
-      const result: { orders: { nodes: ShopifyOrder[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await shopifyGraph(shopDomain, accessToken, `query Orders($cursor:String){ orders(first:25,after:$cursor,sortKey:UPDATED_AT){ nodes{
+      const result: { orders: { nodes: ShopifyOrder[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await shopifyGraph(shopDomain, accessToken, `query Orders($cursor:String,$query:String){ orders(first:25,after:$cursor,sortKey:UPDATED_AT,query:$query){ nodes{
         id legacyResourceId name displayFinancialStatus displayFulfillmentStatus sourceName test cancelledAt processedAt createdAt updatedAt currencyCode
         currentSubtotalPriceSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} currentTotalDiscountsSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} currentShippingPriceSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} currentTotalTaxSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} currentTotalDutiesSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} currentTotalPriceSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}}
         customer{id legacyResourceId displayName defaultEmailAddress{emailAddress} numberOfOrders amountSpent{amount currencyCode} createdAt updatedAt}
@@ -170,7 +157,7 @@ export async function POST(request: Request) {
         refunds(first:50){id legacyResourceId note createdAt processedAt updatedAt totalRefundedSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} refundLineItems(first:100){nodes{id quantity restockType subtotalSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} lineItem{id}} pageInfo{hasNextPage}}}
         transactions(first:100){nodes{id kind status gateway formattedGateway amountSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} fees{amount{amount currencyCode} taxAmount{amount currencyCode}} createdAt processedAt} pageInfo{hasNextPage}}
         customerJourneySummary{ready daysToConversion customerOrderIndex firstVisit{id occurredAt landingPage referrerUrl source sourceDescription sourceType utmParameters{source medium campaign content term}} lastVisit{id occurredAt landingPage referrerUrl source sourceDescription sourceType utmParameters{source medium campaign content term}}}
-      } pageInfo{hasNextPage endCursor} } }`, { cursor: orderCursor });
+      } pageInfo{hasNextPage endCursor} } }`, { cursor: orderCursor, query: shopifyUpdatedAtQuery(windowStart, windowEnd) });
 
       const customers = dedupeByShopifyId(result.orders.nodes.flatMap((order) => order.customer ? [{ organization_id: membership.organization_id, store_id: store.id, shopify_gid: order.customer.id, legacy_resource_id: order.customer.legacyResourceId, display_name: order.customer.displayName, email: order.customer.defaultEmailAddress?.emailAddress ?? null, number_of_orders: order.customer.numberOfOrders, amount_spent: order.customer.amountSpent.amount, currency: order.customer.amountSpent.currencyCode, created_at_shopify: order.customer.createdAt, updated_at_shopify: order.customer.updatedAt, synced_at: new Date().toISOString() }] : []));
       if (customers.length) { const { error } = await supabase.from("shopify_customers").upsert(dedupeByShopifyId(customers), { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
@@ -230,14 +217,15 @@ export async function POST(request: Request) {
 
       orderCursor = result.orders.pageInfo.hasNextPage ? result.orders.pageInfo.endCursor : null;
       const recordsProcessed = priorRecordsProcessed + productsProcessed + variantsProcessed + ordersProcessed + orderLinesProcessed + customersProcessed + refundsProcessed + refundLinesProcessed + transactionsProcessed + attributionProcessed;
-      const { error: progressError } = await supabase.from("sync_runs").update({ cursor: orderCursor, records_processed: recordsProcessed, warnings, updated_at: new Date().toISOString() }).eq("id", run.id);
+      const pagesProcessed = priorPagesProcessed + Math.ceil(ordersProcessed / 25);
+      const { error: progressError } = await supabase.from("sync_runs").update({ cursor: orderCursor, records_processed: recordsProcessed, pages_processed: pagesProcessed, warnings, updated_at: new Date().toISOString() }).eq("id", run.id);
       if (progressError) throw new Error(progressError.message);
     } while (orderCursor);
 
     const recordsProcessed = priorRecordsProcessed + productsProcessed + variantsProcessed + ordersProcessed + orderLinesProcessed + customersProcessed + refundsProcessed + refundLinesProcessed + transactionsProcessed + attributionProcessed;
     const { error: completeError } = await supabase.from("sync_runs").update({ status: "completed", cursor: null, records_processed: recordsProcessed, warnings, completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", run.id);
     if (completeError) throw new Error(completeError.message);
-    return NextResponse.json({ connection: { provider: "shopify", status: "connected", external_account_id: shopData.shop.id, external_account_name: shopData.shop.name, granted_scopes: [...grantedScopes].sort() }, resumed, sync: { products: productsProcessed, variants: variantsProcessed, orders: ordersProcessed, orderLines: orderLinesProcessed, customers: customersProcessed, refunds: refundsProcessed, refundLines: refundLinesProcessed, transactions: transactionsProcessed, attribution: attributionProcessed, warnings: warnings.length } });
+    return NextResponse.json({ connection: { provider: "shopify", status: "connected", external_account_id: shopData.shop.id, external_account_name: shopData.shop.name, granted_scopes: [...grantedScopes].sort() }, resumed, sync: { mode: syncMode, windowStart, windowEnd, products: productsProcessed, variants: variantsProcessed, orders: ordersProcessed, orderLines: orderLinesProcessed, customers: customersProcessed, refunds: refundsProcessed, refundLines: refundLinesProcessed, transactions: transactionsProcessed, attribution: attributionProcessed, warnings: warnings.length } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Shopify connection failed";
     if (runId) await supabase.from("sync_runs").update({ status: "failed", error_message: message.slice(0, 500), completed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", runId);

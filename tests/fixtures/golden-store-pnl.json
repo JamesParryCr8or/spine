@@ -1,0 +1,28 @@
+{
+  "description": "One manually reconciled GBP period with discounts, a partial refund, direct costs, marketing, and operating costs.",
+  "input": {
+    "grossSales": 1250,
+    "discounts": 50,
+    "netProductSales": 1200,
+    "shippingRevenue": 40,
+    "tax": 248,
+    "duties": 0,
+    "totalSales": 1488,
+    "refunds": 100,
+    "cogs": 440,
+    "marketingSpend": 120,
+    "transactionFees": 32,
+    "merchantShippingCosts": 75,
+    "handlingCosts": 25,
+    "fixedOperatingExpenses": 80,
+    "variableOperatingExpenses": 20,
+    "complete": true
+  },
+  "expected": {
+    "grossProfit": 660,
+    "operatingExpenses": 100,
+    "contributionMarginBeforeShipping": 488,
+    "contributionMargin": 388,
+    "netProfit": 308
+  }
+}

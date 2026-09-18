@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
+import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
 
 type Order = {
   id: string;
@@ -41,6 +42,7 @@ export async function GET() {
     if (page.length < pageSize) break;
   }
   const ordersByCustomer = new Map<string, Order[]>();
+  const customerClasses = classifyCustomerOrders(orders.map((order) => ({ id: order.id, customerId: order.customer_id, processedAt: order.processed_at })));
   let guestOrders = 0;
   let guestSales = 0;
   for (const order of orders) {
@@ -100,11 +102,11 @@ export async function GET() {
       })(),
     }));
   for (const customerOrders of customers) {
-    customerOrders.forEach((order, index) => {
+    customerOrders.forEach((order) => {
       const sales = money(order.net_product_sales) + money(order.shipping_revenue);
       const key = monthFor(order.processed_at);
       const month = key ? months.get(key) ?? { key, newCustomerOrders: 0, newCustomerSales: 0, repeatCustomerOrders: 0, repeatCustomerSales: 0 } : null;
-      if (index === 0) {
+      if (customerClasses.get(order.id) === "new") {
         newCustomerOrders += 1;
         newCustomerSales += sales;
         if (month) { month.newCustomerOrders += 1; month.newCustomerSales += sales; }

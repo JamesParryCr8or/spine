@@ -17,7 +17,19 @@
 - [x] Added live Shopify sales orders, product profitability, and last-touch UTM source/medium/campaign reporting.
 - [x] Added reconciled Shopify P&L metrics, effective-dated COGS, fixed operating costs, and CSV export.
 - [x] Added owner/admin-managed recurring operating expenses with tenant-protected storage.
-- [x] Added a production GitHub Actions verification workflow for linting and the Next.js build.
+- [x] Added a production GitHub Actions verification workflow for linting, type checking, Shopify retry tests, and the Next.js build.
+
+### Latest continuation
+
+- [x] Add regression tests for Shopify import recovery, retry limits, permanent failures, and sanitized errors; run them in GitHub Actions.
+- [ ] Verify retry behavior against a live Shopify store; automated coverage currently uses simulated upstream responses.
+- [x] Fix dashboard lint failures in `components/analytics-app.tsx`: avoid synchronous state updates in effects, update the stale-import clock outside rendering, complete effect dependencies, and remove the unused report deletion path.
+- [x] Add server-validated date-range filtering and period-aware CSV metadata to product profitability reporting.
+- [x] Add server-validated date-range filtering and period-aware CSV metadata to UTM reporting.
+- [x] Add provisional contribution margin and percentage before merchant shipping, using COGS, variable costs, actual payment fees, and imported marketing spend.
+- [x] Add owner/admin payment-fee rule management and use effective gateway rules when Shopify transactions omit actual fees.
+- [x] Apply the payment-fee migration to the connected Supabase project and verify its columns, RLS policies, and database advisors.
+- [x] Add effective-dated per-unit/per-order product shipping overrides with store-level fulfilment fallback and deploy the tenant-protected schema.
 
 ### Active build order
 
@@ -43,20 +55,20 @@ The product should answer these questions quickly:
 
 ## Agreed architecture
 
-- [ ] Build a standalone responsive web app rather than extending the Apps Script sidebar.
-- [ ] Use Supabase Auth and Postgres for users, organizations, normalized ecommerce data, report definitions, schedules, and run history.
-- [ ] Use a server-side application layer for API calls, secret access, sync orchestration, metric calculations, and exports.
-- [ ] Keep API credentials and OAuth refresh tokens out of browser code and exposed database schemas.
-- [ ] Use lightweight persistence rather than pulling every API live for every page view.
+- [x] Build a standalone responsive web app rather than extending the Apps Script sidebar.
+- [x] Use Supabase Auth and Postgres for users, organizations, normalized ecommerce data, report definitions, and run history; scheduling remains a later phase.
+- [x] Use a server-side application layer for API calls, secret access, sync orchestration, metric calculations, and exports.
+- [x] Keep API credentials and connector tokens out of browser code and exposed database schemas.
+- [x] Use lightweight persistence rather than pulling every API live for every page view.
 - [ ] Store normalized operational data and daily analytics aggregates; do not build an unlimited raw event lake in v1.
 - [ ] Refresh recent dates on every sync so refunds, attribution, cancellations, and late adjustments are corrected.
-- [ ] Make every tenant-owned record belong to an `organization_id` and enforce access with Row Level Security.
+- [x] Make implemented tenant-owned records belong to an `organization_id` and enforce access with Row Level Security.
 - [ ] Keep the existing Apps Script project available as a connector reference until parity is reached.
 
 ### Proposed application stack
 
-- [ ] Web: Next.js, TypeScript, and a reusable component system.
-- [ ] Backend: server routes/jobs plus Supabase Postgres, Auth, Storage, and Cron where appropriate.
+- [x] Web: Next.js, TypeScript, and a reusable component system.
+- [x] Backend: server routes plus Supabase Postgres and Auth; background scheduling remains a later phase.
 - [ ] Charts: choose a chart library after prototyping the income statement and product views.
 - [ ] Validation: shared runtime schemas for API payloads, imports, report definitions, and server responses.
 - [ ] Testing: unit tests for financial calculations, integration tests for connectors, and browser tests for onboarding and reports.
@@ -105,18 +117,18 @@ The product should answer these questions quickly:
 
 ### Multi-tenant model
 
-- [ ] Create `organizations`.
-- [ ] Create `organization_members` with `owner`, `admin`, `analyst`, and `viewer` roles.
-- [ ] Create `stores` with Shopify domain, timezone, currency, reporting currency, and fiscal settings.
+- [x] Create `organizations`.
+- [x] Create `organization_members` with `owner`, `admin`, `analyst`, and `viewer` roles.
+- [x] Create `stores` with Shopify domain, timezone, currency, reporting currency, and fiscal settings.
 - [ ] Support one organization owning multiple stores, even if the MVP UI exposes one store initially.
 - [ ] Add an active-store selector to the application shell.
-- [ ] Add RLS policies based on organization membership for every exposed tenant table.
-- [ ] Explicitly expose and grant Data API access only to tables/views required by the browser; do not assume new tables are exposed automatically.
-- [ ] Keep connector secrets and internal job tables in a private, non-exposed schema.
+- [x] Add RLS policies based on organization membership for every implemented exposed tenant table.
+- [x] Explicitly revoke and grant Data API access for implemented browser-facing tables rather than relying on automatic exposure.
+- [x] Keep connector secrets in Supabase Vault behind functions in the private, non-exposed schema.
 
 ### Application shell
 
-- [ ] Build the left navigation inspired by the supplied references, without cloning their branding.
+- [x] Build the left navigation inspired by the supplied references, without cloning their branding.
 - [ ] Add sections for Overview, Profit & Loss, Sales, Products, Customers, Marketing, Costs, Reports, Connections, and Settings.
 - [ ] Add a global date range, comparison period, and daily/weekly/monthly granularity control.
 - [ ] Persist active organization, store, date range, comparison, and timezone preferences.
@@ -150,15 +162,15 @@ Shopify is the primary sales and catalog source. Other sources enrich Shopify ra
 
 ### Sync engine
 
-- [ ] Add retry and backoff to the implemented cursor-based GraphQL pagination.
-- [ ] Implement an initial historical import with visible progress and resumable checkpoints.
-- [ ] Implement incremental sync using updated timestamps and durable cursors.
-- [ ] Re-fetch a rolling recent window to capture refunds, edits, cancellations, and fulfillment changes.
+- [x] Add retry and backoff to the implemented cursor-based GraphQL pagination (bounded network/temporary-server retries, HTTP and GraphQL throttling, Retry-After, and query-cost recovery delays).
+- [x] Implement an initial historical import with visible record/page progress and resumable order-page checkpoints.
+- [x] Implement incremental sync using a fixed updated-at window and durable cursors so resumed runs see the same source result set.
+- [x] Re-fetch a rolling seven-day recent window to capture refunds, edits, cancellations, and fulfillment changes.
 - [ ] Add Shopify webhooks for important changes after scheduled sync is stable.
 - [x] Make writes idempotent with source IDs and deterministic upserts.
 - [x] Expand the implemented `sync_runs` tracking with resumable cursor, duration, warnings, and sanitized failed-run updates.
 - [ ] Add dead-letter or retry handling for individual failed records.
-- [ ] Respect Shopify rate limits and report throttling clearly.
+- [x] Respect Shopify rate limits with bounded Retry-After/query-cost backoff and user-facing throttling errors.
 - [ ] Add a manual “Sync now” action and configurable scheduled refresh.
 
 ### Shopify correctness
@@ -181,24 +193,24 @@ The cost engine must support direct entry, Shopify-provided values, and bulk imp
 - [x] Store source (`shopify`, `manual`, `csv`, or `google_sheets`), amount, currency, effective-from, effective-to, and notes.
 - [x] Import Shopify unit cost when available, but allow a manual override.
 - [x] Calculate order-line COGS using the cost effective on the order date.
-- [ ] Add a product cost table with product, variant, SKU, selling price, Shopify cost, override cost, and shipping cost.
+- [x] Add a product cost table with product, variant, SKU, selling price, Shopify cost, active override cost, and active shipping override.
 - [x] Add inline editing with validation and an audit history.
 - [x] Highlight missing or stale product costs and quantify affected revenue/orders.
 
 ### Transaction costs
 
-- [ ] Create effective-dated payment fee rules by gateway.
-- [ ] Support percentage plus fixed fee, tax on fees, currency, and minimum fee.
-- [ ] Map Shopify gateways to user-defined fee rules.
-- [ ] Support imported actual transaction fees when a payment provider later supplies them.
+- [x] Create effective-dated payment fee rules by gateway with tenant RLS and owner/admin writes.
+- [x] Support percentage plus fixed fee, tax on fees, currency, and minimum fee in the rule model and calculation service.
+- [x] Map Shopify gateways to the latest effective matching-currency fee rule when imported actual fees are unavailable.
+- [x] Support imported actual Shopify transaction fees, including fee tax, when Shopify supplies them in the reporting currency.
 
 ### Shipping and handling costs
 
 - [ ] Create shipping cost rules by country/zone, service, order, weight, item, or flat amount.
-- [ ] Start the MVP with flat-per-order and product/variant shipping overrides.
-- [ ] Add handling and pick/pack rules as separate cost categories.
-- [ ] Distinguish customer shipping revenue from merchant shipping expense.
-- [ ] Add a fallback cost and report how often the fallback was used.
+- [x] Start the MVP with flat-per-order fulfilment fallback and effective-dated product/variant shipping overrides with per-order or per-unit allocation.
+- [x] Add handling and pick/pack rules as separate effective-dated cost categories and deduct them from contribution margin and net profit.
+- [x] Distinguish customer shipping revenue from merchant shipping expense.
+- [x] Use store-level fulfilment costs as the fallback and report fallback, override, and uncovered order-line counts in the P&L.
 
 ### Custom costs and expenses
 
@@ -238,23 +250,23 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [x] Product COGS using the effective product cost on the order date, with Shopify unit-cost fallback.
 - [x] Gross profit and gross margin percentage, with missing-cost coverage warnings.
 - [x] Marketing spend from imported Meta Ads daily account insights, scoped to the P&L date range and source currency.
-- [ ] Payment transaction fees.
-- [ ] Shipping and fulfilment costs.
-- [ ] Handling costs.
-- [ ] Contribution margin and contribution margin percentage.
+- [x] Payment transaction fees from imported Shopify records when available, with effective-dated gateway rules as the fallback.
+- [x] Shipping and fulfilment costs from effective-dated fulfilment expense rules.
+- [x] Handling and pick/pack costs from effective-dated expense rules.
+- [x] Contribution margin and contribution margin percentage, with a clearly labelled before-shipping fallback until fulfilment rules are configured.
 - [x] Operating/custom expenses.
-- [ ] Net profit and net margin percentage.
+- [x] Net profit and net margin percentage when marketing, shipping, product-cost, and operating-cost coverage is complete.
 
 ### Acquisition and customer metrics
 
-- [ ] Orders and units sold.
+- [x] Orders and units sold from imported non-test, non-cancelled Shopify orders and their current line quantities.
 - [x] Average order value.
 - [ ] New customers and repeat customers.
 - [x] New-customer sales and repeat-customer sales.
 - [x] New-customer AOV and repeat-customer AOV.
-- [ ] Blended CAC.
-- [ ] Blended MER/ROAS.
-- [ ] New-customer ROAS using an explicitly documented attribution basis.
+- [x] Blended CAC using imported Meta spend divided by first-observed Shopify customers in the imported window.
+- [x] Blended MER using Shopify net product sales divided by matching-currency imported Meta spend.
+- [x] New-customer ROAS using first-observed Shopify order sales divided by blended Meta spend, explicitly labelled as a blended imported-window basis.
 - [ ] Profit per new customer.
 - [x] Repeat order and repeat revenue percentages.
 - [ ] Customer lifetime value cohorts after the core P&L is reconciled.
@@ -274,7 +286,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 
 ### Overview dashboard
 
-- [ ] Add KPI cards for sales, gross profit, marketing cost, contribution margin, net profit, orders, AOV, blended CAC, and blended ROAS.
+- [x] Add live KPI cards for sales, gross profit, marketing cost, contribution margin, net profit, orders, units, AOV, blended CAC, blended MER, and new-customer ROAS.
 - [ ] Show percentage and absolute change against the selected comparison period.
 - [ ] Add revenue, cost, and profit trend charts with selectable granularity.
 - [ ] Add channel mix, top products, customer split, and cost breakdown widgets.
@@ -290,7 +302,7 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [x] Add previous-period and previous-year comparisons.
 - [ ] Add chart/table toggle and optional comparison overlay.
 - [x] Show P&L formula explanations and source coverage for included and unavailable cost inputs.
-- [ ] Add reconciliation status and missing-cost warnings above the table.
+- [x] Add reconciliation status and missing-cost warnings above the table.
 - [x] Export exactly the visible P&L configuration.
 
 ### Sales and orders
@@ -302,27 +314,27 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 
 ### UTM analysis
 
-- [ ] Build a dedicated UTM analytics screen using Shopify order and customer-journey attribution data.
+- [x] Build a dedicated UTM analytics screen using Shopify order and customer-journey attribution data.
 - [ ] Add KPI cards for attributed orders, net sales, new-customer sales, gross profit, contribution margin, AOV, and revenue per customer.
 - [ ] Add trend charts for sales, orders, customers, and profit with period comparison.
-- [ ] Add a hierarchical drilldown table for source → medium → campaign → content → term.
+- [x] Add a drilldown table for source → medium → campaign → content → term.
 - [x] Let users switch between available first-touch and last-touch attribution views and explain the selected model.
-- [ ] Preserve raw UTM values while creating normalized values for case, whitespace, aliases, and missing parameters.
-- [ ] Group missing attribution clearly as Direct, Organic/Referral, or Unknown according to documented rules.
-- [ ] Add filters for date, comparison period, source, medium, campaign, landing page, country, product, and new/repeat customer.
+- [x] Preserve imported raw UTM values while creating report-time normalized values for case, whitespace, common aliases, and missing parameters.
+- [x] Group attribution clearly as Direct, Organic, Referral, Attributed, or Unknown using documented source, medium, and referrer rules.
+- [ ] Add filters for comparison period, landing page, country, product, and new/repeat customer.
 - [ ] Show revenue, refunds, COGS, marketing cost, contribution profit, AOV, and customer mix for every UTM grouping.
-- [ ] Prevent order revenue from being counted more than once when an order has multiple visits or attribution records.
+- [x] Prevent order revenue from being counted more than once by selecting one model-specific attribution record per order and aggregating from the valid-order set.
 - [ ] Add a mapping interface to connect UTM campaigns to Meta/Google/custom spend when names do not match exactly.
 - [ ] Calculate ROAS, MER, CAC, and profit after spend is mapped; label metrics unavailable without traffic or spend data.
-- [ ] Add an unattributed-sales diagnostic showing orders missing UTMs, landing pages, or referrers.
+- [x] Add an unattributed-sales diagnostic showing orders missing attribution records, UTMs, landing pages, or referrers.
 - [ ] Allow users to save the UTM view as a report and export the current drilldown to CSV, XLSX, or Google Sheets.
 - [ ] Add optional UTM naming rules and a campaign URL builder after the analysis workflow is stable.
 
 ### Product profitability
 
-- [ ] Add product and variant tables with revenue, units, discounts, refunds, COGS, ad allocation, contribution margin, and margin percentage.
+- [x] Add product/variant profitability with revenue, units, discounts, refunds, COGS, shipping, handling, proportional Meta-spend allocation, contribution profit, and margin percentage.
 - [x] Add missing-cost and low-margin filters.
-- [ ] Add product trend and period comparison views.
+- [x] Add per-product monthly revenue/unit trends and equal-length previous-period contribution-profit comparison.
 - [x] Allow direct navigation from a product to its cost history.
 
 ### Customer analytics
@@ -454,17 +466,17 @@ Normalize every ad source into shared daily dimensions while retaining source-sp
 
 ### Financial test suite
 
-- [ ] Test gross/net sales with discounts and partial refunds.
-- [ ] Test order-level and line-level refund allocation.
-- [ ] Test cost changes across effective dates.
-- [ ] Test missing cost fallback behavior.
-- [ ] Test payment fees with percentage plus fixed charge.
-- [ ] Test shipping rules and multi-item orders.
-- [ ] Test recurring monthly costs across short and partial periods.
-- [ ] Test new/repeat customer classification.
-- [ ] Test timezone boundaries and daylight-saving changes.
-- [ ] Test multi-currency conversion and rounding.
-- [ ] Maintain golden fixture stores whose expected P&L is manually verified.
+- [x] Test gross/net sales inputs with discounts and partial refunds through product profitability fixtures.
+- [x] Test order-level residual refund allocation alongside explicit line-level refunds without double counting.
+- [x] Test cost changes across effective dates.
+- [x] Test missing cost fallback behavior.
+- [x] Test configurable payment-fee rules with percentage plus fixed charge, tax, and minimum fee; actual Shopify fee inclusion is also covered.
+- [x] Test shipping rules and multi-item orders.
+- [x] Test recurring monthly costs across short and partial periods.
+- [x] Test new/repeat customer classification using first valid order, with guest orders kept separate.
+- [x] Test store-local timezone boundaries across daylight-saving changes and use them in P&L date filtering.
+- [x] Test explicit multi-currency conversion, target-currency rounding, and rejection of mixed-currency totals.
+- [x] Maintain a manually reconciled golden-store fixture covering the complete P&L bridge.
 
 ### Security and privacy
 

@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   verify:
-    name: Type check, lint and production build
+    name: Type check, test, lint and production build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -31,6 +31,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Test
+        run: npm test
 
       - name: Build for production
         run: npm run build

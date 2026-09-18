@@ -17,7 +17,7 @@ type CostInput = {
 
 const moneyPattern = /^\d{1,15}(?:\.\d{1,4})?$/;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-const categories = new Set(["software", "agency", "payroll", "warehouse", "rent", "creative", "fulfilment", "duties", "other"]);
+const categories = new Set(["software", "agency", "payroll", "warehouse", "rent", "creative", "fulfilment", "handling", "pick_pack", "duties", "other"]);
 const cadences = new Set(["one_off", "daily", "weekly", "monthly", "annual"]);
 const bases = new Set(["fixed", "orders", "units", "revenue"]);
 
