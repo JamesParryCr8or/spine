@@ -37,6 +37,7 @@
 - [x] Track saved-report executions against their exact definition version and record truthful success/failure outcomes.
 - [x] Expose saved-report run history, sanitized failures, row counts, definition versions, and retry actions in the report library.
 - [x] Prevent silent cross-currency aggregation across order-backed reports and surface excluded-currency coverage.
+- [x] Add tenant-protected effective-dated exchange-rate management with a validated Settings workflow.
 
 ### Active build order
 
@@ -190,6 +191,8 @@ Shopify is the primary sales and catalog source. Other sources enrich Shopify ra
 - [ ] Support multi-currency orders and Shopify Markets without silently mixing currencies.
   - [x] Exclude non-reporting-currency orders from financial totals and show counts by source currency.
   - [ ] Convert orders with explicit dated exchange rates before consolidated reporting.
+    - [x] Add owner/admin-managed dated exchange rates from source currency into the store reporting currency.
+    - [ ] Apply matching historical rates consistently to orders, refunds, fees, and attribution metrics.
 - [x] Add reconciliation tests against Shopify order totals for fixed sample periods.
 
 ## Phase 3 — Cost and expense engine

@@ -16,6 +16,7 @@ import { calculateProfitAndLoss } from '../lib/analytics/profit-and-loss.ts';
 import { normalizeAttribution, normalizeUtmSource } from '../lib/analytics/utm-attribution.ts';
 import { shopifySyncWindow, shopifyUpdatedAtQuery } from '../lib/shopify/sync-window.ts';
 import { reportingPeriods } from '../lib/analytics/reporting-periods.ts';
+import { parseExchangeRate, parseExchangeRateId } from '../lib/settings/exchange-rate-schema.ts';
 import { createCurrencyCoverage } from '../lib/analytics/currency-coverage.ts';
 import { parseCreateReport, parseFinishReportRun, parseStartReportRun, parseUpdateReport, REPORT_SCHEMA_VERSION } from '../lib/reports/schema.ts';
 import goldenStore from './fixtures/golden-store-pnl.json' with { type: 'json' };
@@ -376,4 +377,15 @@ test('currency coverage excludes foreign-currency orders and reports every exclu
   assert.equal(coverage.include('EUR'), false);
   assert.equal(coverage.include('USD'), false);
   assert.deepEqual(coverage.summary(), { reportingCurrency: 'GBP', includedOrders: 1, excludedOrders: 3, excludedCurrencies: [{ currency: 'EUR', orders: 1 }, { currency: 'USD', orders: 2 }] });
+});
+
+
+test('exchange-rate definitions normalize currencies and retain fixed decimal text', () => {
+  assert.deepEqual(parseExchangeRate({ baseCurrency: ' usd ', quoteCurrency: 'gbp', rate: '0.7901234567', effectiveDate: '2026-09-18', notes: ' Manual close ' }), {
+    ok: true,
+    value: { baseCurrency: 'USD', quoteCurrency: 'GBP', rate: '0.7901234567', effectiveDate: '2026-09-18', notes: 'Manual close' },
+  });
+  assert.equal(parseExchangeRate({ baseCurrency: 'GBP', quoteCurrency: 'GBP', rate: '1', effectiveDate: '2026-09-18' }).ok, false);
+  assert.equal(parseExchangeRate({ baseCurrency: 'USD', quoteCurrency: 'GBP', rate: '-1', effectiveDate: '2026-09-18' }).ok, false);
+  assert.equal(parseExchangeRateId('not-an-id').ok, false);
 });
