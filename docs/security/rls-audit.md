@@ -12,6 +12,13 @@ Last verified against Supabase project `smtrzopjvbjzzqacjkrw` on 18 September 20
 
 This structural audit does not replace cross-organization behavior tests. Those remain required for each role and route.
 
+
+## Behavioral coverage
+
+`supabase/tests/tenant_isolation.sql` creates two temporary Auth users and workspaces inside a transaction. It verifies that an owner cannot read or update another organization, cannot read another profile, and cannot create a store for another organization. It also verifies that viewers and analysts can read a shared organization without changing it, while admins can update the organization and create stores. The transaction rolls back all fixtures.
+
+Route-level checks and behavioral coverage for the remaining tenant tables are still required before the broader cross-organization checklist item can be completed.
+
 ## Security advisor review
 
 The advisor currently reports three intentional `SECURITY DEFINER` RPCs:
