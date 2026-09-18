@@ -18,7 +18,7 @@ import { shopifySyncWindow, shopifyUpdatedAtQuery } from '../lib/shopify/sync-wi
 import { reportingPeriods } from '../lib/analytics/reporting-periods.ts';
 import { parseExchangeRate, parseExchangeRateId } from '../lib/settings/exchange-rate-schema.ts';
 import { createCurrencyCoverage } from '../lib/analytics/currency-coverage.ts';
-import { convertDatedAmount, resolveDatedExchangeRate } from '../lib/analytics/exchange-rate.ts';
+import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExchangeRate } from '../lib/analytics/exchange-rate.ts';
 import { parseCreateReport, parseFinishReportRun, parseStartReportRun, parseUpdateReport, REPORT_SCHEMA_VERSION } from '../lib/reports/schema.ts';
 import goldenStore from './fixtures/golden-store-pnl.json' with { type: 'json' };
 
@@ -409,4 +409,21 @@ test('dated exchange rates select the latest non-future source-to-reporting rate
   assert.equal(resolveDatedExchangeRate(rates, 'USD', 'GBP', '2025-12-31T23:59:59Z'), null);
   assert.equal(resolveDatedExchangeRate(rates, 'GBP', 'GBP', '2025-01-01'), 1);
   assert.equal(convertDatedAmount(12.345, 0.8, 'GBP'), 9.88);
+});
+
+
+test('currency conversion coverage distinguishes converted and missing-rate rows', () => {
+  const coverage = createCurrencyConversionCoverage('GBP');
+  assert.equal(coverage.include('GBP', 1), true);
+  assert.equal(coverage.include('USD', 0.8), true);
+  assert.equal(coverage.include('USD', null), false);
+  assert.equal(coverage.include('EUR', null), false);
+  assert.deepEqual(coverage.summary(), {
+    reportingCurrency: 'GBP',
+    includedRows: 2,
+    convertedRows: 1,
+    excludedRows: 2,
+    convertedCurrencies: [{ currency: 'USD', rows: 1 }],
+    excludedCurrencies: [{ currency: 'EUR', rows: 1 }, { currency: 'USD', rows: 1 }],
+  });
 });

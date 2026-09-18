@@ -9,7 +9,7 @@ import { allocateOrderRefund } from "@/lib/analytics/refund-allocation";
 import { calculateProductProfit } from "@/lib/analytics/product-profit";
 import { createClient } from "@/lib/supabase/server";
 import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
-import { convertDatedAmount, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
+import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 
 type Order = { id: string; processed_at: string | null; currency: string; exchange_rate: number };
 type Line = { order_id: string; shopify_gid: string; variant_gid: string | null; sku: string | null; title: string; variant_title: string | null; current_quantity: number; net_sales: string; discounts: string };
@@ -19,7 +19,7 @@ type Variant = { id: string; product_id: string; shopify_gid: string; sku: strin
 type Product = { id: string; title: string };
 type CustomCost = { category: string; amount: string; currency: string; cadence: "one_off" | "daily" | "weekly" | "monthly" | "annual"; allocation_basis: "fixed" | "orders" | "units" | "revenue"; effective_from: string; effective_to: string | null };
 type ShippingCostRow = ProductShippingCost & { currency: string };
-type MetaInsight = { spend: string };
+type MetaInsight = { date_start: string; spend: string; currency: string };
 type Transaction = ShopifyTransactionFee & { order_id: string; gateway: string | null; amount: string; processed_at_shopify: string | null; created_at_shopify: string };
 type PaymentFeeRuleRow = { gateway: string; percentage_rate: string; fixed_fee: string; tax_rate: string; minimum_fee: string; currency: string; effective_from: string; effective_to: string | null };
 
@@ -249,14 +249,19 @@ export async function GET(request: Request) {
   const metaInsights: MetaInsight[] = [];
   if (rangeStart && rangeEnd) {
     for (let from = 0; ; from += pageSize) {
-      const { data, error } = await supabase.from("meta_ad_insights_daily").select("spend").eq("store_id", store.id).eq("currency", store.currency).gte("date_start", rangeStart).lte("date_start", rangeEnd).range(from, from + pageSize - 1);
+      const { data, error } = await supabase.from("meta_ad_insights_daily").select("date_start,spend,currency").eq("store_id", store.id).gte("date_start", rangeStart).lte("date_start", rangeEnd).range(from, from + pageSize - 1);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
       const page = (data ?? []) as MetaInsight[];
       metaInsights.push(...page);
       if (page.length < pageSize) break;
     }
   }
-  const marketingSpend = metaInsights.reduce((total, insight) => total + monetary(insight.spend), 0);
+  const marketingCurrencyCoverage = createCurrencyConversionCoverage(store.currency);
+  const marketingSpend = metaInsights.reduce((total, insight) => {
+    const exchangeRate = resolveDatedExchangeRate(exchangeRates, insight.currency, store.currency, insight.date_start);
+    if (!marketingCurrencyCoverage.include(insight.currency, exchangeRate)) return total;
+    return total + convertDatedAmount(monetary(insight.spend), exchangeRate ?? 1, store.currency);
+  }, 0);
   const revenueWeights = new Map([...profits].map(([key, product]) => [key, Math.max(product.revenue - product.refunds, 0)]));
   const marketingAllocations = proportionalAllocations(marketingSpend, revenueWeights);
   const paymentFeeRules = ((paymentFeeRuleResult.data ?? []) as PaymentFeeRuleRow[]).map((rule): EffectivePaymentFeeRule => ({ gateway: rule.gateway, currency: rule.currency, effectiveFrom: rule.effective_from, effectiveTo: rule.effective_to, percentageRate: monetary(rule.percentage_rate), fixedFee: monetary(rule.fixed_fee), taxRate: monetary(rule.tax_rate), minimumFee: monetary(rule.minimum_fee) }));
@@ -286,6 +291,7 @@ export async function GET(request: Request) {
     hasData: products.length > 0,
     currency: store.currency,
     currencyCoverage: currencyCoverage.summary(),
+    marketingCurrencyCoverage: marketingCurrencyCoverage.summary(),
     period: orderRows.length ? { start: orderRows[0].processed_at?.slice(0, 10), end: orderRows.at(-1)?.processed_at?.slice(0, 10) } : null,
     products,
   });

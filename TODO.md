@@ -38,6 +38,7 @@
 - [x] Expose saved-report run history, sanitized failures, row counts, definition versions, and retry actions in the report library.
 - [x] Prevent silent cross-currency aggregation across order-backed reports and surface excluded-currency coverage.
 - [x] Add tenant-protected effective-dated exchange-rate management with a validated Settings workflow.
+- [x] Convert Meta advertising spend into reporting currency by insight date and surface missing-rate coverage.
 
 ### Active build order
 
@@ -365,7 +366,7 @@ Normalize every ad source into shared daily dimensions while retaining source-sp
 - [ ] Create `ad_accounts`, `ad_campaigns`, `ad_groups`, `ads`, and `ad_metrics_daily` or equivalent normalized tables.
 - [ ] Normalize source, account, campaign, ad group/ad set, ad, date, currency, spend, impressions, clicks, and platform conversions.
 - [ ] Keep platform-reported conversions separate from Shopify revenue and orders.
-- [ ] Convert spend into reporting currency with explicit exchange-rate dates.
+- [x] Convert spend into reporting currency with explicit exchange-rate dates.
 - [ ] Add account and campaign mapping tools for naming inconsistencies.
 - [ ] Re-fetch recent days because advertising attribution is revised after the event.
 

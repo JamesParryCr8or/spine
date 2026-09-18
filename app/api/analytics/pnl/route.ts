@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
 import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
-import { convertDatedAmount, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
+import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 import { costKey, monetary, resolveEffectiveCost, type EffectiveCost } from "@/lib/analytics/effective-cost";
 import { estimatedTransactionFee, selectEffectivePaymentFeeRule, type EffectivePaymentFeeRule, type ShopifyTransactionFee } from "@/lib/analytics/transaction-fees";
 import { allocatePeriodCost, operatingCostBucket } from "@/lib/analytics/cost-allocation";
@@ -18,7 +18,7 @@ type Transaction = ShopifyTransactionFee & { order_id: string; gateway: string |
 type PaymentFeeRuleRow = { gateway: string; percentage_rate: string; fixed_fee: string; tax_rate: string; minimum_fee: string; currency: string; effective_from: string; effective_to: string | null };
 type ProductShippingCostRow = ProductShippingCost & { currency: string };
 type CustomCost = { name: string; category: string; amount: string; currency: string; cadence: "one_off" | "daily" | "weekly" | "monthly" | "annual"; allocation_basis: "fixed" | "orders" | "units" | "revenue"; effective_from: string; effective_to: string | null };
-type MetaInsight = { spend: string };
+type MetaInsight = { date_start: string; spend: string; currency: string };
 
 const dayMs = 24 * 60 * 60 * 1000;
 const utcDay = (date: string) => Date.parse(`${date.slice(0, 10)}T00:00:00.000Z`);
@@ -182,9 +182,8 @@ export async function GET(request: Request) {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await supabase
         .from("meta_ad_insights_daily")
-        .select("spend")
+        .select("date_start,spend,currency")
         .eq("store_id", store.id)
-        .eq("currency", store.currency)
         .gte("date_start", rangeStart)
         .lte("date_start", rangeEnd)
         .order("date_start", { ascending: true })
@@ -195,8 +194,14 @@ export async function GET(request: Request) {
       if (page.length < pageSize) break;
     }
   }
-  const marketingSpend = metaInsights.reduce((total, insight) => total + monetary(insight.spend), 0);
-  const marketingSpendAvailable = metaInsights.length > 0;
+  const marketingCurrencyCoverage = createCurrencyConversionCoverage(store.currency);
+  const marketingSpend = metaInsights.reduce((total, insight) => {
+    const exchangeRate = resolveDatedExchangeRate(exchangeRates, insight.currency, store.currency, insight.date_start);
+    if (!marketingCurrencyCoverage.include(insight.currency, exchangeRate)) return total;
+    return total + convertDatedAmount(monetary(insight.spend), exchangeRate ?? 1, store.currency);
+  }, 0);
+  const marketingCoverage = marketingCurrencyCoverage.summary();
+  const marketingSpendAvailable = marketingCoverage.includedRows > 0 && marketingCoverage.excludedRows === 0;
 
   let fixedOperatingExpenses = 0;
   let variableOperatingExpenses = 0;
@@ -256,6 +261,7 @@ export async function GET(request: Request) {
     hasData: includedOrders.length > 0,
     currency: store.currency,
     currencyCoverage: currencyCoverage.summary(),
+    marketingCurrencyCoverage: marketingCoverage,
     calculatedAt: new Date().toISOString(),
     metrics: { ...totals, refunds, cogs, ...calculated, marketingSpend, transactionFees, merchantShippingCosts, variantShippingCosts, shippingFallbackCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, orders: includedOrders.length, missingCostLines, missingShippingLines: shippingCoverage.missingLines, shippingOverrideLines: shippingCoverage.overrideLines, shippingFallbackLines: shippingCoverage.fallbackLines, shippingFallbackRate: shippingCoverage.fallbackRate, unallocatedOperatingCosts },
     period: rangeStart && rangeEnd ? { start: rangeStart, end: rangeEnd } : null,

@@ -35,3 +35,51 @@ export function convertDatedAmount(amount: number, exchangeRate: number, reporti
   const scale = 10 ** digits;
   return Math.round((amount * exchangeRate + Number.EPSILON) * scale) / scale;
 }
+
+
+export type CurrencyConversionCoverageSummary = {
+  reportingCurrency: string;
+  includedRows: number;
+  convertedRows: number;
+  excludedRows: number;
+  convertedCurrencies: Array<{ currency: string; rows: number }>;
+  excludedCurrencies: Array<{ currency: string; rows: number }>;
+};
+
+export function createCurrencyConversionCoverage(reportingCurrency: string) {
+  const reporting = normalizedCurrency(reportingCurrency);
+  let includedRows = 0;
+  let convertedRows = 0;
+  let excludedRows = 0;
+  const converted = new Map<string, number>();
+  const excluded = new Map<string, number>();
+  const rows = (values: Map<string, number>) => [...values.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([currency, rowCount]) => ({ currency, rows: rowCount }));
+  return {
+    include(currency: string | null | undefined, exchangeRate: number | null) {
+      const source = normalizedCurrency(currency);
+      if (exchangeRate === null || !Number.isFinite(exchangeRate) || exchangeRate <= 0) {
+        excludedRows += 1;
+        excluded.set(source, (excluded.get(source) ?? 0) + 1);
+        return false;
+      }
+      includedRows += 1;
+      if (source !== reporting) {
+        convertedRows += 1;
+        converted.set(source, (converted.get(source) ?? 0) + 1);
+      }
+      return true;
+    },
+    summary(): CurrencyConversionCoverageSummary {
+      return {
+        reportingCurrency: reporting,
+        includedRows,
+        convertedRows,
+        excludedRows,
+        convertedCurrencies: rows(converted),
+        excludedCurrencies: rows(excluded),
+      };
+    },
+  };
+}

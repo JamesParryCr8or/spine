@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createClient } from "@/lib/supabase/server";
 import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
-import { convertDatedAmount, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
+import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 import { calculateAcquisitionMetrics } from "@/lib/analytics/acquisition";
 import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
 import { reportingDateKey, reportingMonthKey } from "@/lib/analytics/reporting-range";
@@ -125,7 +125,7 @@ export async function GET() {
     }
   }
 
-  let metaQuery = supabase.from("meta_ad_insights_daily").select("date_start,spend,currency").eq("store_id", store.id).eq("currency", store.currency).order("date_start", { ascending: true });
+  let metaQuery = supabase.from("meta_ad_insights_daily").select("date_start,spend,currency").eq("store_id", store.id).order("date_start", { ascending: true });
   if (earliestOrderAt) metaQuery = metaQuery.gte("date_start", earliestOrderAt.slice(0, 10));
   if (latestOrderAt) metaQuery = metaQuery.lte("date_start", latestOrderAt.slice(0, 10));
   const { data: metaRows, error: metaError } = await metaQuery;
@@ -140,13 +140,19 @@ export async function GET() {
     if ((data ?? []).length < pageSize) break;
   }
   const metaDates = (metaRows ?? []).map((row) => row.date_start);
-  const marketingSpend = (metaRows ?? []).reduce((total, row) => total + (Number(row.spend) || 0), 0);
+  const marketingCurrencyCoverage = createCurrencyConversionCoverage(store.currency);
+  const marketingSpend = (metaRows ?? []).reduce((total, row) => {
+    const exchangeRate = resolveDatedExchangeRate(exchangeRates, row.currency, store.currency, row.date_start);
+    if (!marketingCurrencyCoverage.include(row.currency, exchangeRate)) return total;
+    return total + convertDatedAmount(Number(row.spend) || 0, exchangeRate ?? 1, store.currency);
+  }, 0);
   const newCustomers = [...customerClasses.values()].filter((classification) => classification === "new").length;
   const acquisition = calculateAcquisitionMetrics({ netSales, newCustomerSales, marketingSpend, newCustomers });
   return NextResponse.json({
     hasData: orderCount > 0,
     currency: store.currency,
     currencyCoverage: currencyCoverage.summary(),
+    marketingCurrencyCoverage: marketingCurrencyCoverage.summary(),
     range: { start: earliestOrderAt ? reportingDateKey(earliestOrderAt, timezone) : isoDate(chartStart), end: latestOrderAt ? reportingDateKey(latestOrderAt, timezone) : latestLocalDate },
     metrics: {
       grossSales,
