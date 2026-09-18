@@ -33,6 +33,7 @@
 - [x] Group dashboard reporting dates by the Shopify store timezone while retaining UTC source timestamps.
 - [x] Add a shared, versioned runtime schema for saved-report create/update payloads with regression tests.
 - [x] Add database-backed saved-report definition versions and immutable revision history.
+- [x] Clear all foreign-key index findings reported by the Supabase performance advisor.
 
 ### Active build order
 
