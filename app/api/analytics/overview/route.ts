@@ -151,6 +151,7 @@ export async function GET() {
   return NextResponse.json({
     hasData: orderCount > 0,
     currency: store.currency,
+    timezone,
     currencyCoverage: currencyCoverage.summary(),
     marketingCurrencyCoverage: marketingCurrencyCoverage.summary(),
     range: { start: earliestOrderAt ? reportingDateKey(earliestOrderAt, timezone) : isoDate(chartStart), end: latestOrderAt ? reportingDateKey(latestOrderAt, timezone) : latestLocalDate },

@@ -100,6 +100,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     hasData: orderRows.length > 0,
     currency: store.currency,
+    timezone: store.timezone || "UTC",
     currencyCoverage: currencyCoverage.summary(),
     attributionModel,
     period: orderRows.length ? { start: orderRows[0].processed_at?.slice(0, 10), end: orderRows.at(-1)?.processed_at?.slice(0, 10) } : null,

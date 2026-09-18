@@ -45,7 +45,7 @@ export async function GET(request: Request) {
 
   const { data: membership } = await supabase.from("organization_members").select("organization_id").eq("user_id", userId).limit(1).single();
   if (!membership) return NextResponse.json({ error: "No workspace is configured" }, { status: 403 });
-  const { data: store } = await supabase.from("stores").select("id,currency").eq("organization_id", membership.organization_id).limit(1).single();
+  const { data: store } = await supabase.from("stores").select("id,currency,timezone").eq("organization_id", membership.organization_id).limit(1).single();
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
   const { data: exchangeRateRows, error: exchangeRateError } = await supabase.from("exchange_rates").select("base_currency,quote_currency,rate,effective_date").eq("store_id", store.id).eq("quote_currency", store.currency).order("effective_date", { ascending: true });
@@ -290,6 +290,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     hasData: products.length > 0,
     currency: store.currency,
+    timezone: store.timezone || "UTC",
     currencyCoverage: currencyCoverage.summary(),
     marketingCurrencyCoverage: marketingCurrencyCoverage.summary(),
     period: orderRows.length ? { start: orderRows[0].processed_at?.slice(0, 10), end: orderRows.at(-1)?.processed_at?.slice(0, 10) } : null,

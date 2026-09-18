@@ -10,7 +10,7 @@ export async function GET() {
 
   const { data: membership } = await supabase.from("organization_members").select("organization_id").eq("user_id", userId).limit(1).single();
   if (!membership) return NextResponse.json({ error: "No workspace is configured" }, { status: 403 });
-  const { data: store } = await supabase.from("stores").select("id,currency").eq("organization_id", membership.organization_id).limit(1).single();
+  const { data: store } = await supabase.from("stores").select("id,currency,timezone").eq("organization_id", membership.organization_id).limit(1).single();
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
   const { data: orders, error } = await supabase
@@ -28,5 +28,6 @@ export async function GET() {
   if (refundsError) return NextResponse.json({ error: refundsError.message }, { status: 500 });
   const refundsByOrder = new Map<string, number>();
   for (const refund of refunds ?? []) refundsByOrder.set(refund.order_id, (refundsByOrder.get(refund.order_id) ?? 0) + Number(refund.total_refunded));
-  return NextResponse.json({ hasData: orderRows.length > 0, currency: store.currency, orders: orderRows.map((order) => ({ ...order, refunded: refundsByOrder.get(order.id) ?? 0 })) });
+  const orderDates = orderRows.flatMap((order) => order.processed_at ? [order.processed_at.slice(0, 10)] : []).sort();
+  return NextResponse.json({ hasData: orderRows.length > 0, currency: store.currency, timezone: store.timezone || "UTC", period: orderDates.length ? { start: orderDates[0], end: orderDates.at(-1) } : null, orders: orderRows.map((order) => ({ ...order, refunded: refundsByOrder.get(order.id) ?? 0 })) });
 }

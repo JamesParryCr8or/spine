@@ -39,6 +39,7 @@
 - [x] Prevent silent cross-currency aggregation across order-backed reports and surface excluded-currency coverage.
 - [x] Add tenant-protected effective-dated exchange-rate management with a validated Settings workflow.
 - [x] Convert Meta advertising spend into reporting currency by insight date and surface missing-rate coverage.
+- [x] Standardize CSV export metadata across live report tables, including filters, reporting period, timezone, currency, and generation time.
 
 ### Active build order
 
@@ -448,9 +449,9 @@ Normalize every ad source into shared daily dimensions while retaining source-sp
 
 ### File exports
 
-- [ ] Export any report table to CSV.
+- [x] Export any report table to CSV.
 - [ ] Export the income statement and selected detailed reports to XLSX with formatted headers and currency/date cells.
-- [ ] Include report name, filters, date range, timezone, currency, and generated timestamp in export metadata.
+- [x] Include report name, filters, date range, timezone, currency, and generated timestamp in export metadata.
 - [ ] Stream or background large exports and provide a time-limited download.
 
 ### Google Sheets export

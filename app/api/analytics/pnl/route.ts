@@ -260,6 +260,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     hasData: includedOrders.length > 0,
     currency: store.currency,
+    timezone: store.timezone || "UTC",
     currencyCoverage: currencyCoverage.summary(),
     marketingCurrencyCoverage: marketingCoverage,
     calculatedAt: new Date().toISOString(),
