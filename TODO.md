@@ -67,6 +67,7 @@
 - [x] Remove hardcoded Supabase browser fallbacks and validate public configuration across browser, server, proxy, tests, and deployment tooling.
 - [x] Audit all 31 public Supabase tables for RLS and ownership-safe update policies; add a reusable structural database test.
 - [x] Add a transactional tenant-isolation regression test for owner, viewer, analyst, and admin access to core workspace records.
+- [x] Add an authenticated workspace API with validated, persistent organization and store selection; migrate freshness reporting to the selected store.
 - [ ] Enable Supabase leaked-password protection before external onboarding.
 
 ### Active build order
