@@ -57,6 +57,7 @@
 - [x] Export the current UTM drilldown as a formatted XLSX workbook with numeric currency and percentage cells.
 - [x] Audit connector credential creation, rotation, deletion, and Shopify scope updates without storing secret values.
 - [x] Show the tenant-scoped connector credential audit history to workspace owners and admins in Settings.
+- [x] Import tenant-protected daily custom marketing spend from CSV, deduplicate it deterministically, convert currencies by date, and allocate it to matching UTM groups.
 
 ### Active build order
 
@@ -356,7 +357,8 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [x] Show revenue, refunds, COGS, marketing cost, contribution profit, AOV, and customer mix for every UTM grouping.
 - [x] Prevent order revenue from being counted more than once by selecting one model-specific attribution record per order and aggregating from the valid-order set.
 - [x] Add a mapping interface to connect imported Meta campaigns to UTM groups when names do not match exactly.
-- [ ] Extend campaign mapping to Google Ads and custom spend sources after those connectors are available.
+- [x] Feed custom spend rows directly into normalized UTM source, medium, and campaign groups.
+- [ ] Extend campaign mapping to Google Ads after that connector is available.
 - [x] Calculate ROAS, MER, CAC, and profit after Meta spend is mapped; label metrics unavailable without traffic, spend, or required cost data.
 - [x] Add an unattributed-sales diagnostic showing orders missing attribution records, UTMs, landing pages, or referrers.
 - [x] Allow users to save the current UTM filters as a report and reopen the same view; keep CSV export available for the current drilldown.
@@ -409,10 +411,10 @@ Normalize every ad source into shared daily dimensions while retaining source-sp
 
 ### Custom marketing cost import
 
-- [ ] Allow CSV import of daily spend for channels without an API connector.
-- [ ] Require date, source/channel, and spend; optionally accept account, campaign, ad group, currency, and external ID.
+- [x] Allow CSV import of daily spend for channels without an API connector.
+- [x] Require date, source/channel, and spend; optionally accept account, campaign, ad group, currency, and external ID.
 - [ ] Reuse the cost import mapping, preview, validation, batch, and rollback framework.
-- [ ] Prevent duplicate spend with deterministic import keys.
+- [x] Prevent duplicate spend with deterministic import keys.
 
 ## Phase 7 — Klaviyo analytics
 
