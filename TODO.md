@@ -30,6 +30,7 @@
 - [x] Add owner/admin payment-fee rule management and use effective gateway rules when Shopify transactions omit actual fees.
 - [x] Apply the payment-fee migration to the connected Supabase project and verify its columns, RLS policies, and database advisors.
 - [x] Add effective-dated per-unit/per-order product shipping overrides with store-level fulfilment fallback and deploy the tenant-protected schema.
+- [x] Group dashboard reporting dates by the Shopify store timezone while retaining UTC source timestamps.
 
 ### Active build order
 
@@ -61,7 +62,7 @@ The product should answer these questions quickly:
 - [x] Keep API credentials and connector tokens out of browser code and exposed database schemas.
 - [x] Use lightweight persistence rather than pulling every API live for every page view.
 - [ ] Store normalized operational data and daily analytics aggregates; do not build an unlimited raw event lake in v1.
-- [ ] Refresh recent dates on every sync so refunds, attribution, cancellations, and late adjustments are corrected.
+- [x] Refresh recent dates on every sync so refunds, attribution, cancellations, and late adjustments are corrected.
 - [x] Make implemented tenant-owned records belong to an `organization_id` and enforce access with Row Level Security.
 - [ ] Keep the existing Apps Script project available as a connector reference until parity is reached.
 
@@ -78,7 +79,7 @@ The product should answer these questions quickly:
 
 - [ ] Store monetary values in integer minor units or fixed-precision numeric columns; never use floating-point arithmetic for financial totals.
 - [ ] Preserve source currency and normalized reporting currency separately.
-- [ ] Use effective-dated cost records so changing a product cost does not rewrite historical profit.
+- [x] Use effective-dated cost records so changing a product cost does not rewrite historical profit.
 - [ ] Define whether every headline metric includes or excludes tax, shipping revenue, duties, tips, gift cards, and refunds.
 - [x] Make metric definitions visible in the UI with tooltips or a metric dictionary.
 - [ ] Reconcile dashboard totals back to Shopify for a selected period before releasing the MVP.
@@ -175,13 +176,13 @@ Shopify is the primary sales and catalog source. Other sources enrich Shopify ra
 
 ### Shopify correctness
 
-- [ ] Separate gross sales, discounts, returns, shipping income, tax, duties, tips, and net sales.
-- [ ] Decide how cancelled, test, draft, fully refunded, partially refunded, and zero-value orders are treated.
-- [ ] Use shop timezone for business-day grouping while retaining UTC source timestamps.
-- [ ] Determine new versus repeat customer from first valid order, not from campaign attribution.
+- [x] Separate gross sales, discounts, returns, shipping income, tax, duties, and net sales; tips and gift cards remain outside the current imported metric set.
+- [x] Exclude test, cancelled, and unprocessed orders from financial reporting; include valid zero-value and refunded orders while recording refunds separately. Draft orders are not imported.
+- [x] Use shop timezone for business-day grouping while retaining UTC source timestamps.
+- [x] Determine new versus repeat customer from first valid order, not from campaign attribution.
 - [ ] Handle guest checkouts and customer merges without double-counting customers.
 - [ ] Support multi-currency orders and Shopify Markets without silently mixing currencies.
-- [ ] Add reconciliation tests against Shopify order totals for fixed sample periods.
+- [x] Add reconciliation tests against Shopify order totals for fixed sample periods.
 
 ## Phase 3 — Cost and expense engine
 

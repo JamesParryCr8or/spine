@@ -10,7 +10,7 @@ import { proportionalAllocations } from '../lib/analytics/proportional-allocatio
 import { allocateOrderRefund } from '../lib/analytics/refund-allocation.ts';
 import { calculateProductProfit } from '../lib/analytics/product-profit.ts';
 import { classifyCustomerOrders } from '../lib/analytics/customer-classification.ts';
-import { reportingRangeToUtc } from '../lib/analytics/reporting-range.ts';
+import { reportingDateKey, reportingMonthKey, reportingRangeToUtc } from '../lib/analytics/reporting-range.ts';
 import { convertCurrency, sumSingleCurrency } from '../lib/analytics/money.ts';
 import { calculateProfitAndLoss } from '../lib/analytics/profit-and-loss.ts';
 import { normalizeAttribution, normalizeUtmSource } from '../lib/analytics/utm-attribution.ts';
@@ -249,6 +249,13 @@ test('store-local reporting dates honor daylight-saving boundaries', () => {
   assert.deepEqual(spring, { start: '2026-03-29T00:00:00.000Z', endExclusive: '2026-03-29T23:00:00.000Z' });
   assert.deepEqual(autumn, { start: '2026-10-24T23:00:00.000Z', endExclusive: '2026-10-26T00:00:00.000Z' });
 });
+
+test('reporting date and month keys use the store timezone at UTC boundaries', () => {
+  assert.equal(reportingDateKey('2026-01-01T00:30:00.000Z', 'America/Los_Angeles'), '2025-12-31');
+  assert.equal(reportingMonthKey('2026-01-01T00:30:00.000Z', 'America/Los_Angeles'), '2025-12');
+  assert.equal(reportingDateKey('2025-12-31T16:00:00.000Z', 'Asia/Tokyo'), '2026-01-01');
+});
+
 
 test('currency conversion rounds once in the target currency and rejects mixed totals', () => {
   assert.equal(convertCurrency(10.005, 1, 'GBP'), 10.01);

@@ -41,3 +41,17 @@ export function reportingRangeToUtc(from: string, to: string, timeZone: string) 
   const endExclusive = zonedMidnight(nextCalendarDate(to), timeZone);
   return { start: start.toISOString(), endExclusive: endExclusive.toISOString() };
 }
+
+
+/** Returns the store-local calendar date for a UTC source timestamp. */
+export function reportingDateKey(value: string | Date, timeZone: string) {
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) throw new Error("Use a valid timestamp");
+  const parts = dateParts(date, timeZone);
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+/** Returns the store-local calendar month for a UTC source timestamp. */
+export function reportingMonthKey(value: string | Date, timeZone: string) {
+  return reportingDateKey(value, timeZone).slice(0, 7);
+}

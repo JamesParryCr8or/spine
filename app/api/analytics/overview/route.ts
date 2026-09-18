@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { calculateAcquisitionMetrics } from "@/lib/analytics/acquisition";
 import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
+import { reportingDateKey, reportingMonthKey } from "@/lib/analytics/reporting-range";
 
 type Order = {
   id: string;
@@ -69,8 +70,11 @@ export async function GET() {
 
   const latestOrderAt = orders.reduce<string | null>((latest, order) => !latest || (order.processed_at && order.processed_at > latest) ? order.processed_at : latest, null);
   const earliestOrderAt = orders[0]?.processed_at ?? null;
-  const chartEnd = latestOrderAt ? new Date(latestOrderAt) : new Date();
-  const chartStart = new Date(Date.UTC(chartEnd.getUTCFullYear(), chartEnd.getUTCMonth() - 5, 1));
+  const timezone = store.timezone || "UTC";
+  const latestLocalDate = reportingDateKey(latestOrderAt ?? new Date(), timezone);
+  const [latestYear, latestMonth] = latestLocalDate.slice(0, 7).split("-").map(Number);
+  const chartEnd = new Date(Date.UTC(latestYear, latestMonth - 1, 1));
+  const chartStart = new Date(Date.UTC(latestYear, latestMonth - 6, 1));
   const months = Array.from({ length: 6 }, (_, index) => {
     const date = new Date(Date.UTC(chartEnd.getUTCFullYear(), chartEnd.getUTCMonth() - (5 - index), 1));
     return { key: date.toISOString().slice(0, 7), label: monthLabel(date, store.timezone || "UTC"), grossSales: 0, discounts: 0, netSales: 0, shippingRevenue: 0, orders: 0 };
@@ -85,7 +89,7 @@ export async function GET() {
 
   for (const order of orders) {
     if (!order.processed_at) continue;
-    const key = order.processed_at.slice(0, 7);
+    const key = reportingMonthKey(order.processed_at, timezone);
     const period = periods.get(key);
     const gross = Number(order.gross_sales) || 0;
     const discount = Number(order.discounts) || 0;
@@ -126,7 +130,7 @@ export async function GET() {
   return NextResponse.json({
     hasData: orderCount > 0,
     currency: store.currency,
-    range: { start: earliestOrderAt ? isoDate(new Date(earliestOrderAt)) : isoDate(chartStart), end: latestOrderAt ? isoDate(chartEnd) : isoDate(chartEnd) },
+    range: { start: earliestOrderAt ? reportingDateKey(earliestOrderAt, timezone) : isoDate(chartStart), end: latestOrderAt ? reportingDateKey(latestOrderAt, timezone) : latestLocalDate },
     metrics: {
       grossSales,
       discounts,
