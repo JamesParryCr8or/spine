@@ -37,7 +37,7 @@ function zipStore(files: Array<{ name: string; content: string }>) {
 }
 
 export function buildXlsx(rows: Cell[][], options: { sheetName?: string; headerRow?: number; columnStyles?: Record<number, ColumnStyle> } = {}) {
-  const sheetName = (options.sheetName || "Report").replace(/[\\/*?:[\]]/g, " ").slice(0, 31) || "Report";
+  const sheetName = (options.sheetName || "Report").replace(/[\\/*?:[\]]/g, " ").replace(/\s+/g, " ").trim().slice(0, 31) || "Report";
   const sheetRows = rows.map((row, rowIndex) => {
     const cells = row.map((value, columnIndex) => {
       const ref = `${columnName(columnIndex)}${rowIndex + 1}`;
