@@ -11,7 +11,8 @@
     "start": "next start",
     "lint": "eslint app components lib proxy.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/*.test.mjs"
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
+    "validate:env": "node --env-file-if-exists=.env.local --experimental-strip-types scripts/validate-env.mjs"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "1.3.11",

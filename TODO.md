@@ -64,6 +64,7 @@
 - [x] Add blended net profit per new customer to Customer analytics with explicit completeness requirements.
 - [x] Audit the foundation checklist against the current auth, tenancy, and CI implementation and split remaining gaps precisely.
 - [x] Add Google OAuth and email magic-link login paths with PKCE callback handling and local-only redirects.
+- [x] Remove hardcoded Supabase browser fallbacks and validate public configuration across browser, server, proxy, tests, and deployment tooling.
 
 ### Active build order
 
@@ -134,7 +135,8 @@ The product should answer these questions quickly:
 
 - [ ] Create the web application in a new directory so the Apps Script prototype remains intact.
 - [x] Add linting, type checking, unit testing, and production-build validation.
-- [ ] Add an automatic formatter and explicit environment validation.
+- [ ] Add an automatic formatter.
+- [x] Add explicit Supabase public-environment validation and a deploy-time validation command.
 - [x] Add local Supabase configuration and migration workflow.
 - [x] Pin dependency versions and commit the lockfile.
 - [x] Create CI checks for type checking, linting, tests, and the production build.

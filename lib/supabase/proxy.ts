@@ -1,6 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { hasEnvVars } from "../utils";
+import { getSupabasePublicEnvironment, hasSupabasePublicEnvironment } from "@/lib/env";
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -9,15 +9,16 @@ export async function updateSession(request: NextRequest) {
 
   // If the env vars are not set, skip proxy check. You can remove this
   // once you setup the project.
-  if (!hasEnvVars) {
+  if (!hasSupabasePublicEnvironment()) {
     return supabaseResponse;
   }
 
   // With Fluid compute, don't put this client in a global environment
   // variable. Always create a new one on each request.
+  const { url, publishableKey } = getSupabasePublicEnvironment();
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    url,
+    publishableKey,
     {
       cookies: {
         getAll() {
