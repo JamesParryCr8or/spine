@@ -159,15 +159,18 @@ export async function GET(request: Request) {
 
   const storeCostDefault = storeCostDefaultResult.data as StoreCostDefault | null;
   const usableStoreCostDefault = storeCostDefault?.currency === store.currency ? storeCostDefault : null;
+  const dailyOrderCount = shopifyDaily.reduce((total, day) => total + Math.max(day.orders, 0), 0);
+  const dailyUnitCount = shopifyDaily.reduce((total, day) => total + Math.max(day.net_items_sold, 0), 0);
   const uncoveredShippingLines = lines.filter((line) => !shippingRuleByLine.has(line));
-  const uncoveredShippingOrderCount = new Set(uncoveredShippingLines.map((line) => line.order_id)).size;
-  const uncoveredShippingUnits = uncoveredShippingLines.reduce((total, line) => total + Math.max(line.current_quantity, 0), 0);
+  const uncoveredShippingOrderCount = lines.length ? new Set(uncoveredShippingLines.map((line) => line.order_id)).size : dailyOrderCount;
+  const uncoveredShippingUnits = lines.length ? uncoveredShippingLines.reduce((total, line) => total + Math.max(line.current_quantity, 0), 0) : dailyUnitCount;
   const defaultPostageCosts = usableStoreCostDefault
     ? monetary(usableStoreCostDefault.postage_amount) * (usableStoreCostDefault.postage_basis === "orders" ? uncoveredShippingOrderCount : uncoveredShippingUnits)
     : 0;
-  const totalOrderUnits = lines.reduce((total, line) => total + Math.max(line.current_quantity, 0), 0);
+  const totalOrderUnits = lines.length ? lines.reduce((total, line) => total + Math.max(line.current_quantity, 0), 0) : dailyUnitCount;
+  const reportOrderCount = includedOrders.length || dailyOrderCount;
   const defaultFulfilmentCosts = usableStoreCostDefault
-    ? monetary(usableStoreCostDefault.fulfilment_amount) * (usableStoreCostDefault.fulfilment_basis === "orders" ? includedOrders.length : totalOrderUnits)
+    ? monetary(usableStoreCostDefault.fulfilment_amount) * (usableStoreCostDefault.fulfilment_basis === "orders" ? reportOrderCount : totalOrderUnits)
     : 0;
 
   const defaultProductCogsRate = usableStoreCostDefault && monetary(usableStoreCostDefault.default_cogs_percent) > 0 ? monetary(usableStoreCostDefault.default_cogs_percent) / 100 : null;
