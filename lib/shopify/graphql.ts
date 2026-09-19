@@ -4,7 +4,7 @@ const MAX_RETRY_DELAY_MS = 15_000;
 
 type GraphPayload<T> = {
   data?: T;
-  errors?: Array<{ extensions?: { code?: string } }>;
+  errors?: Array<{ message?: string; extensions?: { code?: string } }>;
   extensions?: { cost?: {
     requestedQueryCost?: number;
     throttleStatus?: { currentlyAvailable?: number; restoreRate?: number };
@@ -60,7 +60,9 @@ export async function shopifyGraph<T>(
       if (response?.status === 401 || response?.status === 403) {
         throw new Error("Shopify denied access. Check the saved token and required app scopes, then reconnect.");
       }
-      throw new Error("Shopify could not complete the import query. Check the app scopes and API configuration.");
+      const reason = errors[0]?.message?.replace(/\s+/g, " ").slice(0, 220);
+      console.error("Shopify GraphQL query failed", { status: response?.status, code: errors[0]?.extensions?.code, reason });
+      throw new Error(reason ? `Shopify import query: ${reason}` : "Shopify could not complete the import query. Check the app scopes and API configuration.");
     }
 
     const failure = throttled
