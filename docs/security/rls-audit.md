@@ -23,10 +23,10 @@ Route-level checks and behavioral coverage for the remaining tenant tables are s
 
 The advisor currently reports three intentional `SECURITY DEFINER` RPCs:
 
-- `save_data_connection`
-- `delete_data_connection`
-- `record_shopify_connection_scopes`
+- `save_data_connection(connection_provider, requested_store_id, ...)`
+- `delete_data_connection(connection_provider, requested_store_id)`
+- `record_shopify_connection_scopes(scopes, requested_store_id)`
 
-They are exposed to authenticated users because the server routes need narrowly scoped Vault operations. Each function derives the caller from `auth.uid()`, requires an owner or admin membership, scopes its work to that membership’s organization/store, fixes `search_path`, and does not return secrets. Keep these checks when modifying the functions.
+They are exposed to authenticated users because the server routes need narrowly scoped Vault operations. Each function derives the caller from `auth.uid()`, requires an owner or admin membership, requires the requested store to belong to an organization where the caller is an owner or admin, fixes `search_path`, and does not return secrets. Legacy overloads that selected the first organization/store were removed after the scoped release reached production. Keep these checks when modifying the functions.
 
 The advisor also reports that leaked-password protection is disabled. Enable that Auth setting before external customer onboarding.

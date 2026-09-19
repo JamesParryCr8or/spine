@@ -72,6 +72,7 @@
 - [x] Scope costs, saved reports, report runs, exchange rates, campaign mappings, custom spend, and connection audits to the active workspace and store.
 - [x] Add store-scoped credential RPCs and bind Shopify, Meta, and Klaviyo connection routes to the active store.
 - [x] Activate the application-shell store selector and reload every scoped report, cost, setting, and connection view after switching.
+- [x] Remove legacy unscoped connection RPC overloads after the active-store release reached production.
 - [ ] Enable Supabase leaked-password protection before external onboarding.
 
 ### Active build order
