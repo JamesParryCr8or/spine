@@ -82,7 +82,7 @@ export async function GET(request: Request) {
   for (const customerId of directCustomerIds) {
     const root = await search(token.access_token, developerToken, customerId, "SELECT customer.id, customer.descriptive_name, customer.manager FROM customer LIMIT 1");
     const rootCustomer = root.payload[0]?.results?.[0]?.customer;
-    if (!root.response.ok) discoveryErrors.push(root.payload.error?.message ?? "Google Ads did not allow account details to be read");
+    if (!root.response.ok) { console.error("Google Ads account lookup failed", { customerId, status: root.response.status, payload: root.payload }); discoveryErrors.push(root.payload.error?.message ?? "Google Ads did not allow account details to be read"); }
     const isManager = Boolean(rootCustomer?.manager);
     accountMap.set(customerId, {
       customer_id: customerId,
@@ -94,7 +94,7 @@ export async function GET(request: Request) {
 
     if (!isManager) continue;
     const children = await search(token.access_token, developerToken, customerId, "SELECT customer_client.id, customer_client.descriptive_name, customer_client.manager, customer_client.level, customer_client.status FROM customer_client WHERE customer_client.status = 'ENABLED'", customerId);
-    if (!children.response.ok) { discoveryErrors.push(children.payload.error?.message ?? "Google Ads did not allow the MCC client accounts to be read"); continue; }
+    if (!children.response.ok) { console.error("Google Ads MCC hierarchy lookup failed", { customerId, status: children.response.status, payload: children.payload }); discoveryErrors.push(children.payload.error?.message ?? "Google Ads did not allow the MCC client accounts to be read"); continue; }
     for (const row of children.payload.flatMap((page) => page.results ?? [])) {
       const child = row.customerClient;
       if (!child?.id) continue;
