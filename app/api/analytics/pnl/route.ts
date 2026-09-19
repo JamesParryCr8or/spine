@@ -18,7 +18,7 @@ type Refund = { order_id: string; total_refunded: string };
 type Transaction = ShopifyTransactionFee & { order_id: string; gateway: string | null; amount: string; processed_at_shopify: string | null; created_at_shopify: string };
 type PaymentFeeRuleRow = { gateway: string; percentage_rate: string; fixed_fee: string; tax_rate: string; minimum_fee: string; currency: string; effective_from: string; effective_to: string | null };
 type ProductShippingCostRow = ProductShippingCost & { currency: string };
-type StoreCostDefault = { fulfilment_amount: string; fulfilment_basis: "orders" | "units"; postage_amount: string; postage_basis: "orders" | "units"; currency: string };
+type StoreCostDefault = { fulfilment_amount: string; fulfilment_basis: "orders" | "units"; postage_amount: string; postage_basis: "orders" | "units"; default_cogs_per_unit: string; currency: string };
 type CustomCost = { name: string; category: string; amount: string; currency: string; cadence: "one_off" | "daily" | "weekly" | "monthly" | "annual"; allocation_basis: "fixed" | "orders" | "units" | "revenue"; effective_from: string; effective_to: string | null };
 type MetaInsight = { date_start: string; spend: string; currency: string };
 type GoogleInsight = { insight_date: string; spend: string; currency: string };
@@ -116,7 +116,7 @@ export async function GET(request: Request) {
     supabase.from("custom_costs").select("name,category,amount,currency,cadence,allocation_basis,effective_from,effective_to").eq("store_id", store.id),
     supabase.from("payment_fee_rules").select("gateway,percentage_rate,fixed_fee,tax_rate,minimum_fee,currency,effective_from,effective_to").eq("store_id", store.id),
     supabase.from("product_shipping_costs").select("id,variant_id,sku,amount,allocation_basis,currency,effective_from,effective_to").eq("store_id", store.id),
-    supabase.from("store_cost_defaults").select("fulfilment_amount,fulfilment_basis,postage_amount,postage_basis,currency").eq("store_id", store.id).maybeSingle(),
+    supabase.from("store_cost_defaults").select("fulfilment_amount,fulfilment_basis,postage_amount,postage_basis,default_cogs_per_unit,currency").eq("store_id", store.id).maybeSingle(),
   ]);
   const allResults = [...lineResults, ...refundResults, ...transactionResults, variantResult, costResult, operatingCostResult, paymentFeeRuleResult, productShippingCostResult, storeCostDefaultResult];
   const fetchError = allResults.find((result) => result.error)?.error;
@@ -170,6 +170,7 @@ export async function GET(request: Request) {
     ? monetary(usableStoreCostDefault.fulfilment_amount) * (usableStoreCostDefault.fulfilment_basis === "orders" ? includedOrders.length : totalOrderUnits)
     : 0;
 
+  const defaultProductCogs = usableStoreCostDefault && monetary(usableStoreCostDefault.default_cogs_per_unit) > 0 ? monetary(usableStoreCostDefault.default_cogs_per_unit) : null;
   let cogs = 0;
   let missingCostLines = 0;
   for (const line of lines) {
@@ -177,7 +178,7 @@ export async function GET(request: Request) {
     if (!order?.processed_at) continue;
     const variant = line.variant_gid ? variantsByGid.get(line.variant_gid) : line.sku ? variantsBySku.get(line.sku.trim().toLowerCase()) : undefined;
     const costs = variant ? costsByKey.get(`variant:${variant.id}`) ?? costsByKey.get(`sku:${variant.sku?.trim().toLowerCase()}`) ?? [] : costsByKey.get(`sku:${line.sku?.trim().toLowerCase()}`) ?? [];
-    const unitCost = resolveEffectiveCost(costs, order.processed_at.slice(0, 10), variant?.shopify_unit_cost === null || variant?.shopify_unit_cost === undefined ? null : monetary(variant.shopify_unit_cost));
+    const unitCost = resolveEffectiveCost(costs, order.processed_at.slice(0, 10), variant?.shopify_unit_cost === null || variant?.shopify_unit_cost === undefined ? null : monetary(variant.shopify_unit_cost)) ?? defaultProductCogs;
     if (unitCost === null) missingCostLines += 1;
     else cogs += unitCost * Math.max(line.current_quantity, 0);
   }
