@@ -23,7 +23,7 @@ const numeric = (value: unknown) => {
 };
 
 async function readSecret(supabase: SupabaseClient, storeId: string, provider: string) {
-  const { data, error } = await supabase.rpc("read_connection_secret", {
+  const { data, error } = await supabase.rpc("read_connection_secret_for_server", {
     requested_store_id: storeId,
     connection_provider: provider,
   });
