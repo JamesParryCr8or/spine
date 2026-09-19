@@ -117,46 +117,74 @@ export async function POST(request: Request) {
     if (scopesError) throw new Error(scopesError.message);
 
     // ShopifyQL uses the same commerce analytics engine as Shopify Admin. Store the
-    // compact daily result so report pages never need to total thousands of orders.
-    const dailySales = await shopifyGraph<{
+    // compact daily results so report pages never total thousands of orders.
+    type ShopifyQlResult = {
       shopifyqlQuery: {
         tableData: { rows: Array<Record<string, string | number | null>> } | null;
         parseErrors: string[];
       };
-    }>(shopDomain, accessToken, `query DailySales($shopifyQl:String!){ shopifyqlQuery(query:$shopifyQl){ tableData{ rows } parseErrors } }`, {
-      shopifyQl: `FROM sales
+    };
+    const dailySales = await shopifyGraph<ShopifyQlResult>(
+      shopDomain,
+      accessToken,
+      `query DailySales($shopifyQl:String!){ shopifyqlQuery(query:$shopifyQl){ tableData{ rows } parseErrors } }`,
+      { shopifyQl: `FROM sales
 SHOW gross_sales, discounts, sales_reversals, net_sales, shipping_charges, taxes, total_sales, orders, net_items_sold, cost_of_goods_sold, gross_profit, net_sales_with_cost_recorded, net_sales_without_cost_recorded
 TIMESERIES day
 SINCE -5y UNTIL today
-ORDER BY day ASC`,
-    });
-    if (dailySales.shopifyqlQuery.parseErrors.length) {
-      throw new Error(`Shopify reporting query: ${dailySales.shopifyqlQuery.parseErrors[0]}`);
-    }
+ORDER BY day ASC` },
+    );
+    const dailyFees = await shopifyGraph<ShopifyQlResult>(
+      shopDomain,
+      accessToken,
+      `query DailyFees($shopifyQl:String!){ shopifyqlQuery(query:$shopifyQl){ tableData{ rows } parseErrors } }`,
+      { shopifyQl: `FROM fees
+SHOW shopify_payments_processing_fees, foreign_exchange_fees, managed_markets_fees, international_fees
+TIMESERIES day
+SINCE -5y UNTIL today
+ORDER BY day ASC` },
+    );
+    const parseError = dailySales.shopifyqlQuery.parseErrors[0] ?? dailyFees.shopifyqlQuery.parseErrors[0];
+    if (parseError) throw new Error(`Shopify reporting query: ${parseError}`);
+
+    const numeric = (row: Record<string, string | number | null> | undefined, key: string) => {
+      const value = Number(row?.[key] ?? 0);
+      return Number.isFinite(value) ? value : 0;
+    };
+    const feesByDate = new Map(
+      (dailyFees.shopifyqlQuery.tableData?.rows ?? []).flatMap((row) => {
+        const day = typeof row.day === "string" ? row.day.slice(0, 10) : "";
+        return /^\d{4}-\d{2}-\d{2}$/.test(day) ? [[day, row] as const] : [];
+      }),
+    );
     const dailyRows = (dailySales.shopifyqlQuery.tableData?.rows ?? []).flatMap((row) => {
       const salesDate = typeof row.day === "string" ? row.day.slice(0, 10) : "";
       if (!/^\d{4}-\d{2}-\d{2}$/.test(salesDate)) return [];
-      const numeric = (key: string) => {
-        const value = Number(row[key] ?? 0);
-        return Number.isFinite(value) ? value : 0;
-      };
+      const feeRow = feesByDate.get(salesDate);
+      const processingFees = numeric(feeRow, "shopify_payments_processing_fees");
+      const internationalFees = numeric(feeRow, "international_fees");
       return [{
         organization_id: membership.organizationId,
         store_id: store.id,
         sales_date: salesDate,
-        gross_sales: numeric("gross_sales"),
-        discounts: numeric("discounts"),
-        sales_reversals: numeric("sales_reversals"),
-        net_sales: numeric("net_sales"),
-        shipping_charges: numeric("shipping_charges"),
-        taxes: numeric("taxes"),
-        total_sales: numeric("total_sales"),
-        orders: Math.max(0, Math.trunc(numeric("orders"))),
-        net_items_sold: Math.trunc(numeric("net_items_sold")),
-        cost_of_goods_sold: numeric("cost_of_goods_sold"),
-        gross_profit: numeric("gross_profit"),
-        net_sales_with_cost_recorded: numeric("net_sales_with_cost_recorded"),
-        net_sales_without_cost_recorded: numeric("net_sales_without_cost_recorded"),
+        gross_sales: numeric(row, "gross_sales"),
+        discounts: numeric(row, "discounts"),
+        sales_reversals: numeric(row, "sales_reversals"),
+        net_sales: numeric(row, "net_sales"),
+        shipping_charges: numeric(row, "shipping_charges"),
+        taxes: numeric(row, "taxes"),
+        total_sales: numeric(row, "total_sales"),
+        orders: Math.max(0, Math.trunc(numeric(row, "orders"))),
+        net_items_sold: Math.trunc(numeric(row, "net_items_sold")),
+        cost_of_goods_sold: numeric(row, "cost_of_goods_sold"),
+        gross_profit: numeric(row, "gross_profit"),
+        net_sales_with_cost_recorded: numeric(row, "net_sales_with_cost_recorded"),
+        net_sales_without_cost_recorded: numeric(row, "net_sales_without_cost_recorded"),
+        shopify_payments_processing_fees: processingFees,
+        foreign_exchange_fees: numeric(feeRow, "foreign_exchange_fees"),
+        managed_markets_fees: numeric(feeRow, "managed_markets_fees"),
+        international_fees: internationalFees,
+        total_payment_fees: processingFees + internationalFees,
         currency: shopData.shop.currencyCode,
         synced_at: new Date().toISOString(),
       }];
