@@ -9,6 +9,13 @@ type OrderRow = {
   net_product_sales: string | number; shipping_revenue: string | number; total_sales: string | number; currency: string;
 };
 type BreakdownRow = { label: string; orders: number; units: number; sales: number };
+type DailyShopifyRow = {
+  sales_date: string; gross_sales: string | number; discounts: string | number;
+  sales_reversals: string | number; net_sales: string | number; shipping_charges: string | number;
+  taxes: string | number; total_sales: string | number; orders: number; net_items_sold: number;
+  cost_of_goods_sold: string | number; gross_profit: string | number;
+  net_sales_with_cost_recorded: string | number; net_sales_without_cost_recorded: string | number;
+};
 
 function addBreakdown(map: Map<string, BreakdownRow>, label: string, orderId: string, units: number, sales: number, seen: Map<string, Set<string>>) {
   const row = map.get(label) ?? { label, orders: 0, units: 0, sales: 0 };
@@ -105,6 +112,32 @@ export async function GET(request: Request) {
     addBreakdown(productMap, label, line.order_id, line.current_quantity, Number(line.net_sales), productSeen);
   }
 
+  let dailyQuery = supabase
+    .from("shopify_sales_daily")
+    .select("sales_date,gross_sales,discounts,sales_reversals,net_sales,shipping_charges,taxes,total_sales,orders,net_items_sold,cost_of_goods_sold,gross_profit,net_sales_with_cost_recorded,net_sales_without_cost_recorded")
+    .eq("store_id", store.id)
+    .order("sales_date", { ascending: true });
+  if (from) dailyQuery = dailyQuery.gte("sales_date", from);
+  if (to) dailyQuery = dailyQuery.lte("sales_date", to);
+  const { data: dailyData, error: dailyError } = await dailyQuery;
+  if (dailyError) return NextResponse.json({ error: dailyError.message }, { status: 500 });
+  const shopifyDaily = (dailyData ?? []) as DailyShopifyRow[];
+  const dailyBreakdown = shopifyDaily.map((row) => ({
+    label: row.sales_date,
+    orders: row.orders,
+    units: row.net_items_sold,
+    sales: Number(row.net_sales),
+    grossSales: Number(row.gross_sales),
+    discounts: Number(row.discounts),
+    refunds: Math.abs(Number(row.sales_reversals)),
+    shipping: Number(row.shipping_charges),
+    taxes: Number(row.taxes),
+    totalSales: Number(row.total_sales),
+    cogs: Number(row.cost_of_goods_sold),
+    grossProfit: Number(row.gross_profit),
+    salesWithoutRecordedCost: Number(row.net_sales_without_cost_recorded),
+  }));
+
   const orderDates = orderRows.flatMap((order) => order.processed_at ? [reportingDateKey(order.processed_at, store.timezone || "UTC")] : []).sort();
   return NextResponse.json({
     hasData: orderRows.length > 0,
@@ -112,8 +145,9 @@ export async function GET(request: Request) {
     timezone: store.timezone || "UTC",
     period: orderDates.length ? { start: orderDates[0], end: orderDates.at(-1) } : null,
     analysisOrderCount: orderRows.length,
+    dailySource: dailyBreakdown.length ? "shopifyql" : "imported_orders",
     breakdowns: {
-      date: sorted(dateMap, true),
+      date: dailyBreakdown.length ? dailyBreakdown : sorted(dateMap, true),
       channel: sorted(channelMap),
       customerType: sorted(customerMap),
       country: sorted(countryMap),
