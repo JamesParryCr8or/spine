@@ -71,6 +71,7 @@
 - [x] Scope Overview, P&L, Sales, Products, Customers, and UTM analytics routes to the validated active store.
 - [x] Scope costs, saved reports, report runs, exchange rates, campaign mappings, custom spend, and connection audits to the active workspace and store.
 - [x] Add store-scoped credential RPCs and bind Shopify, Meta, and Klaviyo connection routes to the active store.
+- [x] Activate the application-shell store selector and reload every scoped report, cost, setting, and connection view after switching.
 - [ ] Enable Supabase leaked-password protection before external onboarding.
 
 ### Active build order
@@ -166,8 +167,8 @@ The product should answer these questions quickly:
 - [x] Create `organizations`.
 - [x] Create `organization_members` with `owner`, `admin`, `analyst`, and `viewer` roles.
 - [x] Create `stores` with Shopify domain, timezone, currency, reporting currency, and fiscal settings.
-- [ ] Support one organization owning multiple stores, even if the MVP UI exposes one store initially.
-- [ ] Add an active-store selector to the application shell.
+- [x] Support one organization owning multiple stores with validated active-store selection.
+- [x] Add an active-store selector to the application shell.
 - [x] Add RLS policies based on organization membership for every implemented exposed tenant table.
 - [x] Explicitly revoke and grant Data API access for implemented browser-facing tables rather than relying on automatic exposure.
 - [x] Keep connector secrets in Supabase Vault behind functions in the private, non-exposed schema.

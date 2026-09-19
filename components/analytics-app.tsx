@@ -1498,6 +1498,12 @@ function SettingsView() {
 function Generic({ view }: { view: View }) { return <section className="panel empty-feature"><div className="feature-icon"><BarChart3/></div><span className="eyebrow">COMING INTO FOCUS</span><h2>{view}</h2><p>The product shell is ready. This report will use the same trusted Shopify financial model, filters and export workflow.</p><button className="primary"><Plus/> Create report</button></section>; }
 
 type Freshness = { connected: boolean; storeName: string | null; lastSuccessfulSync: string | null; recordsProcessed: number; warnings: number; latestStatus: string | null; latestError: string | null };
+type WorkspaceData = {
+  activeOrganizationId: string;
+  activeStoreId: string | null;
+  organizations: Array<{ id: string; name: string; role: "owner" | "admin" | "analyst" | "viewer" }>;
+  stores: Array<{ id: string; organizationId: string; name: string; currency: string; reportingCurrency: string; timezone: string }>;
+};
 
 export function AnalyticsApp() {
   const [view, setView] = useState<View>("Overview");
@@ -1508,17 +1514,44 @@ export function AnalyticsApp() {
   const [account, setAccount] = useState({ name: "Account", email: "" });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [freshness, setFreshness] = useState<Freshness | null>(null);
+  const [workspace, setWorkspace] = useState<WorkspaceData | null>(null);
+  const [switchingStore, setSwitchingStore] = useState(false);
   const router = useRouter();
-  const activeStoreName = freshness?.storeName || "Your store";
-  useEffect(() => { fetch("/api/analytics/freshness").then(async (response) => response.ok ? response.json() : null).then((payload: Freshness | null) => setFreshness(payload)).catch(() => setFreshness(null)); }, []);
+  const activeStore = workspace?.stores.find((store) => store.id === workspace.activeStoreId);
+  const activeStoreName = activeStore?.name || freshness?.storeName || "Your store";
+  useEffect(() => {
+    fetch("/api/workspace")
+      .then(async (response) => response.ok ? response.json() as Promise<WorkspaceData> : null)
+      .then((payload) => setWorkspace(payload))
+      .catch(() => setWorkspace(null));
+    fetch("/api/analytics/freshness")
+      .then(async (response) => response.ok ? response.json() as Promise<Freshness> : null)
+      .then((payload) => setFreshness(payload))
+      .catch(() => setFreshness(null));
+  }, []);
   useEffect(() => { createClient().auth.getUser().then(({ data }) => { const user = data.user; if (!user) return; const metadataName = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : typeof user.user_metadata?.name === "string" ? user.user_metadata.name : ""; setAccount({ name: metadataName || user.email?.split("@")[0] || "Account", email: user.email || "" }); }); }, []);
+  const switchStore = async (storeId: string) => {
+    const store = workspace?.stores.find((candidate) => candidate.id === storeId);
+    if (!store || store.id === workspace?.activeStoreId) return;
+    setSwitchingStore(true);
+    const response = await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ organizationId: store.organizationId, storeId: store.id }),
+    }).catch(() => null);
+    if (!response?.ok) {
+      setSwitchingStore(false);
+      return;
+    }
+    window.location.reload();
+  };
   const logout = async () => { await createClient().auth.signOut(); router.push("/auth/login"); router.refresh(); };
   const openSync = () => { setDrilldown(null); setView("Connections"); setMobileOpen(false); };
   const openDrilldown = (target: View, context?: DrilldownContext) => { setActiveReportRun(null); setDrilldown(context ?? null); setView(target); setMobileOpen(false); };
   const freshnessHeading = !freshness ? "SHOPIFY DATA" : !freshness.connected ? "SHOPIFY NOT CONNECTED" : freshness.latestStatus === "running" ? "IMPORTING SHOPIFY" : freshness.latestStatus === "failed" || freshness.latestStatus === "interrupted" ? "SYNC NEEDS ATTENTION" : freshness.lastSuccessfulSync ? "SHOPIFY SYNCED" : "READY TO SYNC";
   const freshnessDetail = freshness?.latestStatus === "running" ? "Importing your Shopify catalogue and orders" : freshness?.latestStatus === "interrupted" ? "Open Connections to resume the saved import" : freshness?.lastSuccessfulSync ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(freshness.lastSuccessfulSync)) : freshness?.latestStatus === "failed" ? "Open Connections to review the failed sync" : "Open Connections to import Shopify data";
   return <div className="app-shell">
-    <aside className={mobileOpen?"sidebar open":"sidebar"}><div className="brand"><span className="brand-mark"><Image src="/spine-logo.png" alt="" width={34} height={34} priority /></span><span><b>Spine</b><small>The backbone of your business</small></span><button className="mobile-close" onClick={()=>setMobileOpen(false)}><X/></button></div><button className="store-switcher"><span className="store-icon"><ShoppingBag/></span><span><small>STORE</small><b>{activeStoreName}</b></span><ChevronDown/></button><nav>{nav.map((item)=><div key={item.label}>{item.section&&<span className="nav-section">{item.section}</span>}<button className={view===item.label?"nav-item active":"nav-item"} onClick={()=>{setActiveReportRun(null);setDrilldown(null);setView(item.label);setMobileOpen(false)}}><item.icon/><span>{item.label}</span></button></div>)}</nav><div className="sidebar-bottom"><button className={view==="Settings"?"nav-item active":"nav-item"} onClick={()=>{setActiveReportRun(null);setDrilldown(null);setView("Settings");setMobileOpen(false)}}><Settings/><span>Settings</span></button><button className="nav-item" onClick={logout}><LogOut/><span>Sign out</span></button><div className="user-card"><div>{account.name.slice(0, 2).toUpperCase()}</div><span><b>{account.name}</b><small>{account.email}</small></span></div></div></aside>
+    <aside className={mobileOpen?"sidebar open":"sidebar"}><div className="brand"><span className="brand-mark"><Image src="/spine-logo.png" alt="" width={34} height={34} priority /></span><span><b>Spine</b><small>The backbone of your business</small></span><button className="mobile-close" onClick={()=>setMobileOpen(false)}><X/></button></div><label className="store-switcher"><span className="store-icon"><ShoppingBag/></span><span><small>STORE</small><b>{switchingStore ? "Switching…" : activeStoreName}</b></span><select aria-label="Active store" value={workspace?.activeStoreId ?? ""} disabled={!workspace || switchingStore || workspace.stores.length < 2} onChange={(event)=>void switchStore(event.target.value)}>{workspace?.stores.map((store)=>{const organization=workspace?.organizations.find((candidate)=>candidate.id===store.organizationId);return <option key={store.id} value={store.id}>{organization && (workspace?.organizations.length ?? 0) > 1 ? `${organization.name} · ` : ""}{store.name}</option>})}</select><ChevronDown/></label><nav>{nav.map((item)=><div key={item.label}>{item.section&&<span className="nav-section">{item.section}</span>}<button className={view===item.label?"nav-item active":"nav-item"} onClick={()=>{setActiveReportRun(null);setDrilldown(null);setView(item.label);setMobileOpen(false)}}><item.icon/><span>{item.label}</span></button></div>)}</nav><div className="sidebar-bottom"><button className={view==="Settings"?"nav-item active":"nav-item"} onClick={()=>{setActiveReportRun(null);setDrilldown(null);setView("Settings");setMobileOpen(false)}}><Settings/><span>Settings</span></button><button className="nav-item" onClick={logout}><LogOut/><span>Sign out</span></button><div className="user-card"><div>{account.name.slice(0, 2).toUpperCase()}</div><span><b>{account.name}</b><small>{account.email}</small></span></div></div></aside>
     <main className="main"><header className="topbar"><button className="menu-button" onClick={()=>setMobileOpen(true)}><Menu/></button><div className="breadcrumb"><span>{activeStoreName}</span><b>/</b><strong>{view}</strong></div><div className="top-actions"><button className="date-button" title="Date filtering is coming next"><CalendarDays/><span>All imported data</span><ChevronDown/></button><button className="icon-button" onClick={openSync} title="Open Shopify sync"><RefreshCw/></button><button className="export-button" onClick={()=>setView("Reports")}><Table2/> Reports</button></div></header>
       <div className="content"><div className="page-heading"><div><span className="eyebrow">ECOMMERCE INTELLIGENCE</span><h1>{view}</h1><p>{view==="Overview"?"A clear view of what your store earned—not just what it sold.":view==="UTM Analysis"?"Understand which traffic sources create profitable customers.":view==="Profit & Loss"?"Your ecommerce income statement, based on all imported Shopify data.":`Manage and analyse your ${view.toLowerCase()}.`}</p></div><div className="freshness"><span className={freshness?.latestStatus === "failed" ? "sync-dot syncing" : "sync-dot"}/><div><small>{freshnessHeading}</small><b>{freshnessDetail}</b></div></div></div>
         {view==="Overview"?<Overview reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} onDrilldown={openDrilldown}/>:view==="Profit & Loss"?<ProfitLoss savedPreset={pnlPreset} initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Sales"?<Sales reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="UTM Analysis"?<UTMAnalysis initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Products"?<Products initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} openCosts={(sku) => { setCostSku(sku); setDrilldown(null); setView("Costs"); }}/>:view==="Customers"?<Customers initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Costs"?<Costs focusSku={costSku}/>:view==="Expenses"?<Expenses/>:view==="Reports"?<Reports openReport={(target, preset, runId, filters) => { setPnlPreset(preset); setDrilldown(filters ?? null); setActiveReportRun({ id: runId, view: target }); setView(target); }}/> :view==="Connections"?<Connections/>:view==="Settings"?<SettingsView/>:<Generic view={view}/>}</div>
