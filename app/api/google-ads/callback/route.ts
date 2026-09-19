@@ -25,7 +25,7 @@ function headers(accessToken: string, developerToken: string, loginCustomerId?: 
 }
 
 async function search(accessToken: string, developerToken: string, customerId: string, query: string, loginCustomerId?: string) {
-  const response = await fetch("https://googleads.googleapis.com/v25/customers/" + customerId + ":googleAds:searchStream", {
+  const response = await fetch("https://googleads.googleapis.com/v25/customers/" + customerId + "/googleAds:searchStream", {
     method: "POST",
     headers: headers(accessToken, developerToken, loginCustomerId),
     body: JSON.stringify({ query }),
