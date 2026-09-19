@@ -23,7 +23,7 @@ type MetaInsight = { date_start: string; spend: string; currency: string };
 type ShopifyDaily = {
   sales_date: string; gross_sales: string; discounts: string; sales_reversals: string;
   net_sales: string; shipping_charges: string; taxes: string; total_sales: string;
-  orders: number; total_payment_fees: string;
+  orders: number; total_payment_fees: string; cost_of_goods_sold: string; net_sales_without_cost_recorded: string;
 };
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -54,7 +54,7 @@ export async function GET(request: Request) {
 
   let dailyQuery = supabase
     .from("shopify_sales_daily")
-    .select("sales_date,gross_sales,discounts,sales_reversals,net_sales,shipping_charges,taxes,total_sales,orders,total_payment_fees")
+    .select("sales_date,gross_sales,discounts,sales_reversals,net_sales,shipping_charges,taxes,total_sales,orders,total_payment_fees,cost_of_goods_sold,net_sales_without_cost_recorded")
     .eq("store_id", store.id)
     .order("sales_date", { ascending: true });
   if (fromDate) dailyQuery = dailyQuery.gte("sales_date", fromDate);
@@ -169,6 +169,11 @@ export async function GET(request: Request) {
     else cogs += unitCost * Math.max(line.current_quantity, 0);
   }
 
+  if (shopifyDaily.length && includedOrders.length === 0) {
+    cogs = shopifyDaily.reduce((total, day) => total + monetary(day.cost_of_goods_sold), 0);
+    if (shopifyDaily.some((day) => monetary(day.net_sales_without_cost_recorded) > 0)) missingCostLines = 1;
+  }
+
   const convertedOrderAmount = (order: Order, value: string) => convertDatedAmount(monetary(value), order.exchange_rate, store.currency);
   const importedTotals = includedOrders.reduce((total, order) => ({
     grossSales: total.grossSales + convertedOrderAmount(order, order.gross_sales),
@@ -215,8 +220,9 @@ export async function GET(request: Request) {
   const transactionFees = shopifyDaily.length ? shopifyReportedFees + estimatedFees : actualFees + estimatedFees;
   const transactionFeesAvailable = shopifyDaily.length > 0 || actualFees > 0 || estimatedFees > 0;
   const orderDates = includedOrders.flatMap((order) => order.processed_at ? [order.processed_at.slice(0, 10)] : []);
-  const rangeStart = orderDates.length ? orderDates.reduce((first, date) => date < first ? date : first) : null;
-  const rangeEnd = orderDates.length ? orderDates.reduce((last, date) => date > last ? date : last) : null;
+  const reportDates = shopifyDaily.length ? shopifyDaily.map((day) => day.sales_date) : orderDates;
+  const rangeStart = reportDates.length ? reportDates.reduce((first, date) => date < first ? date : first) : null;
+  const rangeEnd = reportDates.length ? reportDates.reduce((last, date) => date > last ? date : last) : null;
   const metaInsights: MetaInsight[] = [];
   if (rangeStart && rangeEnd) {
     for (let from = 0; ; from += pageSize) {
@@ -298,7 +304,7 @@ export async function GET(request: Request) {
   const calculated = calculateProfitAndLoss({ ...totals, refunds, cogs, marketingSpend, transactionFees, merchantShippingCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, complete: netProfitAvailable });
 
   return NextResponse.json({
-    hasData: includedOrders.length > 0,
+    hasData: shopifyDaily.length > 0 || includedOrders.length > 0,
     currency: store.currency,
     timezone: store.timezone || "UTC",
     currencyCoverage: currencyCoverage.summary(),
