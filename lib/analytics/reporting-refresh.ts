@@ -1,5 +1,6 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+import { getSupabasePublicEnvironment } from "@/lib/env";
 import { shopifyGraph } from "@/lib/shopify/graphql";
 
 type Store = { id: string; organization_id: string; shopify_domain?: string | null; currency: string };
@@ -9,6 +10,13 @@ type GoogleAdsRow = { segments?: { date?: string }; customer?: { currencyCode?: 
 type GoogleAdsPayload = Array<{ results?: GoogleAdsRow[] }>;
 
 const freshAfter = () => new Date(Date.now() - 15 * 60 * 1000).toISOString();
+
+function createReportingClient() {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || process.env.SUPABASE_SECRET_KEY?.trim();
+  if (!key) throw new Error("Server reporting credentials are not configured");
+  const { url } = getSupabasePublicEnvironment();
+  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+}
 const numeric = (value: unknown) => {
   const number = Number(value ?? 0);
   return Number.isFinite(number) ? number : 0;
@@ -155,11 +163,12 @@ async function refreshGoogle(supabase: SupabaseClient, store: Store, from: strin
   }
 }
 
-export async function refreshReportingData(supabase: SupabaseClient, store: Store, from: string, to: string) {
+export async function refreshReportingData(_supabase: SupabaseClient, store: Store, from: string, to: string) {
+  const reportingClient = createReportingClient();
   const results = await Promise.allSettled([
-    refreshShopifyReporting(supabase, store, from, to),
-    refreshMeta(supabase, store, from, to),
-    refreshGoogle(supabase, store, from, to),
+    refreshShopifyReporting(reportingClient, store, from, to),
+    refreshMeta(reportingClient, store, from, to),
+    refreshGoogle(reportingClient, store, from, to),
   ]);
   results.forEach((result, index) => {
     if (result.status === "rejected") console.error("Reporting refresh failed", { source: ["shopify", "meta", "google_ads"][index], message: result.reason instanceof Error ? result.reason.message : "Unknown error" });
