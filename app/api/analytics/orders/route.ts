@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { reportingDateKey, reportingRangeToUtc } from "@/lib/analytics/reporting-range";
+import { costKey, monetary, resolveEffectiveCost, type EffectiveCost } from "@/lib/analytics/effective-cost";
 import { requireWorkspace } from "@/lib/workspace/server";
 
 type OrderRow = {
@@ -70,14 +71,14 @@ export async function GET(request: Request) {
 
   const orderIds = orderRows.map((order) => order.id);
   const refundRows: Array<{ order_id: string; total_refunded: string | number }> = [];
-  const lineRows: Array<{ order_id: string; title: string; variant_title: string | null; current_quantity: number; net_sales: string | number }> = [];
+  const lineRows: Array<{ order_id: string; title: string; variant_title: string | null; variant_gid: string | null; sku: string | null; current_quantity: number; net_sales: string | number }> = [];
   const attributionRows: Array<{ order_id: string; customer_order_index: number | null }> = [];
   const transactionRows: Array<{ order_id: string; status: string; fee_amount: string | number; fee_tax: string | number }> = [];
   for (let index = 0; index < orderIds.length; index += 200) {
     const ids = orderIds.slice(index, index + 200);
     const [refundResult, lineResult, attributionResult, transactionResult] = await Promise.all([
       supabase.from("shopify_refunds").select("order_id,total_refunded").in("order_id", ids),
-      supabase.from("shopify_order_lines").select("order_id,title,variant_title,current_quantity,net_sales").in("order_id", ids),
+      supabase.from("shopify_order_lines").select("order_id,title,variant_title,variant_gid,sku,current_quantity,net_sales").in("order_id", ids),
       supabase.from("shopify_order_attribution").select("order_id,customer_order_index").eq("attribution_model", "last_touch").in("order_id", ids),
       supabase.from("shopify_transactions").select("order_id,status,fee_amount,fee_tax").in("order_id", ids),
     ]);
@@ -105,6 +106,36 @@ export async function GET(request: Request) {
     if (!date || date === "Unknown date") continue;
     const fee = Number(transaction.fee_amount) + Number(transaction.fee_tax);
     paymentFeesByDate.set(date, (paymentFeesByDate.get(date) ?? 0) + (Number.isFinite(fee) ? fee : 0));
+  }
+
+  const [variantResult, costResult] = await Promise.all([
+    supabase.from("shopify_variants").select("id,shopify_gid,sku,shopify_unit_cost").eq("store_id", store.id),
+    supabase.from("product_costs").select("variant_id,sku,amount,effective_from,effective_to,source").eq("store_id", store.id),
+  ]);
+  if (variantResult.error || costResult.error) return NextResponse.json({ error: (variantResult.error ?? costResult.error)!.message }, { status: 500 });
+  const variants = (variantResult.data ?? []) as Array<{ id: string; shopify_gid: string; sku: string | null; shopify_unit_cost: string | null }>;
+  const variantsByGid = new Map(variants.map((variant) => [variant.shopify_gid, variant]));
+  const variantsBySku = new Map(variants.filter((variant) => variant.sku).map((variant) => [variant.sku!.trim().toLowerCase(), variant]));
+  const costsByKey = new Map<string, EffectiveCost[]>();
+  for (const cost of (costResult.data ?? []) as EffectiveCost[]) {
+    const key = costKey(cost);
+    if (key) costsByKey.set(key, [...(costsByKey.get(key) ?? []), cost]);
+  }
+  const ordersById = new Map(orderRows.map((order) => [order.id, order]));
+  const localCogsByDate = new Map<string, { cogs: number; missingCostLines: number }>();
+  for (const line of lineRows) {
+    const order = ordersById.get(line.order_id);
+    const date = dateByOrder.get(line.order_id);
+    if (!order?.processed_at || !date || date === "Unknown date") continue;
+    const variant = line.variant_gid ? variantsByGid.get(line.variant_gid) : line.sku ? variantsBySku.get(line.sku.trim().toLowerCase()) : undefined;
+    const costs = variant
+      ? costsByKey.get(`variant:${variant.id}`) ?? costsByKey.get(`sku:${variant.sku?.trim().toLowerCase()}`) ?? []
+      : costsByKey.get(`sku:${line.sku?.trim().toLowerCase()}`) ?? [];
+    const unitCost = resolveEffectiveCost(costs, order.processed_at.slice(0, 10), variant?.shopify_unit_cost == null ? null : monetary(variant.shopify_unit_cost));
+    const aggregate = localCogsByDate.get(date) ?? { cogs: 0, missingCostLines: 0 };
+    if (unitCost === null) aggregate.missingCostLines += 1;
+    else aggregate.cogs += unitCost * Math.max(line.current_quantity, 0);
+    localCogsByDate.set(date, aggregate);
   }
 
   const dateMap = new Map<string, BreakdownRow>(), channelMap = new Map<string, BreakdownRow>(), customerMap = new Map<string, BreakdownRow>(), productMap = new Map<string, BreakdownRow>(), countryMap = new Map<string, BreakdownRow>(), discountMap = new Map<string, BreakdownRow>();
@@ -138,22 +169,28 @@ export async function GET(request: Request) {
   const { data: dailyData, error: dailyError } = await dailyQuery;
   if (dailyError) return NextResponse.json({ error: dailyError.message }, { status: 500 });
   const shopifyDaily = (dailyData ?? []) as DailyShopifyRow[];
-  const dailyBreakdown = shopifyDaily.map((row) => ({
-    label: row.sales_date,
-    orders: row.orders,
-    units: row.net_items_sold,
-    sales: Number(row.net_sales),
-    grossSales: Number(row.gross_sales),
-    discounts: Number(row.discounts),
-    refunds: Math.abs(Number(row.sales_reversals)),
-    shipping: Number(row.shipping_charges),
-    taxes: Number(row.taxes),
-    totalSales: Number(row.total_sales),
-    cogs: Number(row.cost_of_goods_sold),
-    grossProfit: Number(row.gross_profit),
-    salesWithoutRecordedCost: Number(row.net_sales_without_cost_recorded),
-    paymentFees: Number(row.total_payment_fees) || paymentFeesByDate.get(row.sales_date) || 0,
-  }));
+  const dailyBreakdown = shopifyDaily.map((row) => {
+    const localCost = localCogsByDate.get(row.sales_date);
+    const useLocalCost = Boolean(localCost && localCost.missingCostLines === 0);
+    const cogs = useLocalCost ? localCost!.cogs : Number(row.cost_of_goods_sold);
+    return {
+      label: row.sales_date,
+      orders: row.orders,
+      units: row.net_items_sold,
+      sales: Number(row.net_sales),
+      grossSales: Number(row.gross_sales),
+      discounts: Number(row.discounts),
+      refunds: Math.abs(Number(row.sales_reversals)),
+      shipping: Number(row.shipping_charges),
+      taxes: Number(row.taxes),
+      totalSales: Number(row.total_sales),
+      cogs,
+      grossProfit: Number(row.net_sales) - cogs,
+      missingCostLines: localCost?.missingCostLines ?? 0,
+      salesWithoutRecordedCost: useLocalCost ? 0 : Number(row.net_sales_without_cost_recorded),
+      paymentFees: Number(row.total_payment_fees) || paymentFeesByDate.get(row.sales_date) || 0,
+    };
+  });
 
   const orderDates = orderRows.flatMap((order) => order.processed_at ? [reportingDateKey(order.processed_at, store.timezone || "UTC")] : []).sort();
   return NextResponse.json({
