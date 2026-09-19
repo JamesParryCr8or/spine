@@ -94,3 +94,34 @@ button { cursor:pointer; }
 .auth-magic{margin-top:-7px;color:#6252d2}
 .auth-magic svg{width:14px}
 .auth-success{margin:0;padding:10px 12px;border-radius:8px;background:#edfbf5;color:#187b5b;font-size:9px;font-weight:700}
+
+
+/* Finance reporting controls and combined trend chart */
+.finance-date-controls{align-items:flex-end;padding:0 0 18px}
+.finance-date-controls label{display:flex;flex-direction:column;gap:6px;color:#657086;font-size:9px;font-weight:750;letter-spacing:.2px}
+.finance-date-controls label:first-child select{min-width:190px}
+.finance-date-controls input[type="date"],.finance-date-controls select,.pnl-period input[type="date"]{height:38px;border:1px solid #dfe4ed;border-radius:8px;background:#fff!important;color:#263147!important;color-scheme:light;padding:0 11px;font:600 10px inherit;box-shadow:0 1px 2px #17203308;outline:none}
+.finance-date-controls input[type="date"]:focus,.finance-date-controls select:focus,.pnl-period input[type="date"]:focus{border-color:#7357ff;box-shadow:0 0 0 3px #7357ff1a}
+.finance-date-controls input[type="date"]::-webkit-calendar-picker-indicator,.pnl-period input[type="date"]::-webkit-calendar-picker-indicator{opacity:.7;cursor:pointer}
+.finance-chart-panel{min-height:430px}
+.finance-chart-panel .panel-head{gap:18px;align-items:center;margin-bottom:8px}
+.finance-legend{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:7px 11px;color:#6f7890;font-size:8px}
+.finance-legend span{display:inline-flex;align-items:center;gap:4px}
+.finance-legend i{width:7px;height:7px;border-radius:2px}
+.legend-revenue{background:#7357ff}.legend-cogs{background:#f59e0b}.legend-marketing{background:#ef6c63}.legend-fees{background:#a855f7}.legend-shipping{background:#3b82f6}.legend-operating{background:#64748b}.legend-profit{background:#19b981;border-radius:50%!important}
+.finance-chart{position:relative;width:100%;min-height:330px}
+.finance-chart svg{display:block;width:100%;height:330px;overflow:visible}
+.finance-grid{stroke:#edf0f5;stroke-width:1}
+.finance-zero{stroke:#aeb6c4;stroke-width:1.3}
+.finance-revenue{fill:#7357ff}
+.finance-profit-line{fill:none;stroke:#19b981;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.finance-profit-dot{fill:#fff;stroke:#19b981;stroke-width:3;pointer-events:none}
+.finance-label,.finance-axis-label{fill:#8b94a6;font-size:9px;font-weight:600}
+.finance-chart g[role="button"]{cursor:pointer;outline:none}
+.finance-chart g[role="button"]:focus .finance-revenue,.finance-chart g[role="button"]:hover .finance-revenue{fill:#5e43e7}
+.finance-tooltip{position:absolute;z-index:3;top:8px;right:8px;min-width:220px;padding:12px 14px;border:1px solid #dde2eb;border-radius:9px;background:#fff;box-shadow:0 12px 30px #1720331f;display:grid;gap:6px;font-size:9px;color:#596376;pointer-events:none}
+.finance-tooltip strong{font-size:11px;color:#202a3d;margin-bottom:2px}
+.finance-tooltip span{display:flex;justify-content:space-between;gap:20px}
+.finance-tooltip b{color:#273249}
+.finance-tooltip .tooltip-profit{border-top:1px solid #eceff4;padding-top:7px;margin-top:2px;color:#138860;font-weight:800}
+@media(max-width:900px){.finance-chart-panel .panel-head{align-items:flex-start;flex-direction:column}.finance-legend{justify-content:flex-start}.finance-chart{overflow-x:auto}.finance-chart svg{min-width:760px}.finance-date-controls label,.finance-date-controls label:first-child select{width:100%}.finance-date-controls input[type="date"],.finance-date-controls select{width:100%}}
