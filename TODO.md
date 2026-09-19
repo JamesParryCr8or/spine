@@ -70,6 +70,7 @@
 - [x] Add an authenticated workspace API with validated, persistent organization and store selection; migrate freshness reporting to the selected store.
 - [x] Scope Overview, P&L, Sales, Products, Customers, and UTM analytics routes to the validated active store.
 - [x] Scope costs, saved reports, report runs, exchange rates, campaign mappings, custom spend, and connection audits to the active workspace and store.
+- [x] Add store-scoped credential RPCs and bind Shopify, Meta, and Klaviyo connection routes to the active store.
 - [ ] Enable Supabase leaked-password protection before external onboarding.
 
 ### Active build order

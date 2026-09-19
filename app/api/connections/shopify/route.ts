@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createClient } from "@/lib/supabase/server";
+import { requireWorkspace } from "@/lib/workspace/server";
 import { shopifyGraph } from "@/lib/shopify/graphql";
 import { shopifySyncWindow, shopifyUpdatedAtQuery } from "@/lib/shopify/sync-window";
 
@@ -53,29 +53,49 @@ function visitRow(visit: Visit | null, model: "first_touch" | "last_touch", shar
 }
 
 export async function GET() {
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  if (!claims?.claims?.sub) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
-  const [membershipResult, connectionResult] = await Promise.all([
-    supabase.from("organization_members").select("organization_id").eq("user_id", claims.claims.sub).limit(1).maybeSingle(),
-    supabase.from("data_connections").select("provider,status,external_account_id,external_account_name,last_verified_at,last_error,granted_scopes").eq("provider", "shopify").maybeSingle(),
-  ]);
-  if (membershipResult.error) return NextResponse.json({ error: membershipResult.error.message }, { status: 500 });
-  if (!membershipResult.data) return NextResponse.json({ error: "No workspace is configured" }, { status: 403 });
-  const [storeResult, syncResult] = await Promise.all([
-    supabase.from("stores").select("name,shopify_domain,currency,reporting_currency,timezone").eq("organization_id", membershipResult.data.organization_id).limit(1).maybeSingle(),
-    supabase.from("sync_runs").select("status,sync_mode,window_start,window_end,pages_processed,records_processed,warnings,error_message,completed_at,updated_at").eq("source", "shopify").order("created_at", { ascending: false }).limit(1).maybeSingle(),
+  const workspace = await requireWorkspace();
+  if (!workspace.ok) return workspace.response;
+  const { supabase, store } = workspace;
+  if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
+
+  const [connectionResult, storeResult, syncResult] = await Promise.all([
+    supabase
+      .from("data_connections")
+      .select("provider,status,external_account_id,external_account_name,last_verified_at,last_error,granted_scopes")
+      .eq("store_id", store.id)
+      .eq("provider", "shopify")
+      .maybeSingle(),
+    supabase
+      .from("stores")
+      .select("name,shopify_domain,currency,reporting_currency,timezone")
+      .eq("id", store.id)
+      .single(),
+    supabase
+      .from("sync_runs")
+      .select("status,sync_mode,window_start,window_end,pages_processed,records_processed,warnings,error_message,completed_at,updated_at")
+      .eq("store_id", store.id)
+      .eq("source", "shopify")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
   const error = connectionResult.error ?? storeResult.error ?? syncResult.error;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ connection: connectionResult.data, store: storeResult.data, sync: syncResult.data });
+  return NextResponse.json({
+    connection: connectionResult.data,
+    store: storeResult.data,
+    sync: syncResult.data,
+  });
 }
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  const userId = claims?.claims?.sub;
-  if (!userId) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+  const workspace = await requireWorkspace();
+  if (!workspace.ok) return workspace.response;
+  const { supabase, userId, membership, store } = workspace;
+  if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
+  if (!["owner", "admin"].includes(membership.role)) {
+    return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
+  }
   const body = await request.json().catch(() => null) as { shopDomain?: string; accessToken?: string } | null;
   const shopDomain = normalizeShopDomain(body?.shopDomain ?? "");
   const accessToken = body?.accessToken?.trim();
@@ -89,17 +109,11 @@ export async function POST(request: Request) {
     const missingScopes = REQUIRED_SCOPES.filter((scope) => !grantedScopes.has(scope));
     if (missingScopes.length) throw new Error(`Add these Shopify Admin API scopes and reinstall the app: ${missingScopes.join(", ")}`);
 
-    const [{ data: membership }, { data: store }] = await Promise.all([
-      supabase.from("organization_members").select("organization_id").eq("user_id", userId).limit(1).single(),
-      supabase.from("stores").select("id,organization_id").limit(1).single(),
-    ]);
-    if (!membership || !store || membership.organization_id !== store.organization_id) throw new Error("No workspace store is configured");
-
     const { error: storeError } = await supabase.from("stores").update({ name: shopData.shop.name, shopify_domain: shopData.shop.myshopifyDomain, currency: shopData.shop.currencyCode, reporting_currency: shopData.shop.currencyCode, timezone: shopData.shop.ianaTimezone, updated_at: new Date().toISOString() }).eq("id", store.id);
     if (storeError) throw new Error(storeError.message);
-    const { error: connectionError } = await supabase.rpc("save_data_connection", { connection_provider: "shopify", access_token: accessToken, account_id: shopData.shop.id, account_name: shopData.shop.name });
+    const { error: connectionError } = await supabase.rpc("save_data_connection", { connection_provider: "shopify", access_token: accessToken, account_id: shopData.shop.id, account_name: shopData.shop.name, requested_store_id: store.id });
     if (connectionError) throw new Error(connectionError.message);
-    const { error: scopesError } = await supabase.rpc("record_shopify_connection_scopes", { scopes: [...grantedScopes].sort() });
+    const { error: scopesError } = await supabase.rpc("record_shopify_connection_scopes", { scopes: [...grantedScopes].sort(), requested_store_id: store.id });
     if (scopesError) throw new Error(scopesError.message);
 
     const staleBefore = new Date(Date.now() - 6 * 60 * 1000).toISOString();
@@ -116,7 +130,7 @@ export async function POST(request: Request) {
     const { start: windowStart, end: windowEnd, mode: syncMode } = syncWindow;
     const { data: run, error: runError } = existingRun
       ? { data: existingRun, error: null }
-      : await supabase.from("sync_runs").insert({ organization_id: membership.organization_id, store_id: store.id, source: "shopify", resource: "catalog_orders", status: "running", sync_mode: syncMode, window_start: windowStart, window_end: windowEnd, created_by: userId }).select("id,cursor,records_processed,pages_processed,sync_mode,window_start,window_end,updated_at").single();
+      : await supabase.from("sync_runs").insert({ organization_id: membership.organizationId, store_id: store.id, source: "shopify", resource: "catalog_orders", status: "running", sync_mode: syncMode, window_start: windowStart, window_end: windowEnd, created_by: userId }).select("id,cursor,records_processed,pages_processed,sync_mode,window_start,window_end,updated_at").single();
     if (runError || !run) throw new Error(runError?.message ?? "Could not create sync run");
     runId = run.id;
     const priorRecordsProcessed = run.records_processed ?? 0;
@@ -126,7 +140,7 @@ export async function POST(request: Request) {
     let productsProcessed = 0;
     do {
       const result: { products: { nodes: Array<{ id: string; legacyResourceId: string; title: string; handle: string; status: string; vendor: string; productType: string; createdAt: string; updatedAt: string; featuredMedia?: { preview?: { image?: { url?: string } } } }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await shopifyGraph(shopDomain, accessToken, `query Products($cursor:String){ products(first:100,after:$cursor,sortKey:ID){ nodes{id legacyResourceId title handle status vendor productType createdAt updatedAt featuredMedia{preview{image{url}}}} pageInfo{hasNextPage endCursor} } }`, { cursor: productCursor });
-      const rows = result.products.nodes.map((product) => ({ organization_id: membership.organization_id, store_id: store.id, shopify_gid: product.id, legacy_resource_id: product.legacyResourceId, title: product.title, handle: product.handle, status: product.status, vendor: product.vendor || null, product_type: product.productType || null, featured_image_url: product.featuredMedia?.preview?.image?.url ?? null, created_at_shopify: product.createdAt, updated_at_shopify: product.updatedAt, synced_at: new Date().toISOString() }));
+      const rows = result.products.nodes.map((product) => ({ organization_id: membership.organizationId, store_id: store.id, shopify_gid: product.id, legacy_resource_id: product.legacyResourceId, title: product.title, handle: product.handle, status: product.status, vendor: product.vendor || null, product_type: product.productType || null, featured_image_url: product.featuredMedia?.preview?.image?.url ?? null, created_at_shopify: product.createdAt, updated_at_shopify: product.updatedAt, synced_at: new Date().toISOString() }));
       if (rows.length) { const { error } = await supabase.from("shopify_products").upsert(dedupeByShopifyId(rows), { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
       productsProcessed += resumed ? 0 : rows.length;
       productCursor = result.products.pageInfo.hasNextPage ? result.products.pageInfo.endCursor : null;
@@ -139,7 +153,7 @@ export async function POST(request: Request) {
     let variantsProcessed = 0;
     do {
       const result: { productVariants: { nodes: Array<{ id: string; legacyResourceId: string; title: string; sku: string | null; barcode: string | null; price: string; compareAtPrice: string | null; inventoryQuantity: number | null; createdAt: string; updatedAt: string; product: { id: string }; inventoryItem: { id: string; unitCost?: { amount: string; currencyCode: string } | null } }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await shopifyGraph(shopDomain, accessToken, `query Variants($cursor:String){ productVariants(first:100,after:$cursor,sortKey:ID){ nodes{id legacyResourceId title sku barcode price compareAtPrice inventoryQuantity createdAt updatedAt product{id} inventoryItem{id unitCost{amount currencyCode}}} pageInfo{hasNextPage endCursor} } }`, { cursor: variantCursor });
-      const rows = result.productVariants.nodes.flatMap((variant) => { const productId = productMap.get(variant.product.id); return productId ? [{ organization_id: membership.organization_id, store_id: store.id, product_id: productId, shopify_gid: variant.id, legacy_resource_id: variant.legacyResourceId, title: variant.title, sku: variant.sku, barcode: variant.barcode, price: variant.price, compare_at_price: variant.compareAtPrice, inventory_quantity: variant.inventoryQuantity, inventory_item_gid: variant.inventoryItem.id, shopify_unit_cost: variant.inventoryItem.unitCost?.amount ?? null, currency: variant.inventoryItem.unitCost?.currencyCode ?? shopData.shop.currencyCode, created_at_shopify: variant.createdAt, updated_at_shopify: variant.updatedAt, synced_at: new Date().toISOString() }] : []; });
+      const rows = result.productVariants.nodes.flatMap((variant) => { const productId = productMap.get(variant.product.id); return productId ? [{ organization_id: membership.organizationId, store_id: store.id, product_id: productId, shopify_gid: variant.id, legacy_resource_id: variant.legacyResourceId, title: variant.title, sku: variant.sku, barcode: variant.barcode, price: variant.price, compare_at_price: variant.compareAtPrice, inventory_quantity: variant.inventoryQuantity, inventory_item_gid: variant.inventoryItem.id, shopify_unit_cost: variant.inventoryItem.unitCost?.amount ?? null, currency: variant.inventoryItem.unitCost?.currencyCode ?? shopData.shop.currencyCode, created_at_shopify: variant.createdAt, updated_at_shopify: variant.updatedAt, synced_at: new Date().toISOString() }] : []; });
       if (rows.length) { const { error } = await supabase.from("shopify_variants").upsert(rows, { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
       variantsProcessed += resumed ? 0 : rows.length;
       variantCursor = result.productVariants.pageInfo.hasNextPage ? result.productVariants.pageInfo.endCursor : null;
@@ -159,7 +173,7 @@ export async function POST(request: Request) {
         customerJourneySummary{ready daysToConversion customerOrderIndex firstVisit{id occurredAt landingPage referrerUrl source sourceDescription sourceType utmParameters{source medium campaign content term}} lastVisit{id occurredAt landingPage referrerUrl source sourceDescription sourceType utmParameters{source medium campaign content term}}}
       } pageInfo{hasNextPage endCursor} } }`, { cursor: orderCursor, query: shopifyUpdatedAtQuery(windowStart, windowEnd) });
 
-      const customers = dedupeByShopifyId(result.orders.nodes.flatMap((order) => order.customer ? [{ organization_id: membership.organization_id, store_id: store.id, shopify_gid: order.customer.id, legacy_resource_id: order.customer.legacyResourceId, display_name: order.customer.displayName, email: order.customer.defaultEmailAddress?.emailAddress ?? null, number_of_orders: order.customer.numberOfOrders, amount_spent: order.customer.amountSpent.amount, currency: order.customer.amountSpent.currencyCode, created_at_shopify: order.customer.createdAt, updated_at_shopify: order.customer.updatedAt, synced_at: new Date().toISOString() }] : []));
+      const customers = dedupeByShopifyId(result.orders.nodes.flatMap((order) => order.customer ? [{ organization_id: membership.organizationId, store_id: store.id, shopify_gid: order.customer.id, legacy_resource_id: order.customer.legacyResourceId, display_name: order.customer.displayName, email: order.customer.defaultEmailAddress?.emailAddress ?? null, number_of_orders: order.customer.numberOfOrders, amount_spent: order.customer.amountSpent.amount, currency: order.customer.amountSpent.currencyCode, created_at_shopify: order.customer.createdAt, updated_at_shopify: order.customer.updatedAt, synced_at: new Date().toISOString() }] : []));
       if (customers.length) { const { error } = await supabase.from("shopify_customers").upsert(dedupeByShopifyId(customers), { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
       customersProcessed += customers.length;
       const customerGids = customers.map((customer) => customer.shopify_gid);
@@ -167,7 +181,7 @@ export async function POST(request: Request) {
       if (customerResult.error) throw new Error(customerResult.error.message);
       const customerMap = new Map((customerResult.data ?? []).map((customer) => [customer.shopify_gid, customer.id]));
 
-      const orderRows = result.orders.nodes.map((order) => ({ organization_id: membership.organization_id, store_id: store.id, customer_id: order.customer ? customerMap.get(order.customer.id) ?? null : null, shopify_gid: order.id, legacy_resource_id: order.legacyResourceId, order_name: order.name, financial_status: order.displayFinancialStatus, fulfillment_status: order.displayFulfillmentStatus, source_name: order.sourceName, country_code: order.displayAddress?.countryCodeV2 ?? null, discount_codes: order.discountCodes, test: order.test, cancelled_at: order.cancelledAt, processed_at: order.processedAt, created_at_shopify: order.createdAt, updated_at_shopify: order.updatedAt, currency: order.currencyCode, presentment_currency: order.currentTotalPriceSet.presentmentMoney.currencyCode, gross_sales: order.lineItems.nodes.reduce((sum, line) => sum + Number(money(line.originalTotalSet)), 0).toFixed(4), discounts: money(order.currentTotalDiscountsSet), net_product_sales: money(order.currentSubtotalPriceSet), shipping_revenue: money(order.currentShippingPriceSet), tax: money(order.currentTotalTaxSet), duties: money(order.currentTotalDutiesSet), total_sales: money(order.currentTotalPriceSet), synced_at: new Date().toISOString() }));
+      const orderRows = result.orders.nodes.map((order) => ({ organization_id: membership.organizationId, store_id: store.id, customer_id: order.customer ? customerMap.get(order.customer.id) ?? null : null, shopify_gid: order.id, legacy_resource_id: order.legacyResourceId, order_name: order.name, financial_status: order.displayFinancialStatus, fulfillment_status: order.displayFulfillmentStatus, source_name: order.sourceName, country_code: order.displayAddress?.countryCodeV2 ?? null, discount_codes: order.discountCodes, test: order.test, cancelled_at: order.cancelledAt, processed_at: order.processedAt, created_at_shopify: order.createdAt, updated_at_shopify: order.updatedAt, currency: order.currencyCode, presentment_currency: order.currentTotalPriceSet.presentmentMoney.currencyCode, gross_sales: order.lineItems.nodes.reduce((sum, line) => sum + Number(money(line.originalTotalSet)), 0).toFixed(4), discounts: money(order.currentTotalDiscountsSet), net_product_sales: money(order.currentSubtotalPriceSet), shipping_revenue: money(order.currentShippingPriceSet), tax: money(order.currentTotalTaxSet), duties: money(order.currentTotalDutiesSet), total_sales: money(order.currentTotalPriceSet), synced_at: new Date().toISOString() }));
       if (orderRows.length) { const { error } = await supabase.from("shopify_orders").upsert(dedupeByShopifyId(orderRows), { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
       ordersProcessed += orderRows.length;
       const orderGids = orderRows.map((order) => order.shopify_gid);
@@ -180,7 +194,7 @@ export async function POST(request: Request) {
         if (!orderId) return [];
         if (order.transactions.pageInfo.hasNextPage) warnings.push(`${order.name} has more than 100 transactions; import is partial`);
         return order.transactions.nodes.map((transaction) => ({
-          organization_id: membership.organization_id, store_id: store.id, order_id: orderId, shopify_gid: transaction.id,
+          organization_id: membership.organizationId, store_id: store.id, order_id: orderId, shopify_gid: transaction.id,
           kind: transaction.kind, status: transaction.status, gateway: transaction.gateway, formatted_gateway: transaction.formattedGateway,
           amount: money(transaction.amountSet), currency: transaction.amountSet.shopMoney.currencyCode,
           fee_amount: transaction.fees.reduce((total, fee) => total + Number(fee.amount.amount), 0).toFixed(4),
@@ -191,7 +205,7 @@ export async function POST(request: Request) {
       if (transactionRows.length) { const { error } = await supabase.from("shopify_transactions").upsert(dedupeByShopifyId(transactionRows), { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
       transactionsProcessed += transactionRows.length;
 
-      const lineRows = result.orders.nodes.flatMap((order) => { const orderId = orderMap.get(order.id); if (!orderId) return []; if (order.lineItems.pageInfo.hasNextPage) warnings.push(`${order.name} has more than 100 line items; import is partial`); return order.lineItems.nodes.map((line) => ({ organization_id: membership.organization_id, store_id: store.id, order_id: orderId, shopify_gid: line.id, product_gid: line.product?.id ?? null, variant_gid: line.variant?.id ?? null, title: line.title, variant_title: line.variantTitle, sku: line.sku, vendor: line.vendor, quantity: line.quantity, current_quantity: line.currentQuantity, unit_price: money(line.originalUnitPriceSet), original_total: money(line.originalTotalSet), discounts: money(line.totalDiscountSet), net_sales: money(line.discountedTotalSet), currency: line.originalTotalSet.shopMoney.currencyCode, synced_at: new Date().toISOString() })); });
+      const lineRows = result.orders.nodes.flatMap((order) => { const orderId = orderMap.get(order.id); if (!orderId) return []; if (order.lineItems.pageInfo.hasNextPage) warnings.push(`${order.name} has more than 100 line items; import is partial`); return order.lineItems.nodes.map((line) => ({ organization_id: membership.organizationId, store_id: store.id, order_id: orderId, shopify_gid: line.id, product_gid: line.product?.id ?? null, variant_gid: line.variant?.id ?? null, title: line.title, variant_title: line.variantTitle, sku: line.sku, vendor: line.vendor, quantity: line.quantity, current_quantity: line.currentQuantity, unit_price: money(line.originalUnitPriceSet), original_total: money(line.originalTotalSet), discounts: money(line.totalDiscountSet), net_sales: money(line.discountedTotalSet), currency: line.originalTotalSet.shopMoney.currencyCode, synced_at: new Date().toISOString() })); });
       if (lineRows.length) { const { error } = await supabase.from("shopify_order_lines").upsert(dedupeByShopifyId(lineRows), { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
       orderLinesProcessed += lineRows.length;
       const lineGids = lineRows.map((line) => line.shopify_gid);
@@ -199,7 +213,7 @@ export async function POST(request: Request) {
       if (lineResult.error) throw new Error(lineResult.error.message);
       const lineMap = new Map((lineResult.data ?? []).map((line) => [line.shopify_gid, line.id]));
 
-      const refundRows = result.orders.nodes.flatMap((order) => { const orderId = orderMap.get(order.id); if (!orderId) return []; if (order.refunds.length === 50) warnings.push(`${order.name} has at least 50 refunds; import may be partial`); return order.refunds.map((refund) => ({ organization_id: membership.organization_id, store_id: store.id, order_id: orderId, shopify_gid: refund.id, legacy_resource_id: refund.legacyResourceId, note: refund.note, total_refunded: money(refund.totalRefundedSet), currency: refund.totalRefundedSet.shopMoney.currencyCode, created_at_shopify: refund.createdAt, processed_at_shopify: refund.processedAt, updated_at_shopify: refund.updatedAt, synced_at: new Date().toISOString() })); });
+      const refundRows = result.orders.nodes.flatMap((order) => { const orderId = orderMap.get(order.id); if (!orderId) return []; if (order.refunds.length === 50) warnings.push(`${order.name} has at least 50 refunds; import may be partial`); return order.refunds.map((refund) => ({ organization_id: membership.organizationId, store_id: store.id, order_id: orderId, shopify_gid: refund.id, legacy_resource_id: refund.legacyResourceId, note: refund.note, total_refunded: money(refund.totalRefundedSet), currency: refund.totalRefundedSet.shopMoney.currencyCode, created_at_shopify: refund.createdAt, processed_at_shopify: refund.processedAt, updated_at_shopify: refund.updatedAt, synced_at: new Date().toISOString() })); });
       if (refundRows.length) { const { error } = await supabase.from("shopify_refunds").upsert(dedupeByShopifyId(refundRows), { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
       refundsProcessed += refundRows.length;
       const refundGids = refundRows.map((refund) => refund.shopify_gid);
@@ -207,11 +221,11 @@ export async function POST(request: Request) {
       if (refundResult.error) throw new Error(refundResult.error.message);
       const refundMap = new Map((refundResult.data ?? []).map((refund) => [refund.shopify_gid, refund.id]));
 
-      const refundLineRows = result.orders.nodes.flatMap((order) => order.refunds.flatMap((refund) => { const refundId = refundMap.get(refund.id); if (!refundId) return []; if (refund.refundLineItems.pageInfo.hasNextPage) warnings.push(`${order.name} refund ${refund.legacyResourceId} has more than 100 lines; import is partial`); return refund.refundLineItems.nodes.map((line) => ({ organization_id: membership.organization_id, store_id: store.id, refund_id: refundId, order_line_id: lineMap.get(line.lineItem.id) ?? null, shopify_gid: line.id, line_item_gid: line.lineItem.id, quantity: line.quantity, subtotal: money(line.subtotalSet), currency: line.subtotalSet.shopMoney.currencyCode, restock_type: line.restockType, synced_at: new Date().toISOString() })); }));
+      const refundLineRows = result.orders.nodes.flatMap((order) => order.refunds.flatMap((refund) => { const refundId = refundMap.get(refund.id); if (!refundId) return []; if (refund.refundLineItems.pageInfo.hasNextPage) warnings.push(`${order.name} refund ${refund.legacyResourceId} has more than 100 lines; import is partial`); return refund.refundLineItems.nodes.map((line) => ({ organization_id: membership.organizationId, store_id: store.id, refund_id: refundId, order_line_id: lineMap.get(line.lineItem.id) ?? null, shopify_gid: line.id, line_item_gid: line.lineItem.id, quantity: line.quantity, subtotal: money(line.subtotalSet), currency: line.subtotalSet.shopMoney.currencyCode, restock_type: line.restockType, synced_at: new Date().toISOString() })); }));
       if (refundLineRows.length) { const { error } = await supabase.from("shopify_refund_lines").upsert(dedupeByShopifyId(refundLineRows), { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
       refundLinesProcessed += refundLineRows.length;
 
-      const attributionRows = result.orders.nodes.flatMap((order) => { const orderId = orderMap.get(order.id); const journey = order.customerJourneySummary; if (!orderId || !journey) return []; const shared = { organization_id: membership.organization_id, store_id: store.id, order_id: orderId }; return [visitRow(journey.firstVisit, "first_touch", shared, journey), visitRow(journey.lastVisit, "last_touch", shared, journey)]; });
+      const attributionRows = result.orders.nodes.flatMap((order) => { const orderId = orderMap.get(order.id); const journey = order.customerJourneySummary; if (!orderId || !journey) return []; const shared = { organization_id: membership.organizationId, store_id: store.id, order_id: orderId }; return [visitRow(journey.firstVisit, "first_touch", shared, journey), visitRow(journey.lastVisit, "last_touch", shared, journey)]; });
       if (attributionRows.length) { const { error } = await supabase.from("shopify_order_attribution").upsert(attributionRows, { onConflict: "order_id,attribution_model" }); if (error) throw new Error(error.message); }
       attributionProcessed += attributionRows.length;
 
@@ -234,10 +248,17 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE() {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  if (!data?.claims?.sub) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
-  const { error } = await supabase.rpc("delete_data_connection", { connection_provider: "shopify" });
+  const workspace = await requireWorkspace();
+  if (!workspace.ok) return workspace.response;
+  const { supabase, membership, store } = workspace;
+  if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
+  if (!["owner", "admin"].includes(membership.role)) {
+    return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
+  }
+  const { error } = await supabase.rpc("delete_data_connection", {
+    connection_provider: "shopify",
+    requested_store_id: store.id,
+  });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ success: true });
 }

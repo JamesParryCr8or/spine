@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { createClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+import { requireWorkspace } from "@/lib/workspace/server";
 
 type MetaAccount = {
   id: string;
@@ -28,24 +30,16 @@ const numeric = (value: string | undefined) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-async function requireUser() {
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.getClaims();
-
-  if (error || !data?.claims?.sub) {
-    return { supabase, userId: null, response: NextResponse.json({ error: "Authentication required" }, { status: 401 }) };
+async function context() {
+  const workspace = await requireWorkspace();
+  if (!workspace.ok) return { response: workspace.response };
+  if (!workspace.store) {
+    return { response: NextResponse.json({ error: "No store is configured" }, { status: 404 }) };
   }
-
-  return { supabase, userId: data.claims.sub, response: null };
+  return { ...workspace, response: null };
 }
 
-async function importMetaInsights({ supabase, userId, account, accessToken, lookbackMonths }: { supabase: Awaited<ReturnType<typeof createClient>>; userId: string; account: MetaAccount; accessToken: string; lookbackMonths: number }) {
-  const { data: membership, error: membershipError } = await supabase
-    .from("organization_members").select("organization_id").eq("user_id", userId).limit(1).single();
-  if (membershipError || !membership) throw new Error("No workspace is configured");
-  const { data: store, error: storeError } = await supabase
-    .from("stores").select("id,currency").eq("organization_id", membership.organization_id).limit(1).single();
-  if (storeError || !store) throw new Error("No store is configured");
+async function importMetaInsights({ supabase, organizationId, store, account, accessToken, lookbackMonths }: { supabase: SupabaseClient; organizationId: string; store: { id: string; currency: string }; account: MetaAccount; accessToken: string; lookbackMonths: number }) {
 
   const until = new Date();
   const since = new Date(until);
@@ -72,7 +66,7 @@ async function importMetaInsights({ supabase, userId, account, accessToken, look
   const campaignRows = insights
     .filter((insight) => insight.date_start && insight.date_stop && insight.campaign_id && insight.campaign_name)
     .map((insight) => ({
-      organization_id: membership.organization_id,
+      organization_id: organizationId,
       store_id: store.id,
       account_id: insight.account_id ?? account.id,
       account_name: insight.account_name ?? account.name ?? null,
@@ -110,36 +104,33 @@ async function importMetaInsights({ supabase, userId, account, accessToken, look
 }
 
 export async function GET() {
-  const { supabase, userId, response } = await requireUser();
-  if (response || !userId) return response!;
+  const result = await context();
+  if (result.response) return result.response;
+  const { supabase, store } = result;
 
   const { data, error } = await supabase
     .from("data_connections")
     .select("provider,status,external_account_id,external_account_name,last_verified_at,last_error")
+    .eq("store_id", store.id)
     .eq("provider", "meta")
     .maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   let sync = null;
   if (data) {
-    const { data: membership } = await supabase.from("organization_members").select("organization_id").eq("user_id", userId).limit(1).maybeSingle();
-    if (membership) {
-      const { data: store } = await supabase.from("stores").select("id").eq("organization_id", membership.organization_id).limit(1).maybeSingle();
-      if (store) {
-        const [{ data: latest, count }, { count: campaignDays }] = await Promise.all([
-          supabase.from("meta_ad_insights_daily").select("date_start,synced_at", { count: "exact" }).eq("store_id", store.id).order("date_start", { ascending: false }).limit(1),
-          supabase.from("meta_campaign_insights_daily").select("id", { count: "exact", head: true }).eq("store_id", store.id),
-        ]);
-        sync = { importedDays: count ?? 0, importedCampaignDays: campaignDays ?? 0, latestDate: latest?.[0]?.date_start ?? null, syncedAt: latest?.[0]?.synced_at ?? null };
-      }
-    }
+    const [{ data: latest, count }, { count: campaignDays }] = await Promise.all([
+      supabase.from("meta_ad_insights_daily").select("date_start,synced_at", { count: "exact" }).eq("store_id", store.id).order("date_start", { ascending: false }).limit(1),
+      supabase.from("meta_campaign_insights_daily").select("id", { count: "exact", head: true }).eq("store_id", store.id),
+    ]);
+    sync = { importedDays: count ?? 0, importedCampaignDays: campaignDays ?? 0, latestDate: latest?.[0]?.date_start ?? null, syncedAt: latest?.[0]?.synced_at ?? null };
   }
   return NextResponse.json({ connection: data, sync });
 }
 
 export async function POST(request: Request) {
-  const { supabase, userId, response } = await requireUser();
-  if (response || !userId) return response!;
+  const result = await context();
+  if (result.response) return result.response;
+  const { supabase, membership, store } = result;
 
   const body = await request.json().catch(() => null) as { accessToken?: string; accountId?: string; lookbackMonths?: number } | null;
   const requestedLookback = Number(body?.lookbackMonths);
@@ -163,12 +154,12 @@ export async function POST(request: Request) {
   if (!account) return NextResponse.json({ error: requestedId ? "That ad account is not available to this token" : "No ad accounts were found for this token" }, { status: 400 });
 
   const { data, error } = await supabase.rpc("save_data_connection", {
-    connection_provider: "meta", access_token: accessToken, account_id: account.id, account_name: account.name ?? null,
+    connection_provider: "meta", requested_store_id: store.id, access_token: accessToken, account_id: account.id, account_name: account.name ?? null,
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   try {
-    const sync = await importMetaInsights({ supabase, userId, account, accessToken, lookbackMonths });
+    const sync = await importMetaInsights({ supabase, organizationId: membership.organizationId, store, account, accessToken, lookbackMonths });
     const saved = Array.isArray(data) ? data[0] : data;
     return NextResponse.json({
       connection: { provider: saved?.provider ?? "meta", status: saved?.status ?? "connected", external_account_id: account.id, external_account_name: account.name ?? account.id, last_verified_at: saved?.last_verified_at ?? new Date().toISOString() },
@@ -181,9 +172,10 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE() {
-  const { supabase, response } = await requireUser();
-  if (response) return response;
-  const { error } = await supabase.rpc("delete_data_connection", { connection_provider: "meta" });
+  const result = await context();
+  if (result.response) return result.response;
+  const { supabase, store } = result;
+  const { error } = await supabase.rpc("delete_data_connection", { connection_provider: "meta", requested_store_id: store.id });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ success: true });
 }
