@@ -6,7 +6,7 @@ import { shopifySyncWindow, shopifyUpdatedAtQuery } from "@/lib/shopify/sync-win
 
 export const maxDuration = 300;
 
-const REQUIRED_SCOPES = ["read_products", "read_inventory", "read_orders", "read_customers"];
+const REQUIRED_SCOPES = ["read_products", "read_inventory", "read_orders", "read_customers", "read_reports"];
 
 type Money = { amount: string; currencyCode: string };
 type MoneyBag = { shopMoney: Money; presentmentMoney: Money };
@@ -115,6 +115,58 @@ export async function POST(request: Request) {
     if (connectionError) throw new Error(connectionError.message);
     const { error: scopesError } = await supabase.rpc("record_shopify_connection_scopes", { scopes: [...grantedScopes].sort(), requested_store_id: store.id });
     if (scopesError) throw new Error(scopesError.message);
+
+    // ShopifyQL uses the same commerce analytics engine as Shopify Admin. Store the
+    // compact daily result so report pages never need to total thousands of orders.
+    const dailySales = await shopifyGraph<{
+      shopifyqlQuery: {
+        tableData: { rows: Array<Record<string, string | number | null>> } | null;
+        parseErrors: string[];
+      };
+    }>(shopDomain, accessToken, `query DailySales($shopifyQl:String!){ shopifyqlQuery(query:$shopifyQl){ tableData{ rows } parseErrors } }`, {
+      shopifyQl: `FROM sales
+SHOW gross_sales, discounts, sales_reversals, net_sales, shipping_charges, taxes, total_sales, orders, net_items_sold, cost_of_goods_sold, gross_profit, net_sales_with_cost_recorded, net_sales_without_cost_recorded
+TIMESERIES day
+SINCE -5y UNTIL today
+ORDER BY day ASC`,
+    });
+    if (dailySales.shopifyqlQuery.parseErrors.length) {
+      throw new Error(`Shopify reporting query: ${dailySales.shopifyqlQuery.parseErrors[0]}`);
+    }
+    const dailyRows = (dailySales.shopifyqlQuery.tableData?.rows ?? []).flatMap((row) => {
+      const salesDate = typeof row.day === "string" ? row.day.slice(0, 10) : "";
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(salesDate)) return [];
+      const numeric = (key: string) => {
+        const value = Number(row[key] ?? 0);
+        return Number.isFinite(value) ? value : 0;
+      };
+      return [{
+        organization_id: membership.organizationId,
+        store_id: store.id,
+        sales_date: salesDate,
+        gross_sales: numeric("gross_sales"),
+        discounts: numeric("discounts"),
+        sales_reversals: numeric("sales_reversals"),
+        net_sales: numeric("net_sales"),
+        shipping_charges: numeric("shipping_charges"),
+        taxes: numeric("taxes"),
+        total_sales: numeric("total_sales"),
+        orders: Math.max(0, Math.trunc(numeric("orders"))),
+        net_items_sold: Math.trunc(numeric("net_items_sold")),
+        cost_of_goods_sold: numeric("cost_of_goods_sold"),
+        gross_profit: numeric("gross_profit"),
+        net_sales_with_cost_recorded: numeric("net_sales_with_cost_recorded"),
+        net_sales_without_cost_recorded: numeric("net_sales_without_cost_recorded"),
+        currency: shopData.shop.currencyCode,
+        synced_at: new Date().toISOString(),
+      }];
+    });
+    for (let index = 0; index < dailyRows.length; index += 500) {
+      const { error: dailyError } = await supabase
+        .from("shopify_sales_daily")
+        .upsert(dailyRows.slice(index, index + 500), { onConflict: "store_id,sales_date" });
+      if (dailyError) throw new Error(dailyError.message);
+    }
 
     const staleBefore = new Date(Date.now() - 6 * 60 * 1000).toISOString();
     const [{ data: existingRun, error: existingRunError }, { data: latestCompleted, error: latestCompletedError }] = await Promise.all([
