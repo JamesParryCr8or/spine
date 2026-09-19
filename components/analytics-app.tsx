@@ -1113,6 +1113,8 @@ function Connections() {
   const [accountId, setAccountId] = useState("");
   const [metaLookbackMonths, setMetaLookbackMonths] = useState("12");
   const [metaConnected, setMetaConnected] = useState(false);
+  const [googleAdsConnected, setGoogleAdsConnected] = useState(false);
+  const [googleAdsAccountName, setGoogleAdsAccountName] = useState("");
   const [klaviyoConnected, setKlaviyoConnected] = useState(false);
   const [metaAccountName, setMetaAccountName] = useState("");
   const [metaSyncResult, setMetaSyncResult] = useState("");
@@ -1148,6 +1150,7 @@ function Connections() {
         setMetaLastSync(payload.sync ?? null);
       })
       .catch(() => undefined);
+    fetch("/api/connections/google-ads").then((response) => response.ok ? response.json() : null).then((payload) => { setGoogleAdsConnected(payload?.connection?.status === "connected"); setGoogleAdsAccountName(payload?.connection?.external_account_name ?? ""); }).catch(() => undefined);
     fetch("/api/connections/klaviyo").then((response) => response.ok ? response.json() : null).then((payload) => setKlaviyoConnected(payload?.connection?.status === "connected")).catch(() => undefined);
     fetch("/api/connections/shopify")
       .then((response) => response.ok ? response.json() : null)
@@ -1217,17 +1220,17 @@ function Connections() {
   };
 
   const connectKlaviyo = async () => { const apiKey = window.prompt("Paste your Klaviyo private API key"); if (!apiKey) return; setSavingConnection(true); const response = await fetch("/api/connections/klaviyo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey }) }); setSavingConnection(false); if (!response.ok) { const payload = await response.json(); setConnectionError(payload.error || "Could not connect Klaviyo"); return; } setKlaviyoConnected(true); };
-
+  const connectGoogleAds = () => { window.location.assign("/api/google-ads/authorize"); };
   const connections = [
     ["Shopify", "Sales, orders, products & customers", shopifyConnected ? "Connected" : "Connect", "S"],
     ["Meta Ads", "Campaign spend & performance", metaConnected ? "Connected" : "Connect", "M"],
-    ["Google Ads", "Campaign and keyword reporting", "Coming next", "G"],
+    ["Google Ads", googleAdsConnected ? (googleAdsAccountName || "Google Ads account") : "Campaign and keyword reporting", googleAdsConnected ? "Connected" : "Connect", "G"],
     ["Klaviyo", "Campaign and flow analytics", klaviyoConnected ? "Connected" : "Connect", "K"],
   ];
 
   return <>
     <div className="connection-notice"><Info/><div><strong>Secure connection storage</strong><span>Access tokens are encrypted in Supabase Vault and are never returned to the browser after saving.</span></div></div>
-    <section className="connection-grid">{connections.map(([name,desc,status,letter])=><article className="connection-card" key={name}><div className={`source-logo ${letter.toLowerCase()}`}>{letter}</div><div><h3>{name}</h3><p>{desc}</p></div><button disabled={status === "Coming next"} onClick={()=>name === "Meta Ads" ? setShowMetaSetup(true) : name === "Shopify" ? setShowShopifySetup(true) : name === "Klaviyo" && void connectKlaviyo()} className={status==="Connected"?"connected":""}>{status==="Connected"&&<span/>}{status}</button></article>)}</section>
+    <section className="connection-grid">{connections.map(([name,desc,status,letter])=><article className="connection-card" key={name}><div className={`source-logo ${letter.toLowerCase()}`}>{letter}</div><div><h3>{name}</h3><p>{desc}</p></div><button disabled={status === "Coming next"} onClick={() => { if (name === "Meta Ads") setShowMetaSetup(true); else if (name === "Shopify") setShowShopifySetup(true); else if (name === "Google Ads" && !googleAdsConnected) connectGoogleAds(); else if (name === "Klaviyo") void connectKlaviyo(); }} className={status==="Connected"?"connected":""}>{status==="Connected"&&<span/>}{status}</button></article>)}</section>
     {showShopifySetup && <div className="modal-backdrop" onMouseDown={()=>setShowShopifySetup(false)}><section className="connection-modal" onMouseDown={(event)=>event.stopPropagation()}>
       <button className="modal-close" onClick={()=>setShowShopifySetup(false)}><X/></button><div className="modal-brand"><div className="source-logo s">S</div><div><span className="eyebrow">PRIMARY SALES SOURCE</span><h2>Connect Shopify</h2></div></div>
       <p className="modal-intro">Connect an Admin API token to validate the store and import catalogue, order, customer, refund and attribution data. Disconnecting removes the encrypted token but preserves your imported reporting data.</p>
