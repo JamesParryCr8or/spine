@@ -188,8 +188,10 @@ export async function GET(request: Request) {
   }
 
   if (shopifyDaily.length && includedOrders.length === 0) {
-    cogs = shopifyDaily.reduce((total, day) => total + monetary(day.cost_of_goods_sold), 0);
-    if (shopifyDaily.some((day) => monetary(day.net_sales_without_cost_recorded) > 0)) missingCostLines = 1;
+    const recordedCogs = shopifyDaily.reduce((total, day) => total + monetary(day.cost_of_goods_sold), 0);
+    const uncostedSales = shopifyDaily.reduce((total, day) => total + Math.max(monetary(day.net_sales_without_cost_recorded), 0), 0);
+    cogs = recordedCogs + (defaultProductCogsRate === null ? 0 : uncostedSales * defaultProductCogsRate);
+    if (uncostedSales > 0 && defaultProductCogsRate === null) missingCostLines = 1;
   }
 
   const convertedOrderAmount = (order: Order, value: string) => convertDatedAmount(monetary(value), order.exchange_rate, store.currency);

@@ -70,6 +70,7 @@ export async function GET(request: Request) {
   const { data: dailyRowsData, error: dailyRowsError } = await dailyQuery;
   if (dailyRowsError) return NextResponse.json({ error: dailyRowsError.message }, { status: 500 });
   const dailyRows = (dailyRowsData ?? []) as ShopifyDaily[];
+  const timezone = store.timezone || "UTC";
 
   if (dailyRows.length) {
     const rangeStart = fromDate || dailyRows[0].sales_date;
@@ -99,12 +100,46 @@ export async function GET(request: Request) {
       .reduce((total, row) => row.currency === store.currency ? total + (Number(row.spend) || 0) : total, 0);
     const metaDates = (metaResult.data ?? []).map((row) => row.date_start).sort();
     const googleDates = (googleResult.data ?? []).map((row) => row.insight_date).sort();
+
+    // ShopifyQL supplies the authoritative daily sales totals. Customer acquisition
+    // needs the imported order history, so use it only to identify first purchases.
+    const rangeUtc = reportingRangeToUtc(rangeStart, rangeEnd, timezone);
+    const history: Array<{ id: string; customer_id: string | null; processed_at: string | null }> = [];
+    const periodOrders: Array<{ id: string; customer_id: string | null; processed_at: string | null; net_product_sales: string; currency: string }> = [];
+    const pageSize = 1000;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await supabase.from("shopify_orders")
+        .select("id,customer_id,processed_at")
+        .eq("store_id", store.id).is("cancelled_at", null).eq("test", false)
+        .not("processed_at", "is", null).lt("processed_at", rangeUtc.endExclusive)
+        .order("processed_at", { ascending: true }).range(offset, offset + pageSize - 1);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      const page = data ?? [];
+      history.push(...page.map((order) => ({ id: order.id, customer_id: order.customer_id, processed_at: order.processed_at })));
+      if (page.length < pageSize) break;
+    }
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await supabase.from("shopify_orders")
+        .select("id,customer_id,processed_at,net_product_sales,currency")
+        .eq("store_id", store.id).is("cancelled_at", null).eq("test", false)
+        .not("processed_at", "is", null).gte("processed_at", rangeUtc.start).lt("processed_at", rangeUtc.endExclusive)
+        .order("processed_at", { ascending: true }).range(offset, offset + pageSize - 1);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      const page = data ?? [];
+      periodOrders.push(...page);
+      if (page.length < pageSize) break;
+    }
+    const customerClasses = classifyCustomerOrders(history.map((order) => ({ id: order.id, customerId: order.customer_id, processedAt: order.processed_at })));
+    const newOrders = periodOrders.filter((order) => customerClasses.get(order.id) === "new");
+    const newCustomers = new Set(newOrders.flatMap((order) => order.customer_id ? [order.customer_id] : [])).size;
+    const newCustomerSales = newOrders.reduce((total, order) => order.currency === store.currency ? total + (Number(order.net_product_sales) || 0) : total, 0);
+    const acquisition = calculateAcquisitionMetrics({ netSales, newCustomerSales, marketingSpend, newCustomers });
     return NextResponse.json({
-      hasData: true, currency: store.currency, timezone: store.timezone || "UTC",
+      hasData: true, currency: store.currency, timezone,
       currencyCoverage: { reportingCurrency: store.currency, includedOrders: orderCount, convertedOrders: 0, excludedOrders: 0, convertedCurrencies: [], excludedCurrencies: [] },
       marketingCurrencyCoverage: { reportingCurrency: store.currency, includedRows: metaDates.length + googleDates.length, convertedRows: 0, excludedRows: 0, convertedCurrencies: [], excludedCurrencies: [] },
       range: { start: rangeStart, end: rangeEnd },
-      metrics: { grossSales, discounts, netSales, shippingRevenue, orders: orderCount, unitsSold, averageOrderValue: orderCount ? netSales / orderCount : 0, marketingSpend, newCustomers: 0, newCustomerSales: 0, blendedCac: null, blendedMer: marketingSpend ? netSales / marketingSpend : null, newCustomerRoas: null },
+      metrics: { grossSales, discounts, netSales, shippingRevenue, orders: orderCount, unitsSold, averageOrderValue: orderCount ? netSales / orderCount : 0, marketingSpend, newCustomers, newCustomerSales, ...acquisition },
       months: [...monthMap.values()].slice(-12),
       meta: { importedDays: metaDates.length, start: metaDates[0] ?? null, end: metaDates.at(-1) ?? null },
       google: { importedDays: googleDates.length, start: googleDates[0] ?? null, end: googleDates.at(-1) ?? null },
@@ -119,7 +154,6 @@ export async function GET(request: Request) {
     .order("effective_date", { ascending: true });
   if (exchangeRateError) return NextResponse.json({ error: exchangeRateError.message }, { status: 500 });
   const exchangeRates = (exchangeRateRows ?? []) as DatedExchangeRate[];
-  const timezone = store.timezone || "UTC";
   const dateRange = fromDate && toDate ? reportingRangeToUtc(fromDate, toDate, timezone) : null;
   const orders: Order[] = [];
   const currencyCoverage = createCurrencyCoverage(store.currency);
