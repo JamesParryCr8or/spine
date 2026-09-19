@@ -49,7 +49,8 @@ export async function GET(request: Request) {
   const workspace = await requireWorkspace();
   if (!workspace.ok) return workspace.response;
   if (!workspace.store) return fail(request, "No active brand was found");
-  if (!["owner", "admin"].includes(workspace.membership.role)) return fail(request, "Owner or admin access is required");
+  const { supabase, store, membership } = workspace;
+  if (!["owner", "admin"].includes(membership.role)) return fail(request, "Owner or admin access is required");
 
   const clientId = process.env.GOOGLE_ADS_CLIENT_ID?.trim();
   const clientSecret = process.env.GOOGLE_ADS_CLIENT_SECRET?.trim();
@@ -106,20 +107,20 @@ export async function GET(request: Request) {
   const accounts = [...accountMap.values()];
   const initial = accounts.find((account) => account.direct_access) ?? accounts[0];
 
-  const { error: connectionError } = await workspace.supabase.rpc("save_data_connection", {
+  const { error: connectionError } = await supabase.rpc("save_data_connection", {
     connection_provider: "google_ads",
-    requested_store_id: workspace.store.id,
+    requested_store_id: store.id,
     access_token: token.refresh_token,
     account_id: initial.customer_id,
     account_name: initial.name,
   });
   if (connectionError) return fail(request, "Google Ads was authorized but Spine could not save the connection");
 
-  const { error: clearError } = await workspace.supabase.from("google_ads_accounts").delete().eq("store_id", workspace.store.id);
+  const { error: clearError } = await supabase.from("google_ads_accounts").delete().eq("store_id", store.id);
   if (clearError) return fail(request, "Google Ads was authorized but Spine could not refresh the account list");
-  const { error: accountError } = await workspace.supabase.from("google_ads_accounts").upsert(accounts.map((account) => ({
-    organization_id: workspace.membership.organizationId,
-    store_id: workspace.store.id,
+  const { error: accountError } = await supabase.from("google_ads_accounts").upsert(accounts.map((account) => ({
+    organization_id: membership.organizationId,
+    store_id: store.id,
     ...account,
     updated_at: new Date().toISOString(),
   })), { onConflict: "store_id,customer_id" });
