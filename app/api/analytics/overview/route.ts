@@ -51,7 +51,16 @@ export async function GET(request: Request) {
   const { supabase, store } = workspace;
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
-  if (fromDate && toDate) await refreshReportingData(supabase, store, fromDate, toDate);
+  if (fromDate && toDate) {
+    try {
+      await refreshReportingData(supabase, store, fromDate, toDate);
+    } catch (error) {
+      console.warn("Reporting refresh was skipped; returning saved report data", {
+        source: "overview",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
 
   let dailyQuery = supabase.from("shopify_sales_daily")
     .select("sales_date,gross_sales,discounts,net_sales,shipping_charges,orders,net_items_sold")

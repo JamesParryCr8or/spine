@@ -54,7 +54,16 @@ export async function GET(request: Request) {
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
   const dateRange = fromDate && toDate ? reportingRangeToUtc(fromDate, toDate, store.timezone || "UTC") : null;
 
-  if (fromDate && toDate) await refreshReportingData(supabase, store, fromDate, toDate);
+  if (fromDate && toDate) {
+    try {
+      await refreshReportingData(supabase, store, fromDate, toDate);
+    } catch (error) {
+      console.warn("Reporting refresh was skipped; returning saved report data", {
+        source: "pnl",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
 
   let dailyQuery = supabase
     .from("shopify_sales_daily")
