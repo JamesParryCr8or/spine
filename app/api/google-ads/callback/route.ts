@@ -7,7 +7,7 @@ const stateCookie = "spine-google-ads-oauth-state";
 type GoogleTokenResponse = { access_token?: string; refresh_token?: string; error?: string; error_description?: string };
 type AccessibleCustomersResponse = { resourceNames?: string[]; error?: { message?: string } };
 type GoogleAdsAccount = { customer_id: string; name: string; is_manager: boolean; hierarchy_level: number; direct_access: boolean };
-type SearchStreamResponse = Array<{ results?: Array<{ customer?: { id?: string; descriptiveName?: string }; customerClient?: { id?: string; descriptiveName?: string; manager?: boolean; level?: number; status?: string } }> }>;
+type SearchStreamResponse = Array<{ results?: Array<{ customer?: { id?: string; descriptiveName?: string; manager?: boolean }; customerClient?: { id?: string; descriptiveName?: string; manager?: boolean; level?: number; status?: string } }> }>;
 
 function fail(request: Request, message: string) {
   const url = new URL("/protected", request.url);
@@ -24,10 +24,10 @@ function headers(accessToken: string, developerToken: string, loginCustomerId?: 
   };
 }
 
-async function search(accessToken: string, developerToken: string, customerId: string, query: string) {
+async function search(accessToken: string, developerToken: string, customerId: string, query: string, loginCustomerId?: string) {
   const response = await fetch("https://googleads.googleapis.com/v25/customers/" + customerId + ":googleAds:searchStream", {
     method: "POST",
-    headers: headers(accessToken, developerToken, customerId),
+    headers: headers(accessToken, developerToken, loginCustomerId),
     body: JSON.stringify({ query }),
     cache: "no-store",
   });
@@ -79,17 +79,19 @@ export async function GET(request: Request) {
 
   const accountMap = new Map<string, GoogleAdsAccount>();
   for (const customerId of directCustomerIds) {
-    const root = await search(token.access_token, developerToken, customerId, "SELECT customer.id, customer.descriptive_name FROM customer LIMIT 1");
+    const root = await search(token.access_token, developerToken, customerId, "SELECT customer.id, customer.descriptive_name, customer.manager FROM customer LIMIT 1");
     const rootCustomer = root.payload[0]?.results?.[0]?.customer;
+    const isManager = Boolean(rootCustomer?.manager);
     accountMap.set(customerId, {
       customer_id: customerId,
       name: rootCustomer?.descriptiveName ?? "Google Ads account " + customerId,
-      is_manager: true,
+      is_manager: isManager,
       hierarchy_level: 0,
       direct_access: true,
     });
 
-    const children = await search(token.access_token, developerToken, customerId, "SELECT customer_client.id, customer_client.descriptive_name, customer_client.manager, customer_client.level, customer_client.status FROM customer_client WHERE customer_client.status = 'ENABLED'");
+    if (!isManager) continue;
+    const children = await search(token.access_token, developerToken, customerId, "SELECT customer_client.id, customer_client.descriptive_name, customer_client.manager, customer_client.level, customer_client.status FROM customer_client WHERE customer_client.status = 'ENABLED'", customerId);
     if (!children.response.ok) continue;
     for (const row of children.payload.flatMap((page) => page.results ?? [])) {
       const child = row.customerClient;
