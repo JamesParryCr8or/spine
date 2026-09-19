@@ -27,7 +27,7 @@
 - [x] Identify synced Shopify variants that have no active override and no Shopify unit cost.
 - [x] Export the missing-COGS list as a CSV or Excel template that can be edited and imported again.
 - [x] Keep imported COGS as effective-dated store data until an owner or admin changes it.
-- [ ] Add brand management so an account can create, rename, and select multiple brands; each brand owns its Shopify, Meta, Google Ads, Klaviyo, and future GoHighLevel connections.
+- [x] Add brand creation and selection so each brand owns its Shopify, Meta, Google Ads, Klaviyo, and future GoHighLevel connections.\n- [ ] Add brand rename and archive controls.
 - [ ] Add an ecommerce / lead-generation operating mode per brand.
 - [ ] Add a GoHighLevel connection and sync contacts, opportunities, pipelines, and pipeline stages.
 - [ ] Add lead-generation reporting for cost per lead, cost per booked call, and stage conversion by channel and campaign.

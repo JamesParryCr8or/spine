@@ -78,3 +78,40 @@ export async function POST(request: Request) {
     activeStoreId: storeId,
   });
 }
+
+
+export async function PUT(request: Request) {
+  const result = await requireWorkspace();
+  if (!result.ok) return result.response;
+  if (result.membership.role !== "owner" && result.membership.role !== "admin") {
+    return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
+  }
+  const input = await request.json().catch(() => null) as { name?: string } | null;
+  const name = input?.name?.trim() ?? "";
+  if (name.length < 2 || name.length > 80) {
+    return NextResponse.json({ error: "Brand name must be between 2 and 80 characters" }, { status: 400 });
+  }
+  const templateStore = result.store;
+  const { data: store, error } = await result.supabase.from("stores").insert({
+    organization_id: result.membership.organizationId,
+    name,
+    currency: templateStore?.currency ?? "GBP",
+    reporting_currency: templateStore?.reporting_currency ?? templateStore?.currency ?? "GBP",
+    timezone: templateStore?.timezone ?? "Europe/London",
+  }).select("id,organization_id,name,currency,reporting_currency,timezone").single();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  const cookieStore = await cookies();
+  cookieStore.set(activeOrganizationCookie, store.organization_id, cookieOptions);
+  cookieStore.set(activeStoreCookie, store.id, cookieOptions);
+  return NextResponse.json({
+    store: {
+      id: store.id,
+      organizationId: store.organization_id,
+      name: store.name,
+      currency: store.currency,
+      reportingCurrency: store.reporting_currency,
+      timezone: store.timezone,
+    },
+  }, { status: 201 });
+}
