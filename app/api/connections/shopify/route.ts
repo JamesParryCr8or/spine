@@ -118,11 +118,11 @@ export async function POST(request: Request) {
 
     const staleBefore = new Date(Date.now() - 6 * 60 * 1000).toISOString();
     const [{ data: existingRun, error: existingRunError }, { data: latestCompleted, error: latestCompletedError }] = await Promise.all([
-      supabase.from("sync_runs").select("id,cursor,records_processed,pages_processed,sync_mode,window_start,window_end,updated_at").eq("store_id", store.id).eq("source", "shopify").eq("status", "running").order("updated_at", { ascending: false }).limit(1).maybeSingle(),
+      supabase.from("sync_runs").select("id,cursor,records_processed,pages_processed,sync_mode,window_start,window_end,status,updated_at").eq("store_id", store.id).eq("source", "shopify").in("status", ["running", "failed", "interrupted"]).not("cursor", "is", null).order("updated_at", { ascending: false }).limit(1).maybeSingle(),
       supabase.from("sync_runs").select("completed_at").eq("store_id", store.id).eq("source", "shopify").eq("status", "completed").order("completed_at", { ascending: false }).limit(1).maybeSingle(),
     ]);
     if (existingRunError || latestCompletedError) throw new Error((existingRunError ?? latestCompletedError)!.message);
-    if (existingRun && existingRun.updated_at >= staleBefore) {
+    if (existingRun?.status === "running" && existingRun.updated_at >= staleBefore) {
       return NextResponse.json({ error: "A Shopify import is already running. Leave this page open and refresh the dashboard in a few minutes." }, { status: 409 });
     }
     const resumed = Boolean(existingRun?.cursor);
@@ -133,6 +133,10 @@ export async function POST(request: Request) {
       : await supabase.from("sync_runs").insert({ organization_id: membership.organizationId, store_id: store.id, source: "shopify", resource: "catalog_orders", status: "running", sync_mode: syncMode, window_start: windowStart, window_end: windowEnd, created_by: userId }).select("id,cursor,records_processed,pages_processed,sync_mode,window_start,window_end,updated_at").single();
     if (runError || !run) throw new Error(runError?.message ?? "Could not create sync run");
     runId = run.id;
+    if (existingRun) {
+      const { error: resumeError } = await supabase.from("sync_runs").update({ status: "running", error_message: null, updated_at: new Date().toISOString() }).eq("id", run.id);
+      if (resumeError) throw new Error(resumeError.message);
+    }
     const priorRecordsProcessed = run.records_processed ?? 0;
     const priorPagesProcessed = run.pages_processed ?? 0;
 
@@ -152,7 +156,7 @@ export async function POST(request: Request) {
     let variantCursor: string | null = null;
     let variantsProcessed = 0;
     do {
-      const result: { productVariants: { nodes: Array<{ id: string; legacyResourceId: string; title: string; sku: string | null; barcode: string | null; price: string; compareAtPrice: string | null; inventoryQuantity: number | null; createdAt: string; updatedAt: string; product: { id: string }; inventoryItem: { id: string; unitCost?: { amount: string; currencyCode: string } | null } }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await shopifyGraph(shopDomain, accessToken, `query Variants($cursor:String){ productVariants(first:100,after:$cursor,sortKey:ID){ nodes{id legacyResourceId title sku barcode price compareAtPrice inventoryQuantity createdAt updatedAt product{id} inventoryItem{id unitCost{amount currencyCode}}} pageInfo{hasNextPage endCursor} } }`, { cursor: variantCursor });
+      const result: { productVariants: { nodes: Array<{ id: string; legacyResourceId: string; title: string; sku: string | null; barcode: string | null; price: string; compareAtPrice: string | null; inventoryQuantity: number | null; createdAt: string; updatedAt: string; product: { id: string }; inventoryItem: { id: string; unitCost?: { amount: string; currencyCode: string } | null } }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await shopifyGraph(shopDomain, accessToken, `query Variants($cursor:String){ productVariants(first:100,after:$cursor,sortKey:ID){ nodes{id legacyResourceId title sku barcode price compareAtPrice inventoryQuantity createdAt updatedAt product{id} inventoryItem{id}} pageInfo{hasNextPage endCursor} } }`, { cursor: variantCursor });
       const rows = result.productVariants.nodes.flatMap((variant) => { const productId = productMap.get(variant.product.id); return productId ? [{ organization_id: membership.organizationId, store_id: store.id, product_id: productId, shopify_gid: variant.id, legacy_resource_id: variant.legacyResourceId, title: variant.title, sku: variant.sku, barcode: variant.barcode, price: variant.price, compare_at_price: variant.compareAtPrice, inventory_quantity: variant.inventoryQuantity, inventory_item_gid: variant.inventoryItem.id, shopify_unit_cost: variant.inventoryItem.unitCost?.amount ?? null, currency: variant.inventoryItem.unitCost?.currencyCode ?? shopData.shop.currencyCode, created_at_shopify: variant.createdAt, updated_at_shopify: variant.updatedAt, synced_at: new Date().toISOString() }] : []; });
       if (rows.length) { const { error } = await supabase.from("shopify_variants").upsert(rows, { onConflict: "store_id,shopify_gid" }); if (error) throw new Error(error.message); }
       variantsProcessed += resumed ? 0 : rows.length;
