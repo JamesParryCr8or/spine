@@ -217,6 +217,7 @@ Shopify is the primary sales and catalog source. Other sources enrich Shopify ra
 - [x] Create `shopify_customers` with first-order date and aggregate customer fields.
 - [x] Create `shopify_products` and `shopify_variants` with SKU, status, price, inventory references, and Shopify unit cost when available.
 - [x] Create `shopify_transactions` for payment gateway and transaction-fee analysis.
+- [x] Import compact daily ShopifyQL sales, COGS, gross-profit, and fee summaries using Shopify Admin’s reporting engine.
 - [x] Create `shopify_order_attribution` for landing page, referrer, first/last visit, UTM source, medium, campaign, term, and content without duplicating order revenue.
 - [ ] Create `shopify_fulfillments` only when required for shipping and operational reporting.
 - [ ] Retain source JSON selectively for troubleshooting, with a retention limit and no unnecessary personal data.
@@ -369,10 +370,12 @@ Centralize formulas in tested SQL views/functions or a versioned metric service.
 - [x] Show P&L formula explanations and source coverage for included and unavailable cost inputs.
 - [x] Add reconciliation status and missing-cost warnings above the table.
 - [x] Export exactly the visible P&L configuration.
+- [x] Default P&L reporting to the latest 365 days and use ShopifyQL totals when available.
 
 ### Sales and orders
 
 - [x] Add sales breakdown by date, country, channel, discount code, new/repeat status, and product.
+- [x] Show the daily sales report from ShopifyQL with refunds, units, recorded COGS, gross profit, payment fees, and profit after fees.
 - [x] Add a searchable order table with financial-status and refund filters.
 - [x] Add an order detail drawer showing source totals, product costs, refunds, and gross profit.
 - [ ] Add saved column layouts and filters later.
