@@ -15,6 +15,7 @@ type DailyShopifyRow = {
   taxes: string | number; total_sales: string | number; orders: number; net_items_sold: number;
   cost_of_goods_sold: string | number; gross_profit: string | number;
   net_sales_with_cost_recorded: string | number; net_sales_without_cost_recorded: string | number;
+  total_payment_fees: string | number;
 };
 
 function addBreakdown(map: Map<string, BreakdownRow>, label: string, orderId: string, units: number, sales: number, seen: Map<string, Set<string>>) {
@@ -129,7 +130,7 @@ export async function GET(request: Request) {
 
   let dailyQuery = supabase
     .from("shopify_sales_daily")
-    .select("sales_date,gross_sales,discounts,sales_reversals,net_sales,shipping_charges,taxes,total_sales,orders,net_items_sold,cost_of_goods_sold,gross_profit,net_sales_with_cost_recorded,net_sales_without_cost_recorded")
+    .select("sales_date,gross_sales,discounts,sales_reversals,net_sales,shipping_charges,taxes,total_sales,orders,net_items_sold,cost_of_goods_sold,gross_profit,net_sales_with_cost_recorded,net_sales_without_cost_recorded,total_payment_fees")
     .eq("store_id", store.id)
     .order("sales_date", { ascending: true });
   if (from) dailyQuery = dailyQuery.gte("sales_date", from);
@@ -151,7 +152,7 @@ export async function GET(request: Request) {
     cogs: Number(row.cost_of_goods_sold),
     grossProfit: Number(row.gross_profit),
     salesWithoutRecordedCost: Number(row.net_sales_without_cost_recorded),
-    paymentFees: paymentFeesByDate.get(row.sales_date) ?? 0,
+    paymentFees: Number(row.total_payment_fees) || paymentFeesByDate.get(row.sales_date) || 0,
   }));
 
   const orderDates = orderRows.flatMap((order) => order.processed_at ? [reportingDateKey(order.processed_at, store.timezone || "UTC")] : []).sort();
