@@ -20,6 +20,11 @@ type ProductShippingCostRow = ProductShippingCost & { currency: string };
 type StoreCostDefault = { fulfilment_amount: string; fulfilment_basis: "orders" | "units"; postage_amount: string; postage_basis: "orders" | "units"; currency: string };
 type CustomCost = { name: string; category: string; amount: string; currency: string; cadence: "one_off" | "daily" | "weekly" | "monthly" | "annual"; allocation_basis: "fixed" | "orders" | "units" | "revenue"; effective_from: string; effective_to: string | null };
 type MetaInsight = { date_start: string; spend: string; currency: string };
+type ShopifyDaily = {
+  sales_date: string; gross_sales: string; discounts: string; sales_reversals: string;
+  net_sales: string; shipping_charges: string; taxes: string; total_sales: string;
+  orders: number; total_payment_fees: string;
+};
 
 const dayMs = 24 * 60 * 60 * 1000;
 const utcDay = (date: string) => Date.parse(`${date.slice(0, 10)}T00:00:00.000Z`);
@@ -46,6 +51,17 @@ export async function GET(request: Request) {
   const { supabase, store } = workspace;
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
   const dateRange = fromDate && toDate ? reportingRangeToUtc(fromDate, toDate, store.timezone || "UTC") : null;
+
+  let dailyQuery = supabase
+    .from("shopify_sales_daily")
+    .select("sales_date,gross_sales,discounts,sales_reversals,net_sales,shipping_charges,taxes,total_sales,orders,total_payment_fees")
+    .eq("store_id", store.id)
+    .order("sales_date", { ascending: true });
+  if (fromDate) dailyQuery = dailyQuery.gte("sales_date", fromDate);
+  if (toDate) dailyQuery = dailyQuery.lte("sales_date", toDate);
+  const { data: dailyData, error: dailyError } = await dailyQuery;
+  if (dailyError) return NextResponse.json({ error: dailyError.message }, { status: 500 });
+  const shopifyDaily = (dailyData ?? []) as ShopifyDaily[];
 
   const { data: exchangeRateRows, error: exchangeRateError } = await supabase.from("exchange_rates").select("base_currency,quote_currency,rate,effective_date").eq("store_id", store.id).eq("quote_currency", store.currency).order("effective_date", { ascending: true });
   if (exchangeRateError) return NextResponse.json({ error: exchangeRateError.message }, { status: 500 });
@@ -154,7 +170,7 @@ export async function GET(request: Request) {
   }
 
   const convertedOrderAmount = (order: Order, value: string) => convertDatedAmount(monetary(value), order.exchange_rate, store.currency);
-  const totals = includedOrders.reduce((total, order) => ({
+  const importedTotals = includedOrders.reduce((total, order) => ({
     grossSales: total.grossSales + convertedOrderAmount(order, order.gross_sales),
     discounts: total.discounts + convertedOrderAmount(order, order.discounts),
     netProductSales: total.netProductSales + convertedOrderAmount(order, order.net_product_sales),
@@ -163,10 +179,23 @@ export async function GET(request: Request) {
     duties: total.duties + convertedOrderAmount(order, order.duties),
     totalSales: total.totalSales + convertedOrderAmount(order, order.total_sales),
   }), { grossSales: 0, discounts: 0, netProductSales: 0, shippingRevenue: 0, tax: 0, duties: 0, totalSales: 0 });
-  const refunds = refundsRows.reduce((total, refund) => {
+  const shopifyTotals = shopifyDaily.reduce((total, day) => ({
+    grossSales: total.grossSales + monetary(day.gross_sales),
+    discounts: total.discounts + Math.abs(monetary(day.discounts)),
+    netProductSales: total.netProductSales + monetary(day.net_sales) + Math.abs(monetary(day.sales_reversals)),
+    shippingRevenue: total.shippingRevenue + monetary(day.shipping_charges),
+    tax: total.tax + monetary(day.taxes),
+    duties: total.duties,
+    totalSales: total.totalSales + monetary(day.total_sales),
+  }), { grossSales: 0, discounts: 0, netProductSales: 0, shippingRevenue: 0, tax: 0, duties: 0, totalSales: 0 });
+  const totals = shopifyDaily.length ? shopifyTotals : importedTotals;
+  const importedRefunds = refundsRows.reduce((total, refund) => {
     const order = ordersById.get(refund.order_id);
     return total + (order ? convertedOrderAmount(order, refund.total_refunded) : 0);
   }, 0);
+  const refunds = shopifyDaily.length
+    ? shopifyDaily.reduce((total, day) => total + Math.abs(monetary(day.sales_reversals)), 0)
+    : importedRefunds;
   const paymentFeeRules = ((paymentFeeRuleResult.data ?? []) as PaymentFeeRuleRow[]).map((rule): EffectivePaymentFeeRule => ({ gateway: rule.gateway, currency: rule.currency, effectiveFrom: rule.effective_from, effectiveTo: rule.effective_to, percentageRate: monetary(rule.percentage_rate), fixedFee: monetary(rule.fixed_fee), taxRate: monetary(rule.tax_rate), minimumFee: monetary(rule.minimum_fee) }));
   let actualFees = 0;
   let estimatedFees = 0;
@@ -182,8 +211,9 @@ export async function GET(request: Request) {
       if (rule) estimatedFees += estimatedTransactionFee(convertDatedAmount(monetary(transaction.amount), transactionRate, store.currency), rule);
     }
   }
-  const transactionFees = actualFees + estimatedFees;
-  const transactionFeesAvailable = actualFees > 0 || estimatedFees > 0;
+  const shopifyReportedFees = shopifyDaily.reduce((total, day) => total + monetary(day.total_payment_fees), 0);
+  const transactionFees = shopifyDaily.length ? shopifyReportedFees + estimatedFees : actualFees + estimatedFees;
+  const transactionFeesAvailable = shopifyDaily.length > 0 || actualFees > 0 || estimatedFees > 0;
   const orderDates = includedOrders.flatMap((order) => order.processed_at ? [order.processed_at.slice(0, 10)] : []);
   const rangeStart = orderDates.length ? orderDates.reduce((first, date) => date < first ? date : first) : null;
   const rangeEnd = orderDates.length ? orderDates.reduce((last, date) => date > last ? date : last) : null;
@@ -274,7 +304,7 @@ export async function GET(request: Request) {
     currencyCoverage: currencyCoverage.summary(),
     marketingCurrencyCoverage: marketingCoverage,
     calculatedAt: new Date().toISOString(),
-    metrics: { ...totals, refunds, cogs, ...calculated, marketingSpend, transactionFees, merchantShippingCosts, variantShippingCosts, shippingFallbackCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, orders: includedOrders.length, missingCostLines, missingShippingLines: shippingCoverage.missingLines, shippingOverrideLines: shippingCoverage.overrideLines, shippingFallbackLines: shippingCoverage.fallbackLines, shippingFallbackRate: shippingCoverage.fallbackRate, unallocatedOperatingCosts },
+    metrics: { ...totals, refunds, cogs, ...calculated, marketingSpend, transactionFees, merchantShippingCosts, variantShippingCosts, shippingFallbackCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, orders: shopifyDaily.length ? shopifyDaily.reduce((total, day) => total + day.orders, 0) : includedOrders.length, missingCostLines, missingShippingLines: shippingCoverage.missingLines, shippingOverrideLines: shippingCoverage.overrideLines, shippingFallbackLines: shippingCoverage.fallbackLines, shippingFallbackRate: shippingCoverage.fallbackRate, unallocatedOperatingCosts },
     period: rangeStart && rangeEnd ? { start: rangeStart, end: rangeEnd } : null,
     availability: { marketingSpend: marketingSpendAvailable, transactionFees: transactionFeesAvailable, shippingCosts: shippingCostsAvailable, handlingCosts: handlingCostsAvailable, operatingExpenses: true, netProfit: netProfitAvailable },
   });
