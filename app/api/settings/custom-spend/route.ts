@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { parseCustomSpendImport } from "@/lib/settings/custom-spend-schema";
-import { createClient } from "@/lib/supabase/server";
+import { requireWorkspace } from "@/lib/workspace/server";
 
 const normalize = (value: string) => value.trim().toLowerCase();
 const keyFor = (row: { date: string; source: string; medium: string; campaign: string; currency: string; account: string | null; adGroup: string | null; externalId: string | null }) => {
@@ -14,14 +14,12 @@ const keyFor = (row: { date: string; source: string; medium: string; campaign: s
 };
 
 async function context() {
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  const userId = claims?.claims?.sub;
-  if (!userId) return { error: NextResponse.json({ error: "Authentication required" }, { status: 401 }) };
-  const { data: membership } = await supabase.from("organization_members").select("organization_id,role").eq("user_id", userId).limit(1).single();
-  if (!membership) return { error: NextResponse.json({ error: "No workspace is configured" }, { status: 403 }) };
-  const { data: store } = await supabase.from("stores").select("id").eq("organization_id", membership.organization_id).limit(1).single();
-  if (!store) return { error: NextResponse.json({ error: "No store is configured" }, { status: 404 }) };
+  const workspace = await requireWorkspace();
+  if (!workspace.ok) return { error: workspace.response };
+  if (!workspace.store) {
+    return { error: NextResponse.json({ error: "No store is configured" }, { status: 404 }) };
+  }
+  const { supabase, userId, membership, store } = workspace;
   return { supabase, userId, membership, store };
 }
 

@@ -128,7 +128,10 @@ export async function requireWorkspace(options: WorkspaceOptions = {}) {
     userId,
     memberships,
     stores,
-    membership: selected.membership,
+    membership: {
+      ...selected.membership,
+      organization_id: selected.membership.organizationId,
+    },
     store,
   };
 }

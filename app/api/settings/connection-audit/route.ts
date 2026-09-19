@@ -1,20 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { createClient } from "@/lib/supabase/server";
+import { requireWorkspace } from "@/lib/workspace/server";
 
 export async function GET() {
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  const userId = claims?.claims?.sub;
-  if (!userId) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
-
-  const { data: membership, error: membershipError } = await supabase
-    .from("organization_members")
-    .select("organization_id,role")
-    .eq("user_id", userId)
-    .limit(1)
-    .single();
-  if (membershipError || !membership) return NextResponse.json({ error: "No workspace is configured" }, { status: 403 });
+  const workspace = await requireWorkspace();
+  if (!workspace.ok) return workspace.response;
+  const { supabase, userId, membership } = workspace;
   if (membership.role !== "owner" && membership.role !== "admin") {
     return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
   }

@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 
 import { parseFinishReportRun, parseStartReportRun } from "@/lib/reports/schema";
-import { createClient } from "@/lib/supabase/server";
+import { requireWorkspace } from "@/lib/workspace/server";
 
 async function context() {
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  const userId = claims?.claims?.sub;
-  if (!userId) return { error: NextResponse.json({ error: "Authentication required" }, { status: 401 }) };
-  const { data: membership } = await supabase.from("organization_members").select("organization_id").eq("user_id", userId).limit(1).single();
-  if (!membership) return { error: NextResponse.json({ error: "No workspace is configured" }, { status: 403 }) };
-  return { supabase, userId, organizationId: membership.organization_id };
+  const workspace = await requireWorkspace();
+  if (!workspace.ok) return { error: workspace.response };
+  return {
+    supabase: workspace.supabase,
+    userId: workspace.userId,
+    organizationId: workspace.membership.organizationId,
+  };
 }
 
 export async function GET(request: Request) {
