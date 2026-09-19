@@ -95,5 +95,3 @@ export async function GET(request: Request) {
   response.cookies.set(stateCookie, "", { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 0 });
   return response;
 }
-
-export const dynamic = "force-dynamic";
