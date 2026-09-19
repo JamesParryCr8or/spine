@@ -24,6 +24,7 @@ type Store = {
   currency: string;
   reporting_currency: string;
   timezone: string;
+  shopify_domain: string | null;
 };
 
 export async function requireWorkspace(options: WorkspaceOptions = {}) {
@@ -65,7 +66,7 @@ export async function requireWorkspace(options: WorkspaceOptions = {}) {
   const organizationIds = memberships.map((membership) => membership.organizationId);
   const { data: storeRows, error: storeError } = await supabase
     .from("stores")
-    .select("id,organization_id,name,currency,reporting_currency,timezone")
+    .select("id,organization_id,name,currency,reporting_currency,timezone,shopify_domain")
     .in("organization_id", organizationIds)
     .order("created_at", { ascending: true });
 
@@ -135,3 +136,4 @@ export async function requireWorkspace(options: WorkspaceOptions = {}) {
     store,
   };
 }
+

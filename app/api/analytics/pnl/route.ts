@@ -9,6 +9,7 @@ import { allocatePeriodCost, operatingCostBucket } from "@/lib/analytics/cost-al
 import { selectEffectiveShippingCost, summarizeShippingCoverage, type ProductShippingCost, type ShippingCoverage } from "@/lib/analytics/shipping-cost";
 import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { calculateProfitAndLoss } from "@/lib/analytics/profit-and-loss";
+import { refreshReportingData } from "@/lib/analytics/reporting-refresh";
 
 type Order = { id: string; processed_at: string | null; gross_sales: string; discounts: string; net_product_sales: string; shipping_revenue: string; tax: string; duties: string; total_sales: string; currency: string; exchange_rate: number };
 type Line = { order_id: string; variant_gid: string | null; sku: string | null; current_quantity: number };
@@ -20,6 +21,7 @@ type ProductShippingCostRow = ProductShippingCost & { currency: string };
 type StoreCostDefault = { fulfilment_amount: string; fulfilment_basis: "orders" | "units"; postage_amount: string; postage_basis: "orders" | "units"; currency: string };
 type CustomCost = { name: string; category: string; amount: string; currency: string; cadence: "one_off" | "daily" | "weekly" | "monthly" | "annual"; allocation_basis: "fixed" | "orders" | "units" | "revenue"; effective_from: string; effective_to: string | null };
 type MetaInsight = { date_start: string; spend: string; currency: string };
+type GoogleInsight = { insight_date: string; spend: string; currency: string };
 type ShopifyDaily = {
   sales_date: string; gross_sales: string; discounts: string; sales_reversals: string;
   net_sales: string; shipping_charges: string; taxes: string; total_sales: string;
@@ -51,6 +53,8 @@ export async function GET(request: Request) {
   const { supabase, store } = workspace;
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
   const dateRange = fromDate && toDate ? reportingRangeToUtc(fromDate, toDate, store.timezone || "UTC") : null;
+
+  if (fromDate && toDate) await refreshReportingData(supabase, store, fromDate, toDate);
 
   let dailyQuery = supabase
     .from("shopify_sales_daily")
@@ -224,25 +228,24 @@ export async function GET(request: Request) {
   const rangeStart = reportDates.length ? reportDates.reduce((first, date) => date < first ? date : first) : null;
   const rangeEnd = reportDates.length ? reportDates.reduce((last, date) => date > last ? date : last) : null;
   const metaInsights: MetaInsight[] = [];
+  const googleInsights: GoogleInsight[] = [];
   if (rangeStart && rangeEnd) {
-    for (let from = 0; ; from += pageSize) {
-      const { data, error } = await supabase
-        .from("meta_ad_insights_daily")
-        .select("date_start,spend,currency")
-        .eq("store_id", store.id)
-        .gte("date_start", rangeStart)
-        .lte("date_start", rangeEnd)
-        .order("date_start", { ascending: true })
-        .range(from, from + pageSize - 1);
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-      const page = (data ?? []) as MetaInsight[];
-      metaInsights.push(...page);
-      if (page.length < pageSize) break;
-    }
+    const [metaResult, googleResult] = await Promise.all([
+      supabase.from("meta_ad_insights_daily").select("date_start,spend,currency").eq("store_id", store.id).gte("date_start", rangeStart).lte("date_start", rangeEnd).order("date_start", { ascending: true }),
+      supabase.from("google_ads_insights_daily").select("insight_date,spend,currency").eq("store_id", store.id).gte("insight_date", rangeStart).lte("insight_date", rangeEnd).order("insight_date", { ascending: true }),
+    ]);
+    const insightError = metaResult.error ?? googleResult.error;
+    if (insightError) return NextResponse.json({ error: insightError.message }, { status: 500 });
+    metaInsights.push(...((metaResult.data ?? []) as MetaInsight[]));
+    googleInsights.push(...((googleResult.data ?? []) as GoogleInsight[]));
   }
   const marketingCurrencyCoverage = createCurrencyConversionCoverage(store.currency);
-  const marketingSpend = metaInsights.reduce((total, insight) => {
-    const exchangeRate = resolveDatedExchangeRate(exchangeRates, insight.currency, store.currency, insight.date_start);
+  const marketingRows = [
+    ...metaInsights.map((insight) => ({ date: insight.date_start, spend: insight.spend, currency: insight.currency })),
+    ...googleInsights.map((insight) => ({ date: insight.insight_date, spend: insight.spend, currency: insight.currency })),
+  ];
+  const marketingSpend = marketingRows.reduce((total, insight) => {
+    const exchangeRate = resolveDatedExchangeRate(exchangeRates, insight.currency, store.currency, insight.date);
     if (!marketingCurrencyCoverage.include(insight.currency, exchangeRate)) return total;
     return total + convertDatedAmount(monetary(insight.spend), exchangeRate ?? 1, store.currency);
   }, 0);
@@ -315,3 +318,4 @@ export async function GET(request: Request) {
     availability: { marketingSpend: marketingSpendAvailable, transactionFees: transactionFeesAvailable, shippingCosts: shippingCostsAvailable, handlingCosts: handlingCostsAvailable, operatingExpenses: true, netProfit: netProfitAvailable },
   });
 }
+

@@ -6,6 +6,7 @@ import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExcha
 import { calculateAcquisitionMetrics } from "@/lib/analytics/acquisition";
 import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
 import { reportingDateKey, reportingMonthKey, reportingRangeToUtc } from "@/lib/analytics/reporting-range";
+import { refreshReportingData } from "@/lib/analytics/reporting-refresh";
 
 type Order = {
   id: string;
@@ -18,6 +19,11 @@ type Order = {
   total_sales: string;
   currency: string;
   exchange_rate: number;
+};
+
+type ShopifyDaily = {
+  sales_date: string; gross_sales: string; discounts: string; net_sales: string; shipping_charges: string;
+  orders: number; net_items_sold: number;
 };
 
 function isoDate(date: Date) {
@@ -44,6 +50,57 @@ export async function GET(request: Request) {
   if (!workspace.ok) return workspace.response;
   const { supabase, store } = workspace;
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
+
+  if (fromDate && toDate) await refreshReportingData(supabase, store, fromDate, toDate);
+
+  let dailyQuery = supabase.from("shopify_sales_daily")
+    .select("sales_date,gross_sales,discounts,net_sales,shipping_charges,orders,net_items_sold")
+    .eq("store_id", store.id).order("sales_date", { ascending: true });
+  if (fromDate) dailyQuery = dailyQuery.gte("sales_date", fromDate);
+  if (toDate) dailyQuery = dailyQuery.lte("sales_date", toDate);
+  const { data: dailyRowsData, error: dailyRowsError } = await dailyQuery;
+  if (dailyRowsError) return NextResponse.json({ error: dailyRowsError.message }, { status: 500 });
+  const dailyRows = (dailyRowsData ?? []) as ShopifyDaily[];
+
+  if (dailyRows.length) {
+    const rangeStart = fromDate || dailyRows[0].sales_date;
+    const rangeEnd = toDate || dailyRows.at(-1)!.sales_date;
+    const [metaResult, googleResult] = await Promise.all([
+      supabase.from("meta_ad_insights_daily").select("date_start,spend,currency").eq("store_id", store.id).gte("date_start", rangeStart).lte("date_start", rangeEnd),
+      supabase.from("google_ads_insights_daily").select("insight_date,spend,currency").eq("store_id", store.id).gte("insight_date", rangeStart).lte("insight_date", rangeEnd),
+    ]);
+    const spendError = metaResult.error ?? googleResult.error;
+    if (spendError) return NextResponse.json({ error: spendError.message }, { status: 500 });
+    const monthMap = new Map<string, { key: string; label: string; grossSales: number; discounts: number; netSales: number; shippingRevenue: number; orders: number }>();
+    let grossSales = 0, discounts = 0, netSales = 0, shippingRevenue = 0, orderCount = 0, unitsSold = 0;
+    for (const row of dailyRows) {
+      const key = row.sales_date.slice(0, 7);
+      const date = new Date(`${key}-01T00:00:00Z`);
+      const month = monthMap.get(key) ?? { key, label: monthLabel(date, store.timezone || "UTC"), grossSales: 0, discounts: 0, netSales: 0, shippingRevenue: 0, orders: 0 };
+      const gross = Number(row.gross_sales) || 0;
+      const discount = Math.abs(Number(row.discounts) || 0);
+      const net = Number(row.net_sales) || 0;
+      const shipping = Number(row.shipping_charges) || 0;
+      grossSales += gross; discounts += discount; netSales += net; shippingRevenue += shipping;
+      orderCount += row.orders || 0; unitsSold += row.net_items_sold || 0;
+      month.grossSales += gross; month.discounts += discount; month.netSales += net; month.shippingRevenue += shipping; month.orders += row.orders || 0;
+      monthMap.set(key, month);
+    }
+    const marketingSpend = [...(metaResult.data ?? []).map((row) => ({ spend: row.spend, currency: row.currency })), ...(googleResult.data ?? []).map((row) => ({ spend: row.spend, currency: row.currency }))]
+      .reduce((total, row) => row.currency === store.currency ? total + (Number(row.spend) || 0) : total, 0);
+    const metaDates = (metaResult.data ?? []).map((row) => row.date_start).sort();
+    const googleDates = (googleResult.data ?? []).map((row) => row.insight_date).sort();
+    return NextResponse.json({
+      hasData: true, currency: store.currency, timezone: store.timezone || "UTC",
+      currencyCoverage: { reportingCurrency: store.currency, includedOrders: orderCount, convertedOrders: 0, excludedOrders: 0, convertedCurrencies: [], excludedCurrencies: [] },
+      marketingCurrencyCoverage: { reportingCurrency: store.currency, includedRows: metaDates.length + googleDates.length, convertedRows: 0, excludedRows: 0, convertedCurrencies: [], excludedCurrencies: [] },
+      range: { start: rangeStart, end: rangeEnd },
+      metrics: { grossSales, discounts, netSales, shippingRevenue, orders: orderCount, unitsSold, averageOrderValue: orderCount ? netSales / orderCount : 0, marketingSpend, newCustomers: 0, newCustomerSales: 0, blendedCac: null, blendedMer: marketingSpend ? netSales / marketingSpend : null, newCustomerRoas: null },
+      months: [...monthMap.values()].slice(-12),
+      meta: { importedDays: metaDates.length, start: metaDates[0] ?? null, end: metaDates.at(-1) ?? null },
+      google: { importedDays: googleDates.length, start: googleDates[0] ?? null, end: googleDates.at(-1) ?? null },
+    });
+  }
 
   const { data: exchangeRateRows, error: exchangeRateError } = await supabase
     .from("exchange_rates")
@@ -181,3 +238,4 @@ export async function GET(request: Request) {
     meta: { importedDays: metaDates.length, start: metaDates[0] ?? null, end: metaDates.at(-1) ?? null },
   });
 }
+
