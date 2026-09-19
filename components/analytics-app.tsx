@@ -1115,6 +1115,9 @@ function Connections() {
   const [metaConnected, setMetaConnected] = useState(false);
   const [googleAdsConnected, setGoogleAdsConnected] = useState(false);
   const [googleAdsAccountName, setGoogleAdsAccountName] = useState("");
+  const [googleAdsAccounts, setGoogleAdsAccounts] = useState<Array<{ customer_id: string; name: string; is_manager: boolean; hierarchy_level: number; direct_access: boolean }>>([]);
+  const [showGoogleAdsAccounts, setShowGoogleAdsAccounts] = useState(false);
+  const [selectingGoogleAdsAccount, setSelectingGoogleAdsAccount] = useState(false);
   const [klaviyoConnected, setKlaviyoConnected] = useState(false);
   const [metaAccountName, setMetaAccountName] = useState("");
   const [metaSyncResult, setMetaSyncResult] = useState("");
@@ -1151,6 +1154,11 @@ function Connections() {
       })
       .catch(() => undefined);
     fetch("/api/connections/google-ads").then((response) => response.ok ? response.json() : null).then((payload) => { setGoogleAdsConnected(payload?.connection?.status === "connected"); setGoogleAdsAccountName(payload?.connection?.external_account_name ?? ""); }).catch(() => undefined);
+    fetch("/api/connections/google-ads/accounts").then((response) => response.ok ? response.json() : null).then((payload) => setGoogleAdsAccounts(payload?.accounts ?? [])).catch(() => undefined);
+    if (new URLSearchParams(window.location.search).get("googleAds") === "select") {
+      const timeout = window.setTimeout(() => { setShowGoogleAdsAccounts(true); window.history.replaceState({}, "", "/protected"); }, 0);
+      return () => window.clearTimeout(timeout);
+    }
     fetch("/api/connections/klaviyo").then((response) => response.ok ? response.json() : null).then((payload) => setKlaviyoConnected(payload?.connection?.status === "connected")).catch(() => undefined);
     fetch("/api/connections/shopify")
       .then((response) => response.ok ? response.json() : null)
@@ -1221,6 +1229,16 @@ function Connections() {
 
   const connectKlaviyo = async () => { const apiKey = window.prompt("Paste your Klaviyo private API key"); if (!apiKey) return; setSavingConnection(true); const response = await fetch("/api/connections/klaviyo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey }) }); setSavingConnection(false); if (!response.ok) { const payload = await response.json(); setConnectionError(payload.error || "Could not connect Klaviyo"); return; } setKlaviyoConnected(true); };
   const connectGoogleAds = () => { window.location.assign("/api/google-ads/authorize"); };
+  const selectGoogleAdsAccount = async (customerId: string) => {
+    setSelectingGoogleAdsAccount(true); setConnectionError("");
+    try {
+      const response = await fetch("/api/connections/google-ads/accounts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customerId }) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Could not select Google Ads account");
+      setGoogleAdsAccountName(payload.connection?.external_account_name ?? "");
+      setGoogleAdsConnected(true); setShowGoogleAdsAccounts(false);
+    } catch (reason) { setConnectionError(reason instanceof Error ? reason.message : "Could not select Google Ads account"); } finally { setSelectingGoogleAdsAccount(false); }
+  };
   const connections = [
     ["Shopify", "Sales, orders, products & customers", shopifyConnected ? "Connected" : "Connect", "S"],
     ["Meta Ads", "Campaign spend & performance", metaConnected ? "Connected" : "Connect", "M"],
@@ -1230,7 +1248,8 @@ function Connections() {
 
   return <>
     <div className="connection-notice"><Info/><div><strong>Secure connection storage</strong><span>Access tokens are encrypted in Supabase Vault and are never returned to the browser after saving.</span></div></div>
-    <section className="connection-grid">{connections.map(([name,desc,status,letter])=><article className="connection-card" key={name}><div className={`source-logo ${letter.toLowerCase()}`}>{letter}</div><div><h3>{name}</h3><p>{desc}</p></div><button disabled={status === "Coming next"} onClick={() => { if (name === "Meta Ads") setShowMetaSetup(true); else if (name === "Shopify") setShowShopifySetup(true); else if (name === "Google Ads" && !googleAdsConnected) connectGoogleAds(); else if (name === "Klaviyo") void connectKlaviyo(); }} className={status==="Connected"?"connected":""}>{status==="Connected"&&<span/>}{status}</button></article>)}</section>
+    <section className="connection-grid">{connections.map(([name,desc,status,letter])=><article className="connection-card" key={name}><div className={`source-logo ${letter.toLowerCase()}`}>{letter}</div><div><h3>{name}</h3><p>{desc}</p></div><button disabled={status === "Coming next"} onClick={() => { if (name === "Meta Ads") setShowMetaSetup(true); else if (name === "Shopify") setShowShopifySetup(true); else if (name === "Google Ads") { if (googleAdsConnected) setShowGoogleAdsAccounts(true); else connectGoogleAds(); } else if (name === "Klaviyo") void connectKlaviyo(); }} className={status==="Connected"?"connected":""}>{status==="Connected"&&<span/>}{status}</button></article>)}</section>
+    {showGoogleAdsAccounts && <div className="modal-backdrop" onMouseDown={() => setShowGoogleAdsAccounts(false)}><section className="connection-modal" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowGoogleAdsAccounts(false)}><X/></button><div className="modal-brand"><div className="source-logo g">G</div><div><span className="eyebrow">GOOGLE ADS</span><h2>Choose an ad account</h2></div></div><p className="modal-intro">Select the Google Ads account for this brand. Manager accounts and their enabled client accounts are listed separately.</p>{googleAdsAccounts.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Account</th><th>Customer ID</th><th>Type</th><th/></tr></thead><tbody>{googleAdsAccounts.map((account) => <tr key={account.customer_id}><td><strong>{account.name}</strong>{account.direct_access && <small>Direct Google access</small>}</td><td>{account.customer_id}</td><td>{account.is_manager ? "Manager (MCC)" : "Client account"}</td><td><button className="primary" disabled={selectingGoogleAdsAccount} onClick={() => void selectGoogleAdsAccount(account.customer_id)}>{googleAdsAccountName === account.name ? "Selected" : "Use this account"}</button></td></tr>)}</tbody></table></div> : <div className="cost-empty"><Database/><strong>No Google Ads accounts have been loaded yet</strong><span>Reconnect Google Ads to load the MCC hierarchy.</span></div>}<div className="modal-actions"><button onClick={() => setShowGoogleAdsAccounts(false)}>Close</button><button className="primary" onClick={connectGoogleAds}>Reconnect and refresh accounts</button></div></section></div>}
     {showShopifySetup && <div className="modal-backdrop" onMouseDown={()=>setShowShopifySetup(false)}><section className="connection-modal" onMouseDown={(event)=>event.stopPropagation()}>
       <button className="modal-close" onClick={()=>setShowShopifySetup(false)}><X/></button><div className="modal-brand"><div className="source-logo s">S</div><div><span className="eyebrow">PRIMARY SALES SOURCE</span><h2>Connect Shopify</h2></div></div>
       <p className="modal-intro">Connect an Admin API token to validate the store and import catalogue, order, customer, refund and attribution data. Disconnecting removes the encrypted token but preserves your imported reporting data.</p>

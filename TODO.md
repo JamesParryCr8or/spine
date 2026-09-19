@@ -29,7 +29,7 @@
 - [x] Keep imported COGS as effective-dated store data until an owner or admin changes it.
 - [x] Add brand creation and selection so each brand owns its Shopify, Meta, Google Ads, Klaviyo, and future GoHighLevel connections.\n- [ ] Add brand rename and archive controls.
 - [ ] Add an ecommerce / lead-generation operating mode per brand.
-- [x] Add Google Ads OAuth authorization, encrypted per-brand refresh-token storage, and direct account discovery.\n- [ ] Import Google Ads campaign, keyword, and daily-spend reporting after account selection.\n- [ ] Add a GoHighLevel connection and sync contacts, opportunities, pipelines, and pipeline stages.
+- [x] Add Google Ads OAuth authorization, encrypted per-brand refresh-token storage, MCC/client account discovery, and account selection.\n- [ ] Import Google Ads campaign, keyword, and daily-spend reporting after account selection.\n- [ ] Add a GoHighLevel connection and sync contacts, opportunities, pipelines, and pipeline stages.
 - [ ] Add lead-generation reporting for cost per lead, cost per booked call, and stage conversion by channel and campaign.
 
 ### Latest continuation

@@ -6,12 +6,32 @@ const stateCookie = "spine-google-ads-oauth-state";
 
 type GoogleTokenResponse = { access_token?: string; refresh_token?: string; error?: string; error_description?: string };
 type AccessibleCustomersResponse = { resourceNames?: string[]; error?: { message?: string } };
-type SearchStreamResponse = Array<{ results?: Array<{ customer?: { id?: string; descriptiveName?: string } }> }>;
+type GoogleAdsAccount = { customer_id: string; name: string; is_manager: boolean; hierarchy_level: number; direct_access: boolean };
+type SearchStreamResponse = Array<{ results?: Array<{ customer?: { id?: string; descriptiveName?: string }; customerClient?: { id?: string; descriptiveName?: string; manager?: boolean; level?: number; status?: string } }> }>;
 
 function fail(request: Request, message: string) {
   const url = new URL("/protected", request.url);
   url.searchParams.set("connectionError", message);
   return NextResponse.redirect(url);
+}
+
+function headers(accessToken: string, developerToken: string, loginCustomerId?: string) {
+  return {
+    Authorization: "Bearer " + accessToken,
+    "developer-token": developerToken,
+    "Content-Type": "application/json",
+    ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}),
+  };
+}
+
+async function search(accessToken: string, developerToken: string, customerId: string, query: string) {
+  const response = await fetch("https://googleads.googleapis.com/v25/customers/" + customerId + ":googleAds:searchStream", {
+    method: "POST",
+    headers: headers(accessToken, developerToken, customerId),
+    body: JSON.stringify({ query }),
+    cache: "no-store",
+  });
+  return { response, payload: await response.json().catch(() => []) as SearchStreamResponse };
 }
 
 export async function GET(request: Request) {
@@ -35,9 +55,7 @@ export async function GET(request: Request) {
   const clientSecret = process.env.GOOGLE_ADS_CLIENT_SECRET?.trim();
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN?.trim();
   const redirectUri = process.env.GOOGLE_ADS_REDIRECT_URI?.trim();
-  if (!clientId || !clientSecret || !developerToken || !redirectUri) {
-    return fail(request, "Google Ads is missing server configuration in Vercel");
-  }
+  if (!clientId || !clientSecret || !developerToken || !redirectUri) return fail(request, "Google Ads is missing server configuration in Vercel");
 
   const exchange = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -46,52 +64,68 @@ export async function GET(request: Request) {
     cache: "no-store",
   });
   const token = await exchange.json().catch(() => ({})) as GoogleTokenResponse;
-  if (!exchange.ok || !token.access_token || !token.refresh_token) {
-    return fail(request, token.error_description ?? token.error ?? "Google did not issue a reusable Google Ads authorization");
-  }
+  if (!exchange.ok || !token.access_token || !token.refresh_token) return fail(request, token.error_description ?? token.error ?? "Google did not issue a reusable Google Ads authorization");
 
   const customersResponse = await fetch("https://googleads.googleapis.com/v25/customers:listAccessibleCustomers", {
-    headers: {
-      Authorization: "Bearer " + token.access_token,
-      "developer-token": developerToken,
-      "Content-Type": "application/json",
-    },
+    headers: headers(token.access_token, developerToken),
     cache: "no-store",
   });
   const customers = await customersResponse.json().catch(() => ({})) as AccessibleCustomersResponse;
-  if (!customersResponse.ok) {
-    return fail(request, customers.error?.message ?? "Google Ads could not list accounts for this user");
+  if (!customersResponse.ok) return fail(request, customers.error?.message ?? "Google Ads could not list accounts for this user");
+
+  const directCustomerIds = (customers.resourceNames ?? []).map((name) => name.match(/^customers\/(\d+)$/)?.[1]).filter((id): id is string => Boolean(id));
+  if (!directCustomerIds.length) return fail(request, "No directly accessible Google Ads accounts were found for this Google user");
+
+  const accountMap = new Map<string, GoogleAdsAccount>();
+  for (const customerId of directCustomerIds) {
+    const root = await search(token.access_token, developerToken, customerId, "SELECT customer.id, customer.descriptive_name FROM customer LIMIT 1");
+    const rootCustomer = root.payload[0]?.results?.[0]?.customer;
+    accountMap.set(customerId, {
+      customer_id: customerId,
+      name: rootCustomer?.descriptiveName ?? "Google Ads account " + customerId,
+      is_manager: true,
+      hierarchy_level: 0,
+      direct_access: true,
+    });
+
+    const children = await search(token.access_token, developerToken, customerId, "SELECT customer_client.id, customer_client.descriptive_name, customer_client.manager, customer_client.level, customer_client.status FROM customer_client WHERE customer_client.status = 'ENABLED'");
+    if (!children.response.ok) continue;
+    for (const row of children.payload.flatMap((page) => page.results ?? [])) {
+      const child = row.customerClient;
+      if (!child?.id) continue;
+      const existing = accountMap.get(child.id);
+      accountMap.set(child.id, {
+        customer_id: child.id,
+        name: child.descriptiveName ?? "Google Ads account " + child.id,
+        is_manager: Boolean(child.manager),
+        hierarchy_level: child.level ?? 1,
+        direct_access: existing?.direct_access ?? false,
+      });
+    }
   }
+  const accounts = [...accountMap.values()];
+  const initial = accounts.find((account) => account.direct_access) ?? accounts[0];
 
-  const accountId = customers.resourceNames?.map((name) => name.match(/^customers\/(\d+)$/)?.[1]).find(Boolean);
-  if (!accountId) return fail(request, "No directly accessible Google Ads accounts were found for this Google user");
-
-  let accountName = "Google Ads account " + accountId;
-  const nameResponse = await fetch("https://googleads.googleapis.com/v25/customers/" + accountId + ":googleAds:searchStream", {
-    method: "POST",
-    headers: {
-      Authorization: "Bearer " + token.access_token,
-      "developer-token": developerToken,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ query: "SELECT customer.id, customer.descriptive_name FROM customer LIMIT 1" }),
-    cache: "no-store",
-  });
-  if (nameResponse.ok) {
-    const stream = await nameResponse.json().catch(() => []) as SearchStreamResponse;
-    accountName = stream[0]?.results?.[0]?.customer?.descriptiveName ?? accountName;
-  }
-
-  const { error } = await workspace.supabase.rpc("save_data_connection", {
+  const { error: connectionError } = await workspace.supabase.rpc("save_data_connection", {
     connection_provider: "google_ads",
     requested_store_id: workspace.store.id,
     access_token: token.refresh_token,
-    account_id: accountId,
-    account_name: accountName,
+    account_id: initial.customer_id,
+    account_name: initial.name,
   });
-  if (error) return fail(request, "Google Ads was authorized but Spine could not save the connection");
+  if (connectionError) return fail(request, "Google Ads was authorized but Spine could not save the connection");
 
-  const response = NextResponse.redirect(new URL("/protected?googleAds=connected", request.url));
+  const { error: clearError } = await workspace.supabase.from("google_ads_accounts").delete().eq("store_id", workspace.store.id);
+  if (clearError) return fail(request, "Google Ads was authorized but Spine could not refresh the account list");
+  const { error: accountError } = await workspace.supabase.from("google_ads_accounts").upsert(accounts.map((account) => ({
+    organization_id: workspace.membership.organizationId,
+    store_id: workspace.store.id,
+    ...account,
+    updated_at: new Date().toISOString(),
+  })), { onConflict: "store_id,customer_id" });
+  if (accountError) return fail(request, "Google Ads was authorized but Spine could not save the account list");
+
+  const response = NextResponse.redirect(new URL("/protected?googleAds=select", request.url));
   response.cookies.set(stateCookie, "", { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 0 });
   return response;
 }
