@@ -6,7 +6,8 @@ async function context() {
   const workspace = await requireWorkspace();
   if (!workspace.ok) return { response: workspace.response };
   if (!workspace.store) return { response: NextResponse.json({ error: "No store is configured" }, { status: 404 }) };
-  return { ...workspace, response: null };
+  const { supabase, membership, store } = workspace;
+  return { supabase, membership, store, response: null };
 }
 
 export async function GET() {
