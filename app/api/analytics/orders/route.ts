@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { reportingDateKey, reportingRangeToUtc } from "@/lib/analytics/reporting-range";
-import { createClient } from "@/lib/supabase/server";
+import { requireWorkspace } from "@/lib/workspace/server";
 
 type OrderRow = {
   id: string; customer_id: string | null; order_name: string; processed_at: string | null;
@@ -24,14 +24,9 @@ function sorted(map: Map<string, BreakdownRow>, chronological = false) {
 }
 
 export async function GET(request: Request) {
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  const userId = claims?.claims?.sub;
-  if (!userId) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
-
-  const { data: membership } = await supabase.from("organization_members").select("organization_id").eq("user_id", userId).limit(1).single();
-  if (!membership) return NextResponse.json({ error: "No workspace is configured" }, { status: 403 });
-  const { data: store } = await supabase.from("stores").select("id,currency,timezone").eq("organization_id", membership.organization_id).limit(1).single();
+  const workspace = await requireWorkspace();
+  if (!workspace.ok) return workspace.response;
+  const { supabase, store } = workspace;
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
   const url = new URL(request.url);

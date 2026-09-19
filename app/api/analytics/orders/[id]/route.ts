@@ -1,20 +1,16 @@
 import { NextResponse } from "next/server";
 
 import { costKey, monetary, resolveEffectiveCost, type EffectiveCost } from "@/lib/analytics/effective-cost";
-import { createClient } from "@/lib/supabase/server";
+import { requireWorkspace } from "@/lib/workspace/server";
 
 type Line = { id: string; variant_gid: string | null; sku: string | null; title: string; variant_title: string | null; current_quantity: number; net_sales: string };
 type Variant = { id: string; shopify_gid: string; sku: string | null; shopify_unit_cost: string | null };
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  const userId = claims?.claims?.sub;
-  if (!userId) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
-  const { data: membership } = await supabase.from("organization_members").select("organization_id").eq("user_id", userId).limit(1).single();
-  if (!membership) return NextResponse.json({ error: "No workspace is configured" }, { status: 403 });
-  const { data: store } = await supabase.from("stores").select("id,currency").eq("organization_id", membership.organization_id).limit(1).single();
+  const workspace = await requireWorkspace();
+  if (!workspace.ok) return workspace.response;
+  const { supabase, store } = workspace;
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
   const { data: order, error: orderError } = await supabase

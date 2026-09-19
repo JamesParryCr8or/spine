@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createClient } from "@/lib/supabase/server";
+import { requireWorkspace } from "@/lib/workspace/server";
 import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 import { calculateAcquisitionMetrics } from "@/lib/analytics/acquisition";
@@ -40,26 +40,10 @@ export async function GET(request: Request) {
   if ((fromDate && !isDate(fromDate)) || (toDate && !isDate(toDate)) || (fromDate && toDate && fromDate > toDate)) {
     return NextResponse.json({ error: "Use a valid start and end date" }, { status: 400 });
   }
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  const userId = claims?.claims?.sub;
-  if (!userId) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
-
-  const { data: membership, error: membershipError } = await supabase
-    .from("organization_members")
-    .select("organization_id")
-    .eq("user_id", userId)
-    .limit(1)
-    .single();
-  if (membershipError || !membership) return NextResponse.json({ error: "No workspace is configured" }, { status: 403 });
-
-  const { data: store, error: storeError } = await supabase
-    .from("stores")
-    .select("id,currency,timezone")
-    .eq("organization_id", membership.organization_id)
-    .limit(1)
-    .single();
-  if (storeError || !store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
+  const workspace = await requireWorkspace();
+  if (!workspace.ok) return workspace.response;
+  const { supabase, store } = workspace;
+  if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
   const { data: exchangeRateRows, error: exchangeRateError } = await supabase
     .from("exchange_rates")

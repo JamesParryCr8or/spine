@@ -7,7 +7,7 @@ import { proportionalAllocations } from "@/lib/analytics/proportional-allocation
 import { estimatedTransactionFee, selectEffectivePaymentFeeRule, type EffectivePaymentFeeRule, type ShopifyTransactionFee } from "@/lib/analytics/transaction-fees";
 import { allocateOrderRefund } from "@/lib/analytics/refund-allocation";
 import { calculateProductProfit } from "@/lib/analytics/product-profit";
-import { createClient } from "@/lib/supabase/server";
+import { requireWorkspace } from "@/lib/workspace/server";
 import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
@@ -39,14 +39,9 @@ export async function GET(request: Request) {
   if ((fromDate && !isDate(fromDate)) || (toDate && !isDate(toDate)) || (fromDate && toDate && fromDate > toDate)) {
     return NextResponse.json({ error: "Use a valid start and end date" }, { status: 400 });
   }
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  const userId = claims?.claims?.sub;
-  if (!userId) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
-
-  const { data: membership } = await supabase.from("organization_members").select("organization_id").eq("user_id", userId).limit(1).single();
-  if (!membership) return NextResponse.json({ error: "No workspace is configured" }, { status: 403 });
-  const { data: store } = await supabase.from("stores").select("id,currency,timezone").eq("organization_id", membership.organization_id).limit(1).single();
+  const workspace = await requireWorkspace();
+  if (!workspace.ok) return workspace.response;
+  const { supabase, store } = workspace;
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
   const { data: exchangeRateRows, error: exchangeRateError } = await supabase.from("exchange_rates").select("base_currency,quote_currency,rate,effective_date").eq("store_id", store.id).eq("quote_currency", store.currency).order("effective_date", { ascending: true });
