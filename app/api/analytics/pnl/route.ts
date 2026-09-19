@@ -17,6 +17,7 @@ type Refund = { order_id: string; total_refunded: string };
 type Transaction = ShopifyTransactionFee & { order_id: string; gateway: string | null; amount: string; processed_at_shopify: string | null; created_at_shopify: string };
 type PaymentFeeRuleRow = { gateway: string; percentage_rate: string; fixed_fee: string; tax_rate: string; minimum_fee: string; currency: string; effective_from: string; effective_to: string | null };
 type ProductShippingCostRow = ProductShippingCost & { currency: string };
+type StoreCostDefault = { fulfilment_amount: string; fulfilment_basis: "orders" | "units"; postage_amount: string; postage_basis: "orders" | "units"; currency: string };
 type CustomCost = { name: string; category: string; amount: string; currency: string; cadence: "one_off" | "daily" | "weekly" | "monthly" | "annual"; allocation_basis: "fixed" | "orders" | "units" | "revenue"; effective_from: string; effective_to: string | null };
 type MetaInsight = { date_start: string; spend: string; currency: string };
 
@@ -77,7 +78,7 @@ export async function GET(request: Request) {
   const orderIds = includedOrders.map((order) => order.id);
   const orderChunks = chunks(orderIds, 500);
 
-  const [lineResults, refundResults, transactionResults, variantResult, costResult, operatingCostResult, paymentFeeRuleResult, productShippingCostResult] = await Promise.all([
+  const [lineResults, refundResults, transactionResults, variantResult, costResult, operatingCostResult, paymentFeeRuleResult, productShippingCostResult, storeCostDefaultResult] = await Promise.all([
     Promise.all(orderChunks.map((ids) => supabase.from("shopify_order_lines").select("order_id,variant_gid,sku,current_quantity").in("order_id", ids))),
     Promise.all(orderChunks.map((ids) => supabase.from("shopify_refunds").select("order_id,total_refunded").in("order_id", ids))),
     Promise.all(orderChunks.map((ids) => supabase.from("shopify_transactions").select("order_id,fee_amount,fee_tax,currency,status,gateway,amount,processed_at_shopify,created_at_shopify").in("order_id", ids))),
@@ -86,8 +87,9 @@ export async function GET(request: Request) {
     supabase.from("custom_costs").select("name,category,amount,currency,cadence,allocation_basis,effective_from,effective_to").eq("store_id", store.id),
     supabase.from("payment_fee_rules").select("gateway,percentage_rate,fixed_fee,tax_rate,minimum_fee,currency,effective_from,effective_to").eq("store_id", store.id),
     supabase.from("product_shipping_costs").select("id,variant_id,sku,amount,allocation_basis,currency,effective_from,effective_to").eq("store_id", store.id),
+    supabase.from("store_cost_defaults").select("fulfilment_amount,fulfilment_basis,postage_amount,postage_basis,currency").eq("store_id", store.id).maybeSingle(),
   ]);
-  const allResults = [...lineResults, ...refundResults, ...transactionResults, variantResult, costResult, operatingCostResult, paymentFeeRuleResult, productShippingCostResult];
+  const allResults = [...lineResults, ...refundResults, ...transactionResults, variantResult, costResult, operatingCostResult, paymentFeeRuleResult, productShippingCostResult, storeCostDefaultResult];
   const fetchError = allResults.find((result) => result.error)?.error;
   if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 });
   const lines = lineResults.flatMap((result) => result.data ?? []) as Line[];
@@ -125,6 +127,19 @@ export async function GET(request: Request) {
       if (!chargedOrderRules.has(chargeKey)) { variantShippingCosts += monetary(rule.amount); chargedOrderRules.add(chargeKey); }
     }
   }
+
+  const storeCostDefault = storeCostDefaultResult.data as StoreCostDefault | null;
+  const usableStoreCostDefault = storeCostDefault?.currency === store.currency ? storeCostDefault : null;
+  const uncoveredShippingLines = lines.filter((line) => !shippingRuleByLine.has(line));
+  const uncoveredShippingOrderCount = new Set(uncoveredShippingLines.map((line) => line.order_id)).size;
+  const uncoveredShippingUnits = uncoveredShippingLines.reduce((total, line) => total + Math.max(line.current_quantity, 0), 0);
+  const defaultPostageCosts = usableStoreCostDefault
+    ? monetary(usableStoreCostDefault.postage_amount) * (usableStoreCostDefault.postage_basis === "orders" ? uncoveredShippingOrderCount : uncoveredShippingUnits)
+    : 0;
+  const totalOrderUnits = lines.reduce((total, line) => total + Math.max(line.current_quantity, 0), 0);
+  const defaultFulfilmentCosts = usableStoreCostDefault
+    ? monetary(usableStoreCostDefault.fulfilment_amount) * (usableStoreCostDefault.fulfilment_basis === "orders" ? includedOrders.length : totalOrderUnits)
+    : 0;
 
   let cogs = 0;
   let missingCostLines = 0;
@@ -200,10 +215,10 @@ export async function GET(request: Request) {
 
   let fixedOperatingExpenses = 0;
   let variableOperatingExpenses = 0;
-  let merchantShippingCosts = variantShippingCosts;
-  let handlingCosts = 0;
-  let shippingCostsAvailable = false;
-  let handlingCostsAvailable = false;
+  let merchantShippingCosts = variantShippingCosts + defaultPostageCosts;
+  let handlingCosts = defaultFulfilmentCosts;
+  let shippingCostsAvailable = Boolean(usableStoreCostDefault);
+  let handlingCostsAvailable = Boolean(usableStoreCostDefault);
   let unallocatedOperatingCosts = 0;
   for (const cost of (operatingCostResult.data ?? []) as CustomCost[]) {
     if (!rangeStart || !rangeEnd || cost.currency !== store.currency) {
@@ -244,11 +259,11 @@ export async function GET(request: Request) {
   const shippingCoverage = summarizeShippingCoverage(lines.map((line): ShippingCoverage => {
     if (shippingRuleByLine.has(line)) return "override";
     const orderDate = ordersById.get(line.order_id)?.processed_at?.slice(0, 10);
-    const hasFallback = Boolean(orderDate && defaultShippingCosts.some((cost) => cost.effective_from <= orderDate && (cost.cadence !== "one_off" || cost.effective_from === orderDate) && (!cost.effective_to || cost.effective_to >= orderDate)));
+    const hasFallback = Boolean(usableStoreCostDefault || (orderDate && defaultShippingCosts.some((cost) => cost.effective_from <= orderDate && (cost.cadence !== "one_off" || cost.effective_from === orderDate) && (!cost.effective_to || cost.effective_to >= orderDate))));
     return hasFallback ? "fallback" : "missing";
   }));
   const shippingFallbackCosts = merchantShippingCosts - variantShippingCosts;
-  shippingCostsAvailable = lines.length > 0 ? shippingCoverage.missingLines === 0 : defaultShippingCosts.length > 0;
+  shippingCostsAvailable = lines.length > 0 ? shippingCoverage.missingLines === 0 : Boolean(usableStoreCostDefault || defaultShippingCosts.length > 0);
   const netProfitAvailable = marketingSpendAvailable && shippingCostsAvailable && handlingCostsAvailable && missingCostLines === 0 && unallocatedOperatingCosts === 0;
   const calculated = calculateProfitAndLoss({ ...totals, refunds, cogs, marketingSpend, transactionFees, merchantShippingCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, complete: netProfitAvailable });
 

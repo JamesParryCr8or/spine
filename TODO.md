@@ -21,8 +21,8 @@
 
 ### Product direction: store costs, brands, and lead generation
 
-- [ ] Add store-level cost defaults for fulfilment and postage, each configurable as a cost per order or cost per unit.
-- [ ] Apply those defaults to profit reporting when a product-level shipping override is absent.
+- [x] Add store-level cost defaults for fulfilment and postage, each configurable as a cost per order or cost per unit.
+- [x] Apply those defaults to P&L reporting when a product-level shipping override is absent; extend the same allocation into product-level reporting next.
 - [ ] Discover Shopify shipping methods from imported orders and optionally map a cost to each method, with the static postage default as fallback.
 - [x] Identify synced Shopify variants that have no active override and no Shopify unit cost.
 - [x] Export the missing-COGS list as a CSV or Excel template that can be edited and imported again.
