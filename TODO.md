@@ -679,3 +679,10 @@ Build one thin end-to-end path before implementing every connector:
 8. Reconcile all totals and add fixtures before widening scope.
 
 
+
+
+## Latest reporting polish
+
+- [x] Keep UTM channel labels to a readable width in the report table.
+- [x] Use white, dark-text search fields across analytics screens.
+- [x] Repair Cost Engine order-date lookup so imported variants and COGS coverage load again.

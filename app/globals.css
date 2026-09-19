@@ -125,3 +125,11 @@ button { cursor:pointer; }
 .finance-tooltip b{color:#273249}
 .finance-tooltip .tooltip-profit{border-top:1px solid #eceff4;padding-top:7px;margin-top:2px;color:#138860;font-weight:800}
 @media(max-width:900px){.finance-chart-panel .panel-head{align-items:flex-start;flex-direction:column}.finance-legend{justify-content:flex-start}.finance-chart{overflow-x:auto}.finance-chart svg{min-width:760px}.finance-date-controls label,.finance-date-controls label:first-child select{width:100%}.finance-date-controls input[type="date"],.finance-date-controls select{width:100%}}
+
+/* Keep reporting filters legible regardless of the surrounding page theme. */
+.search { background: #fff; }
+.search input { background: #fff; color: #111827; }
+.search input::placeholder { color: #6b7280; opacity: 1; }
+/* Long attribution labels should not stretch the report past its useful width. */
+.utm-table th:first-child, .utm-table td:first-child { width: 60ch; max-width: 60ch; }
+.utm-table td:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
