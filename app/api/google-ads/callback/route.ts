@@ -7,7 +7,7 @@ const stateCookie = "spine-google-ads-oauth-state";
 type GoogleTokenResponse = { access_token?: string; refresh_token?: string; error?: string; error_description?: string };
 type AccessibleCustomersResponse = { resourceNames?: string[]; error?: { message?: string } };
 type GoogleAdsAccount = { customer_id: string; name: string; is_manager: boolean; hierarchy_level: number; direct_access: boolean };
-type SearchStreamResponse = Array<{ results?: Array<{ customer?: { id?: string; descriptiveName?: string; manager?: boolean }; customerClient?: { id?: string; descriptiveName?: string; manager?: boolean; level?: number; status?: string } }> }>;
+type SearchStreamResponse = Array<{ results?: Array<{ customer?: { id?: string; descriptiveName?: string; manager?: boolean }; customerClient?: { id?: string; descriptiveName?: string; manager?: boolean; level?: number; status?: string } }> }> & { error?: { message?: string } };
 
 function fail(request: Request, message: string) {
   const url = new URL("/protected", request.url);
@@ -78,9 +78,11 @@ export async function GET(request: Request) {
   if (!directCustomerIds.length) return fail(request, "No directly accessible Google Ads accounts were found for this Google user");
 
   const accountMap = new Map<string, GoogleAdsAccount>();
+  const discoveryErrors: string[] = [];
   for (const customerId of directCustomerIds) {
     const root = await search(token.access_token, developerToken, customerId, "SELECT customer.id, customer.descriptive_name, customer.manager FROM customer LIMIT 1");
     const rootCustomer = root.payload[0]?.results?.[0]?.customer;
+    if (!root.response.ok) discoveryErrors.push(root.payload.error?.message ?? "Google Ads did not allow account details to be read");
     const isManager = Boolean(rootCustomer?.manager);
     accountMap.set(customerId, {
       customer_id: customerId,
@@ -92,7 +94,7 @@ export async function GET(request: Request) {
 
     if (!isManager) continue;
     const children = await search(token.access_token, developerToken, customerId, "SELECT customer_client.id, customer_client.descriptive_name, customer_client.manager, customer_client.level, customer_client.status FROM customer_client WHERE customer_client.status = 'ENABLED'", customerId);
-    if (!children.response.ok) continue;
+    if (!children.response.ok) { discoveryErrors.push(children.payload.error?.message ?? "Google Ads did not allow the MCC client accounts to be read"); continue; }
     for (const row of children.payload.flatMap((page) => page.results ?? [])) {
       const child = row.customerClient;
       if (!child?.id) continue;
@@ -128,7 +130,9 @@ export async function GET(request: Request) {
   })), { onConflict: "store_id,customer_id" });
   if (accountError) return fail(request, "Google Ads was authorized but Spine could not save the account list");
 
-  const response = NextResponse.redirect(new URL("/protected?googleAds=select", request.url));
+  const nextUrl = new URL("/protected?googleAds=select", request.url);
+  if (discoveryErrors.length) nextUrl.searchParams.set("googleAdsError", discoveryErrors[0]);
+  const response = NextResponse.redirect(nextUrl);
   response.cookies.set(stateCookie, "", { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 0 });
   return response;
 }
