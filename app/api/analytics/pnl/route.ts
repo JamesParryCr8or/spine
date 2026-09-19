@@ -25,7 +25,7 @@ type GoogleInsight = { insight_date: string; spend: string; currency: string };
 type ShopifyDaily = {
   sales_date: string; gross_sales: string; discounts: string; sales_reversals: string;
   net_sales: string; shipping_charges: string; taxes: string; total_sales: string;
-  orders: number; total_payment_fees: string; cost_of_goods_sold: string; net_sales_without_cost_recorded: string;
+  orders: number; net_items_sold: number; total_payment_fees: string; cost_of_goods_sold: string; net_sales_without_cost_recorded: string;
 };
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -67,7 +67,7 @@ export async function GET(request: Request) {
 
   let dailyQuery = supabase
     .from("shopify_sales_daily")
-    .select("sales_date,gross_sales,discounts,sales_reversals,net_sales,shipping_charges,taxes,total_sales,orders,total_payment_fees,cost_of_goods_sold,net_sales_without_cost_recorded")
+    .select("sales_date,gross_sales,discounts,sales_reversals,net_sales,shipping_charges,taxes,total_sales,orders,net_items_sold,total_payment_fees,cost_of_goods_sold,net_sales_without_cost_recorded")
     .eq("store_id", store.id)
     .order("sales_date", { ascending: true });
   if (fromDate) dailyQuery = dailyQuery.gte("sales_date", fromDate);
