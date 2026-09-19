@@ -240,15 +240,14 @@ export async function GET(request: Request) {
     googleInsights.push(...((googleResult.data ?? []) as GoogleInsight[]));
   }
   const marketingCurrencyCoverage = createCurrencyConversionCoverage(store.currency);
-  const marketingRows = [
-    ...metaInsights.map((insight) => ({ date: insight.date_start, spend: insight.spend, currency: insight.currency })),
-    ...googleInsights.map((insight) => ({ date: insight.insight_date, spend: insight.spend, currency: insight.currency })),
-  ];
-  const marketingSpend = marketingRows.reduce((total, insight) => {
+  const convertedMarketingSpend = (rows: Array<{ date: string; spend: string; currency: string }>) => rows.reduce((total, insight) => {
     const exchangeRate = resolveDatedExchangeRate(exchangeRates, insight.currency, store.currency, insight.date);
     if (!marketingCurrencyCoverage.include(insight.currency, exchangeRate)) return total;
     return total + convertDatedAmount(monetary(insight.spend), exchangeRate ?? 1, store.currency);
   }, 0);
+  const metaMarketingSpend = convertedMarketingSpend(metaInsights.map((insight) => ({ date: insight.date_start, spend: insight.spend, currency: insight.currency })));
+  const googleMarketingSpend = convertedMarketingSpend(googleInsights.map((insight) => ({ date: insight.insight_date, spend: insight.spend, currency: insight.currency })));
+  const marketingSpend = metaMarketingSpend + googleMarketingSpend;
   const marketingCoverage = marketingCurrencyCoverage.summary();
   const marketingSpendAvailable = marketingCoverage.includedRows > 0 && marketingCoverage.excludedRows === 0;
 
@@ -313,9 +312,9 @@ export async function GET(request: Request) {
     currencyCoverage: currencyCoverage.summary(),
     marketingCurrencyCoverage: marketingCoverage,
     calculatedAt: new Date().toISOString(),
-    metrics: { ...totals, refunds, cogs, ...calculated, marketingSpend, transactionFees, merchantShippingCosts, variantShippingCosts, shippingFallbackCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, orders: shopifyDaily.length ? shopifyDaily.reduce((total, day) => total + day.orders, 0) : includedOrders.length, missingCostLines, missingShippingLines: shippingCoverage.missingLines, shippingOverrideLines: shippingCoverage.overrideLines, shippingFallbackLines: shippingCoverage.fallbackLines, shippingFallbackRate: shippingCoverage.fallbackRate, unallocatedOperatingCosts },
+    metrics: { ...totals, refunds, cogs, ...calculated, marketingSpend, metaMarketingSpend, googleMarketingSpend, transactionFees, merchantShippingCosts, variantShippingCosts, shippingFallbackCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, orders: shopifyDaily.length ? shopifyDaily.reduce((total, day) => total + day.orders, 0) : includedOrders.length, missingCostLines, missingShippingLines: shippingCoverage.missingLines, shippingOverrideLines: shippingCoverage.overrideLines, shippingFallbackLines: shippingCoverage.fallbackLines, shippingFallbackRate: shippingCoverage.fallbackRate, unallocatedOperatingCosts },
     period: rangeStart && rangeEnd ? { start: rangeStart, end: rangeEnd } : null,
-    availability: { marketingSpend: marketingSpendAvailable, transactionFees: transactionFeesAvailable, shippingCosts: shippingCostsAvailable, handlingCosts: handlingCostsAvailable, operatingExpenses: true, netProfit: netProfitAvailable },
+    availability: { marketingSpend: marketingSpendAvailable, metaMarketingSpend: metaInsights.length > 0, googleMarketingSpend: googleInsights.length > 0, transactionFees: transactionFeesAvailable, shippingCosts: shippingCostsAvailable, handlingCosts: handlingCostsAvailable, operatingExpenses: true, netProfit: netProfitAvailable },
   });
 }
 

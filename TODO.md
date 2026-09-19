@@ -36,6 +36,7 @@
 
 - [x] Refresh the selected reporting window from ShopifyQL so P&L and Overview use current daily Shopify totals.
 - [x] Import daily Meta and Google Ads spend and combine both sources in the selected P&L period.
+- [x] Split Meta and Google Ads into separate P&L rows while retaining the combined marketing total.
 
 
 - [x] Add regression tests for Shopify import recovery, retry limits, permanent failures, and sanitized errors; run them in GitHub Actions.
