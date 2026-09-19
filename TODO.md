@@ -34,6 +34,10 @@
 
 ### Latest continuation
 
+- [x] Refresh the selected reporting window from ShopifyQL so P&L and Overview use current daily Shopify totals.
+- [x] Import daily Meta and Google Ads spend and combine both sources in the selected P&L period.
+
+
 - [x] Add regression tests for Shopify import recovery, retry limits, permanent failures, and sanitized errors; run them in GitHub Actions.
 - [ ] Verify retry behavior against a live Shopify store; automated coverage currently uses simulated upstream responses.
 - [x] Fix dashboard lint failures in `components/analytics-app.tsx`: avoid synchronous state updates in effects, update the stale-import clock outside rendering, complete effect dependencies, and remove the unused report deletion path.
@@ -672,3 +676,5 @@ Build one thin end-to-end path before implementing every connector:
 6. Render the overview KPI cards, one trend chart, and the P&L table.
 7. Export that exact report to CSV.
 8. Reconcile all totals and add fixtures before widening scope.
+
+
