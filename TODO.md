@@ -19,6 +19,19 @@
 - [x] Added owner/admin-managed recurring operating expenses with tenant-protected storage.
 - [x] Added a production GitHub Actions verification workflow for linting, type checking, Shopify retry tests, and the Next.js build.
 
+### Product direction: store costs, brands, and lead generation
+
+- [ ] Add store-level cost defaults for fulfilment and postage, each configurable as a cost per order or cost per unit.
+- [ ] Apply those defaults to profit reporting when a product-level shipping override is absent.
+- [ ] Discover Shopify shipping methods from imported orders and optionally map a cost to each method, with the static postage default as fallback.
+- [x] Identify synced Shopify variants that have no active override and no Shopify unit cost.
+- [x] Export the missing-COGS list as a CSV or Excel template that can be edited and imported again.
+- [x] Keep imported COGS as effective-dated store data until an owner or admin changes it.
+- [ ] Add brand management so an account can create, rename, and select multiple brands; each brand owns its Shopify, Meta, Google Ads, Klaviyo, and future GoHighLevel connections.
+- [ ] Add an ecommerce / lead-generation operating mode per brand.
+- [ ] Add a GoHighLevel connection and sync contacts, opportunities, pipelines, and pipeline stages.
+- [ ] Add lead-generation reporting for cost per lead, cost per booked call, and stage conversion by channel and campaign.
+
 ### Latest continuation
 
 - [x] Add regression tests for Shopify import recovery, retry limits, permanent failures, and sanitized errors; run them in GitHub Actions.

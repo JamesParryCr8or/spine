@@ -982,7 +982,8 @@ function Costs({ focusSku }: { focusSku?: string | null }) {
       const cells = parseCsvLine(line);
       const row = Object.fromEntries(headers.map((header, index) => [header, cells[index] ?? ""]));
       return { sku: row.sku, amount: row.amount, currency: row.currency || currency, effectiveFrom: row.effective_from, effectiveTo: row.effective_to || null, notes: row.notes || null };
-    });
+    }).filter((item) => item.sku && item.amount);
+    if (!items.length) { setError("Add a cost amount beside at least one SKU before importing the template"); return; }
     await saveItems(items, "csv", file.name);
   };
 
@@ -996,14 +997,21 @@ function Costs({ focusSku }: { focusSku?: string | null }) {
     return records.length > 0 && !currentCosts.has(key) && !currentCosts.has(skuKey) && records.some((cost) => Boolean(cost.effective_to && cost.effective_to < currentDate));
   }).length;
   const covered = variants.filter((variant) => currentCosts.has(variant.id) || (variant.sku && currentCosts.has(`sku:${variant.sku.toLowerCase()}`)) || variant.shopify_unit_cost !== null).length;
+  const missingVariants = variants.filter((variant) => !currentCosts.has(variant.id) && (!variant.sku || !currentCosts.has(`sku:${variant.sku.toLowerCase()}`)) && variant.shopify_unit_cost === null);
   const coverage = variants.length ? Math.round((covered / variants.length) * 100) : 0;
   const variantMap = new Map(variants.map((variant) => [variant.id, variant]));
+  const missingCostRows: Array<Array<string | number>> = [
+    ["product", "variant", "sku", "amount", "currency", "effective_from", "effective_to", "notes"],
+    ...missingVariants.map((variant) => [variant.productTitle, variant.title, variant.sku ?? "", "", variant.currency || currency, currentDate, "", ""]),
+  ];
+  const exportMissingCsv = () => downloadCsv("missing-product-cogs.csv", missingCostRows);
+  const exportMissingXlsx = () => downloadXlsx("missing-product-cogs.xlsx", missingCostRows, { sheetName: "Missing COGS", headerRow: 1, columnStyles: { 4: "currency" } });
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency, minimumFractionDigits: 2 });
 
   return <>
     <section className="cost-toolbar">
       <div><span className="eyebrow">COST ENGINE</span><h2>Product cost history</h2><p>Costs apply from their effective date, so future changes do not rewrite historical profit.</p></div>
-      <div className="feature-actions"><button className="primary" disabled={!canEdit} onClick={()=>setShowAdd(true)}><Plus/> Add product cost</button><button disabled={!canEdit} onClick={() => setShowAddShipping(true)}><Plus/> Add shipping override</button><label className={canEdit?"csv-button":"csv-button disabled"}><Upload/> Import CSV<input type="file" accept=".csv,text/csv" disabled={!canEdit || saving} onChange={(event)=>{const file=event.target.files?.[0];if(file) void importCsv(file);event.target.value="";}}/></label></div>
+      <div className="feature-actions"><button className="primary" disabled={!canEdit} onClick={()=>setShowAdd(true)}><Plus/> Add product cost</button><button disabled={!canEdit} onClick={() => setShowAddShipping(true)}><Plus/> Add shipping override</button><button disabled={missingVariants.length === 0} onClick={exportMissingCsv}><Download/> Missing COGS CSV</button><button disabled={missingVariants.length === 0} onClick={exportMissingXlsx}><Download/> Missing COGS Excel</button><label className={canEdit?"csv-button":"csv-button disabled"}><Upload/> Import CSV<input type="file" accept=".csv,text/csv" disabled={!canEdit || saving} onChange={(event)=>{const file=event.target.files?.[0];if(file) void importCsv(file);event.target.value="";}}/></label></div>
     </section>
     {error && <div className="connection-error cost-error">{error}</div>}
     <section className="cost-grid live"><div><strong>{variants.length.toLocaleString()}</strong><span>Variants synced</span></div><div><strong>{coverage}%</strong><span>Current cost coverage</span></div><div><strong>{Math.max(variants.length-covered,0).toLocaleString()}</strong><span>Missing costs</span></div><div><strong>{costs.length.toLocaleString()}</strong><span>Cost records</span></div></section>
