@@ -36,6 +36,33 @@ const default365DayRange = (() => {
   return { from: start.toISOString().slice(0, 10), to: end.toISOString().slice(0, 10) };
 })();
 
+type FinanceDatePreset = "today" | "yesterday" | "last_7_days" | "last_7_complete_days" | "last_30_days" | "last_30_complete_days" | "last_90_days" | "last_365_days" | "this_month" | "last_month" | "all_imported" | "custom";
+
+function financeDateRange(preset: FinanceDatePreset) {
+  const today = new Date();
+  const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  const iso = (date: Date) => date.toISOString().slice(0, 10);
+  const rangeEnding = (days: number, endDate = end) => {
+    const start = new Date(endDate);
+    start.setUTCDate(start.getUTCDate() - days + 1);
+    return { from: iso(start), to: iso(endDate) };
+  };
+  if (preset === "all_imported" || preset === "custom") return { from: "", to: "" };
+  if (preset === "today") return { from: iso(end), to: iso(end) };
+  if (preset === "yesterday") { const day = new Date(end); day.setUTCDate(day.getUTCDate() - 1); return { from: iso(day), to: iso(day) }; }
+  if (preset === "last_7_complete_days" || preset === "last_30_complete_days") {
+    const yesterday = new Date(end); yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+    return rangeEnding(preset === "last_7_complete_days" ? 7 : 30, yesterday);
+  }
+  if (preset === "this_month") return { from: iso(new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1))), to: iso(end) };
+  if (preset === "last_month") {
+    const lastDay = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 0));
+    return { from: iso(new Date(Date.UTC(lastDay.getUTCFullYear(), lastDay.getUTCMonth(), 1))), to: iso(lastDay) };
+  }
+  const days = preset === "last_7_days" ? 7 : preset === "last_30_days" ? 30 : preset === "last_90_days" ? 90 : 365;
+  return rangeEnding(days);
+}
+
 const nav: { label: View; icon: typeof LayoutDashboard; section?: string }[] = [
   { label: "Overview", icon: LayoutDashboard },
   { label: "Profit & Loss", icon: FileBarChart, section: "REPORTING" },
@@ -72,6 +99,55 @@ const utms = [
 function Trend({ positive = true, children }: { positive?: boolean; children: React.ReactNode }) {
   const Icon = positive ? ArrowUpRight : ArrowDownRight;
   return <span className={positive ? "trend up" : "trend down"}><Icon />{children}</span>;
+}
+
+type FinanceTrendPoint = {
+  label: string; start: string; end: string; revenue: number; profit: number; complete: boolean;
+  cogs: number; marketing: number; paymentFees: number; shipping: number; operating: number;
+};
+
+function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrendPoint[]; formatter: Intl.NumberFormat; onOpen: (point: FinanceTrendPoint) => void }) {
+  const [hovered, setHovered] = useState<number | null>(null);
+  if (!points.length) return <div className="cost-empty"><BarChart3/><strong>No trend data in this period</strong></div>;
+  const width = 920, height = 330, left = 58, right = 18, top = 18, zeroY = 164, bottom = 292;
+  const plotWidth = width - left - right;
+  const step = plotWidth / points.length;
+  const positiveMax = Math.max(...points.flatMap((point) => [point.revenue, point.profit, 1]));
+  const negativeMax = Math.max(...points.map((point) => point.cogs + point.marketing + point.paymentFees + point.shipping + point.operating), ...points.map((point) => Math.max(-point.profit, 0)), 1);
+  const y = (value: number) => value >= 0 ? zeroY - value / positiveMax * (zeroY - top) : zeroY + Math.abs(value) / negativeMax * (bottom - zeroY);
+  const line = points.map((point, index) => `${left + step * index + step / 2},${y(point.profit)}`).join(" ");
+  const costColors = ["#f59e0b", "#ef6c63", "#a855f7", "#3b82f6", "#64748b"];
+  const active = hovered === null ? null : points[hovered];
+  return <div className="finance-chart">
+    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Revenue, costs and profit over time">
+      <line x1={left} x2={width-right} y1={zeroY} y2={zeroY} className="finance-zero"/>
+      {[0.25,0.5,0.75,1].map((ratio) => <line key={ratio} x1={left} x2={width-right} y1={zeroY-(zeroY-top)*ratio} y2={zeroY-(zeroY-top)*ratio} className="finance-grid"/>)}
+      {points.map((point,index) => {
+        const center = left + step * index + step / 2;
+        const barWidth = Math.min(30, step * .44);
+        const revenueTop = y(point.revenue);
+        const costs = [point.cogs, point.marketing, point.paymentFees, point.shipping, point.operating];
+        let currentY = zeroY;
+        return <g key={`${point.start}-${index}`} onMouseEnter={() => setHovered(index)} onMouseLeave={() => setHovered(null)} onFocus={() => setHovered(index)} onBlur={() => setHovered(null)} onClick={() => onOpen(point)} tabIndex={0} role="button" aria-label={`${point.label}: revenue ${formatter.format(point.revenue)}, costs ${formatter.format(costs.reduce((sum,value)=>sum+value,0))}, profit ${formatter.format(point.profit)}`}>
+          <rect x={center-barWidth/2} y={revenueTop} width={barWidth} height={Math.max(zeroY-revenueTop,1)} rx="4" className="finance-revenue"/>
+          {costs.map((cost,costIndex) => {
+            const segmentHeight = cost / negativeMax * (bottom-zeroY);
+            const rect = <rect key={costIndex} x={center-barWidth/2} y={currentY} width={barWidth} height={Math.max(segmentHeight,0)} fill={costColors[costIndex]} />;
+            currentY += segmentHeight;
+            return rect;
+          })}
+          <rect x={center-step/2} y={top} width={step} height={bottom-top+20} fill="transparent"/>
+          <text x={center} y={318} textAnchor="middle" className="finance-label">{point.label}</text>
+        </g>;
+      })}
+      <polyline points={line} className="finance-profit-line"/>
+      {points.map((point,index) => <circle key={point.start} cx={left+step*index+step/2} cy={y(point.profit)} r={hovered===index?5:3.5} className="finance-profit-dot"/>)}
+      <text x={8} y={top+5} className="finance-axis-label">{formatter.format(positiveMax)}</text>
+      <text x={8} y={zeroY+4} className="finance-axis-label">0</text>
+      <text x={8} y={bottom} className="finance-axis-label">-{formatter.format(negativeMax)}</text>
+    </svg>
+    {active ? <div className="finance-tooltip"><strong>{active.label}</strong><span>Revenue <b>{formatter.format(active.revenue)}</b></span><span>COGS <b>-{formatter.format(active.cogs)}</b></span><span>Marketing <b>-{formatter.format(active.marketing)}</b></span><span>Payment fees <b>-{formatter.format(active.paymentFees)}</b></span><span>Shipping & handling <b>-{formatter.format(active.shipping)}</b></span><span>Operating costs <b>-{formatter.format(active.operating)}</b></span><span className="tooltip-profit">{active.complete ? "Net profit" : "Provisional profit"} <b>{formatter.format(active.profit)}</b></span></div> : null}
+  </div>;
 }
 
 function downloadCsv(filename: string, rows: Array<Array<string | number>>) {
@@ -122,8 +198,9 @@ function Overview({ reportRunId, onDrilldown }: { reportRunId?: string; onDrilld
   const [overviewProducts, setOverviewProducts] = useState<ProductData | null>(null);
   const [overviewCustomers, setOverviewCustomers] = useState<CustomerData | null>(null);
   const [overviewUtm, setOverviewUtm] = useState<UtmData | null>(null);
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
+  const [fromDate, setFromDate] = useState(default365DayRange.from);
+  const [toDate, setToDate] = useState(default365DayRange.to);
+  const [datePreset, setDatePreset] = useState<FinanceDatePreset>("last_365_days");
   const [granularity, setGranularity] = useState<ReportingGranularity>("monthly");
   const [trendData, setTrendData] = useState<PnlPeriodData[]>([]);
   const [trendLoading, setTrendLoading] = useState(false);
@@ -237,16 +314,18 @@ function Overview({ reportRunId, onDrilldown }: { reportRunId?: string; onDrilld
     { label: "Contribution margin", value: pnlSummary?.availability.marketingSpend && pnlSummary.availability.shippingCosts && pnlSummary.availability.handlingCosts ? formatter.format(pnlSummary.metrics.contributionMargin) : "—", ...moneyDelta(pnlSummary?.availability.marketingSpend && pnlSummary.availability.shippingCosts && pnlSummary.availability.handlingCosts ? pnlSummary.metrics.contributionMargin : null, pnlComparison?.availability.marketingSpend && pnlComparison.availability.shippingCosts && pnlComparison.availability.handlingCosts ? pnlComparison.metrics.contributionMargin : null, "After variable direct costs"), hint: pnlSummary?.availability.shippingCosts && pnlSummary?.availability.handlingCosts ? "Shipping and handling included" : "Complete shipping and handling costs" },
     { label: "Net profit", value: pnlSummary?.availability.netProfit && pnlSummary.metrics.netProfit !== null ? formatter.format(pnlSummary.metrics.netProfit) : "—", ...moneyDelta(pnlSummary?.availability.netProfit ? pnlSummary.metrics.netProfit : null, pnlComparison?.availability.netProfit ? pnlComparison.metrics.netProfit : null, "After known operating costs"), hint: pnlSummary?.availability.netProfit ? `${pnlSummary.metrics.netMargin === null ? "—" : `${(pnlSummary.metrics.netMargin * 100).toFixed(1)}%`} net margin` : "Complete cost coverage" },
   ] : demoMetrics;
-  const trendSeries = trendData.map(({ period, data }) => {
+  const trendSeries: FinanceTrendPoint[] = trendData.map(({ period, data }) => {
     const reportRevenue = data.metrics.netProductSales - data.metrics.refunds;
     const reportProfit = data.metrics.netProfit ?? data.metrics.profitAfterMarketingSpend;
-    return { label: period.label, start: period.start, end: period.end, revenue: reportRevenue, costs: reportRevenue - reportProfit, profit: reportProfit, complete: data.availability.netProfit };
+    return {
+      label: period.label, start: period.start, end: period.end, revenue: reportRevenue, profit: reportProfit, complete: data.availability.netProfit,
+      cogs: data.metrics.cogs,
+      marketing: data.metrics.marketingSpend,
+      paymentFees: data.metrics.transactionFees,
+      shipping: data.metrics.merchantShippingCosts + data.metrics.handlingCosts,
+      operating: data.metrics.operatingExpenses,
+    };
   });
-  const chartMonths = trendSeries.length ? trendSeries.map((point) => point.label) : hasLiveData ? liveData!.months.map((month) => month.label) : months;
-  const chartRevenue = trendSeries.length ? trendSeries.map((point) => point.revenue) : hasLiveData ? liveData!.months.map((month) => month.netSales) : revenue;
-  const chartCosts = trendSeries.length ? trendSeries.map((point) => point.costs) : hasLiveData ? liveData!.months.map((month) => month.shippingRevenue) : spend;
-  const chartProfit = trendSeries.length ? trendSeries.map((point) => point.profit) : hasLiveData ? liveData!.months.map((month) => month.grossSales) : profit;
-  const chartMaximum = Math.max(...chartRevenue, ...chartCosts, ...chartProfit, 1);
   const channelPalette = ["#7357ff", "#18b981", "#ff9f43", "#37a3ff", "#e85d75"];
   const channelMap = new Map<string, { sales: number; orders: number }>();
   for (const row of overviewUtm?.rows ?? []) {
@@ -313,8 +392,15 @@ function Overview({ reportRunId, onDrilldown }: { reportRunId?: string; onDrilld
   const toggleWidget = (id: OverviewWidgetId) => setWidgetPreferences((current) => ({ ...current, hidden: current.hidden.includes(id) ? current.hidden.filter((item) => item !== id) : [...current.hidden, id] }));
   const resetWidgets = () => setWidgetPreferences({ order: [...overviewWidgetIds], hidden: [] });
 
+  const applyDatePreset = (preset: FinanceDatePreset) => {
+    setDatePreset(preset);
+    if (preset === "custom") return;
+    const range = financeDateRange(preset);
+    setLoading(true); setFromDate(range.from); setToDate(range.to);
+  };
+
   return <>
-    <section className="filter-row pnl-period"><label>From<input type="date" value={fromDate} onChange={(event) => { setLoading(true); setFromDate(event.target.value); }}/></label><label>To<input type="date" value={toDate} onChange={(event) => { setLoading(true); setToDate(event.target.value); }}/></label><select aria-label="Overview trend granularity" value={granularity} onChange={(event) => setGranularity(event.target.value as ReportingGranularity)}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select>{fromDate && toDate ? <span className="report-note">Comparing with the immediately preceding equal-length period.</span> : <span className="report-note">Select both dates to compare the previous period.</span>}{(fromDate || toDate) && <button onClick={() => { setLoading(true); setFromDate(""); setToDate(""); }}>All imported data</button>}</section>
+    <section className="filter-row pnl-period finance-date-controls"><label>Period<select aria-label="Date period" value={datePreset} onChange={(event) => applyDatePreset(event.target.value as FinanceDatePreset)}><option value="last_7_days">Last 7 days (today)</option><option value="last_7_complete_days">Last 7 complete days</option><option value="last_30_days">Last 30 days (today)</option><option value="last_30_complete_days">Last 30 complete days</option><option value="last_90_days">Last 90 days</option><option value="last_365_days">Last 365 days</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="this_month">This month</option><option value="last_month">Last month</option><option value="all_imported">All imported data</option><option value="custom">Custom dates</option></select></label><label>From<input type="date" value={fromDate} onChange={(event) => { setDatePreset("custom"); setLoading(true); setFromDate(event.target.value); }}/></label><label>To<input type="date" value={toDate} onChange={(event) => { setDatePreset("custom"); setLoading(true); setToDate(event.target.value); }}/></label><label>Group by<select aria-label="Overview trend granularity" value={granularity} onChange={(event) => setGranularity(event.target.value as ReportingGranularity)}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></label>{fromDate && toDate ? <span className="report-note">Compared with the immediately preceding period.</span> : null}</section>
     {loading || trendLoading ? <div className="data-loading">{loading ? "Loading your Shopify summary…" : "Calculating trend periods…"}</div> : !hasLiveData && liveData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to start your live dashboard</strong><span>The figures below are a preview. Your own sales and orders will appear after the first sync.</span></div></div> : null}{liveData?.currencyCoverage.convertedOrders ? <div className="connection-notice"><Info/><div><strong>{liveData.currencyCoverage.convertedOrders.toLocaleString()} orders converted to {liveData.currency}</strong><span>Historical rates applied: {liveData.currencyCoverage.convertedCurrencies.map((item) => `${item.currency} (${item.orders.toLocaleString()})`).join(", ")}.</span></div></div> : null}{liveData?.currencyCoverage.excludedOrders ? <div className="connection-notice"><Info/><div><strong>{liveData.currencyCoverage.excludedOrders.toLocaleString()} orders excluded from financial totals</strong><span>Reporting currency is {liveData.currency}. Excluded: {liveData.currencyCoverage.excludedCurrencies.map((item) => `${item.currency} (${item.orders.toLocaleString()})`).join(", ")}. Add explicit exchange rates before consolidating these orders.</span></div></div> : null}{liveData?.marketingCurrencyCoverage.convertedRows ? <div className="connection-notice"><Info/><div><strong>{liveData.marketingCurrencyCoverage.convertedRows.toLocaleString()} advertising spend rows converted to {liveData.currency}</strong><span>Historical rates applied: {liveData.marketingCurrencyCoverage.convertedCurrencies.map((item) => `${item.currency} (${item.rows.toLocaleString()})`).join(", ")}.</span></div></div> : null}{liveData?.marketingCurrencyCoverage.excludedRows ? <div className="connection-notice"><Info/><div><strong>{liveData.marketingCurrencyCoverage.excludedRows.toLocaleString()} advertising spend rows excluded</strong><span>Missing dated rates: {liveData.marketingCurrencyCoverage.excludedCurrencies.map((item) => `${item.currency} (${item.rows.toLocaleString()})`).join(", ")}.</span></div></div> : null}
     <div className="report-export">{hasLiveData ? <button className="export-button" onClick={exportOverview}><Download/> Export overview CSV</button> : null}<button className="export-button" onClick={() => setCustomizingWidgets((current) => !current)}><Settings/> {customizingWidgets ? "Done customizing" : "Customize dashboard"}</button></div>
     {customizingWidgets ? <section className="widget-customizer" aria-label="Dashboard widget settings"><div><strong>Summary widgets</strong><span>Choose what appears and arrange the reading order.</span></div><div className="widget-customizer-list">{widgetPreferences.order.map((id, index) => <div className="widget-customizer-row" key={id}><label><input type="checkbox" checked={widgetVisible(id)} onChange={() => toggleWidget(id)}/><span>{overviewWidgetLabels[id]}</span></label><div><button type="button" disabled={index === 0} onClick={() => moveWidget(id, -1)} aria-label={`Move ${overviewWidgetLabels[id]} earlier`}>↑</button><button type="button" disabled={index === widgetPreferences.order.length - 1} onClick={() => moveWidget(id, 1)} aria-label={`Move ${overviewWidgetLabels[id]} later`}>↓</button></div></div>)}</div><button type="button" className="panel-drilldown" onClick={resetWidgets}>Restore defaults</button></section> : null}
@@ -324,10 +410,10 @@ function Overview({ reportRunId, onDrilldown }: { reportRunId?: string; onDrilld
       <div className="metric-foot"><Trend positive={metric.positive}>{metric.delta}</Trend><span>{metric.hint}</span></div>
     </button>)}</section>
     <section className="dashboard-grid">
-      <article className="panel chart-panel" style={{ order: 0 }}>
-        <div className="panel-head"><div><span className="eyebrow">PERFORMANCE</span><h2>{hasLiveData ? "Revenue, costs and profit trend" : "Revenue & profit trend"}</h2></div><div className="legend"><span className="blue-dot"/>Revenue <span className="orange-dot"/>Known costs <span className="green-dot"/>Net profit</div></div>
-        <div className="chart-wrap"><div className="y-axis"><span>{hasLiveData ? formatter.format(chartMaximum) : "£300k"}</span><span>{hasLiveData ? formatter.format(chartMaximum / 2) : "£200k"}</span><span>{hasLiveData ? formatter.format(chartMaximum / 4) : "£100k"}</span><span>£0</span></div><div className="bar-chart">{chartMonths.map((month, index) => <button type="button" className="bar-group" key={`${month}-${index}`} disabled={!trendSeries[index]} onClick={() => { const point = trendSeries[index]; if (point) onDrilldown("Profit & Loss", { from: point.start, to: point.end }); }} title={trendSeries[index] ? `Open ${month}: revenue ${formatter.format(trendSeries[index].revenue)} · costs ${formatter.format(trendSeries[index].costs)} · ${trendSeries[index].complete ? "net profit" : "provisional profit"} ${formatter.format(trendSeries[index].profit)}` : month}><div className="bars"><i className="revenue" style={{height:`${Math.max(chartRevenue[index], 0) / chartMaximum * 100}%`}}/><i className="spend" style={{height:`${Math.max(chartCosts[index], 0) / chartMaximum * 100}%`}}/><i className="profit" style={{height:`${Math.max(chartProfit[index], 0) / chartMaximum * 100}%`}}/></div><span>{month}</span></button>)}</div></div>
-        {trendSeries.some((point) => !point.complete) ? <span className="report-note">Profit is provisional in periods with incomplete cost coverage.</span> : null}
+      <article className="panel chart-panel finance-chart-panel" style={{ order: 0 }}>
+        <div className="panel-head"><div><span className="eyebrow">PERFORMANCE</span><h2>Revenue, costs and profit</h2></div><div className="finance-legend"><span><i className="legend-revenue"/>Revenue</span><span><i className="legend-cogs"/>COGS</span><span><i className="legend-marketing"/>Marketing</span><span><i className="legend-fees"/>Fees</span><span><i className="legend-shipping"/>Shipping</span><span><i className="legend-operating"/>Operating</span><span><i className="legend-profit"/>Profit</span></div></div>
+        <FinanceTrendChart points={trendSeries} formatter={formatter} onOpen={(point) => onDrilldown("Profit & Loss", { from: point.start, to: point.end })}/>
+        {trendSeries.some((point) => !point.complete) ? <span className="report-note">Profit is provisional where cost coverage is incomplete. Hover a period for the full revenue and cost bridge.</span> : null}
       </article>
       <article className="panel health-panel" style={{ order: 1 }}><div className="panel-head"><div><span className="eyebrow">DATA HEALTH</span><h2>{hasLiveData ? "Imported store data" : "Store readiness"}</h2></div><span className="score">{hasLiveData ? "LIVE" : "86%"}</span></div>
         <div className="health-ring"><div><strong>{hasLiveData ? liveData!.metrics.orders.toLocaleString() : "86"}</strong><span>{hasLiveData ? "orders" : "Good"}</span></div></div>
