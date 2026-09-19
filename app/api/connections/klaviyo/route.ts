@@ -5,10 +5,11 @@ import { requireWorkspace } from "@/lib/workspace/server";
 async function context() {
   const workspace = await requireWorkspace();
   if (!workspace.ok) return { response: workspace.response };
-  if (!workspace.store) {
+  const store = workspace.store;
+  if (!store) {
     return { response: NextResponse.json({ error: "No store is configured" }, { status: 404 }) };
   }
-  return { ...workspace, response: null };
+  return { ...workspace, store, response: null };
 }
 
 export async function GET() {

@@ -33,10 +33,11 @@ const numeric = (value: string | undefined) => {
 async function context() {
   const workspace = await requireWorkspace();
   if (!workspace.ok) return { response: workspace.response };
-  if (!workspace.store) {
+  const store = workspace.store;
+  if (!store) {
     return { response: NextResponse.json({ error: "No store is configured" }, { status: 404 }) };
   }
-  return { ...workspace, response: null };
+  return { ...workspace, store, response: null };
 }
 
 async function importMetaInsights({ supabase, organizationId, store, account, accessToken, lookbackMonths }: { supabase: SupabaseClient; organizationId: string; store: { id: string; currency: string }; account: MetaAccount; accessToken: string; lookbackMonths: number }) {
