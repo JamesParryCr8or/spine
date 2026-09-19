@@ -55,6 +55,8 @@
 - [x] Standardize CSV export metadata across live report tables, including filters, reporting period, timezone, currency, and generation time.
 - [x] Add Overview date-range selection with equal-length previous-period absolute and percentage KPI comparisons.
 - [x] Add selectable daily, weekly, monthly, quarterly, and annual Overview revenue/cost/profit trends.
+- [x] Replace the Overview trend with a combined finance chart: revenue above zero, stacked COGS/marketing/fees/shipping/operating costs below zero, and an overlaid profit line with hover values.
+- [x] Add finance date presets across Overview, Profit & Loss, and Sales, including today/yesterday, rolling and complete-day windows, month presets, all imported data, and custom dates.
 - [x] Add period-aware channel mix, top-product, customer-split, and known-cost Overview widgets.
 - [x] Add period-preserving drilldowns from Overview KPI cards, chart points, and summary widgets into their detailed reports.
 - [x] Add saved Overview widget visibility and ordering controls.
