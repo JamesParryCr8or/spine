@@ -149,7 +149,7 @@ export function LoginForm({
             <Mail aria-hidden="true"/><span>{isLoading && authMethod === "magic" ? "Sending link…" : "Email me a sign-in link"}</span>
           </Button>
         </div>
-        <div className="auth-signup">New to Cr8or Data? <Link href="/auth/sign-up">Create an account</Link></div>
+        <div className="auth-signup">New to Spine? <Link href="/auth/sign-up">Create an account</Link></div>
         <a className="auth-demo-link" href="/api/demo">Explore the demo first <ArrowRight /></a>
       </form>
     </div>
