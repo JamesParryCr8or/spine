@@ -15,6 +15,7 @@ type Order = {
   currency: string;
   exchange_rate: number;
 };
+type OrderLine = { order_id: string; product_gid: string | null; sku: string | null; title: string; current_quantity: number };
 
 const money = (value: string | null | undefined) => Number(value ?? 0);
 
@@ -150,6 +151,63 @@ export async function GET(request: Request) {
     return first && second ? [(Date.parse(second) - Date.parse(first)) / (24 * 60 * 60 * 1000)] : [];
   });
   const identifiedOrders = newCustomerOrders + repeatCustomerOrders;
+  const orderLines: OrderLine[] = [];
+  const analysedOrderIds = orders.map((order) => order.id);
+  for (let from = 0; from < analysedOrderIds.length; from += 500) {
+    const { data, error } = await supabase.from("shopify_order_lines").select("order_id,product_gid,sku,title,current_quantity").in("order_id", analysedOrderIds.slice(from, from + 500));
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    orderLines.push(...(data ?? []) as OrderLine[]);
+  }
+  const linesByOrder = new Map<string, OrderLine[]>();
+  for (const line of orderLines) linesByOrder.set(line.order_id, [...(linesByOrder.get(line.order_id) ?? []), line]);
+  const repurchaseWindows = [30, 60, 90, 180, 365].map((days) => {
+    let eligible = 0;
+    let repurchased = 0;
+    for (const customerOrders of customers) {
+      const first = customerOrders[0]?.processed_at;
+      if (!first) continue;
+      eligible += 1;
+      const firstAt = Date.parse(first);
+      if (customerOrders.slice(1).some((order) => order.processed_at && Date.parse(order.processed_at) - firstAt <= days * 86400000)) repurchased += 1;
+    }
+    return { days, customers: eligible, repurchased, rate: eligible ? repurchased / eligible : null };
+  });
+  const gaps = customers.flatMap((customerOrders) => customerOrders.slice(1).flatMap((order, index) => {
+    const previous = customerOrders[index]?.processed_at;
+    return previous && order.processed_at ? [(Date.parse(order.processed_at) - Date.parse(previous)) / 86400000] : [];
+  })).filter((value) => value >= 0);
+  const gapBuckets = Array.from({ length: 20 }, (_, index) => ({ label: index === 19 ? "95+ days" : `${index * 5}-${index * 5 + 4} days`, start: index * 5, end: index === 19 ? Infinity : index * 5 + 4, count: 0 }));
+  for (const gap of gaps) (gapBuckets.find((bucket) => gap >= bucket.start && gap <= bucket.end) ?? gapBuckets.at(-1)!).count += 1;
+  let cumulative = 0;
+  const timeBetweenOrders = gapBuckets.map((bucket) => { cumulative += bucket.count; return { ...bucket, share: gaps.length ? bucket.count / gaps.length : 0, cumulativeShare: gaps.length ? cumulative / gaps.length : 0 }; });
+  const productBreakdowns = new Map<string, { product: string; sku: string | null; customers: Set<string>; repurchasers: Set<string>; sameProductRepurchasers: Set<string>; sales: number; gaps: number[] }>();
+  const journeys = new Map<string, { from: string; to: string; customers: Set<string> }>();
+  for (const [customerId, customerOrders] of ordersByCustomer) {
+    const firstOrder = customerOrders[0];
+    if (!firstOrder) continue;
+    const firstLines = linesByOrder.get(firstOrder.id) ?? [];
+    const laterOrders = customerOrders.slice(1);
+    const laterKeys = new Set(laterOrders.flatMap((order) => (linesByOrder.get(order.id) ?? []).map((line) => line.product_gid ?? `sku:${line.sku ?? line.title}`)));
+    const customerSales = customerOrders.reduce((total, order) => total + convertDatedAmount(money(order.net_product_sales) + money(order.shipping_revenue), order.exchange_rate, store.currency), 0);
+    const customerGaps = laterOrders.flatMap((order, index) => {
+      const previous = customerOrders[index]?.processed_at;
+      return previous && order.processed_at ? [(Date.parse(order.processed_at) - Date.parse(previous)) / 86400000] : [];
+    });
+    for (const firstLine of firstLines) {
+      const key = firstLine.product_gid ?? `sku:${firstLine.sku ?? firstLine.title}`;
+      const row = productBreakdowns.get(key) ?? { product: firstLine.title, sku: firstLine.sku, customers: new Set<string>(), repurchasers: new Set<string>(), sameProductRepurchasers: new Set<string>(), sales: 0, gaps: [] };
+      if (!row.customers.has(customerId)) { row.customers.add(customerId); row.sales += customerSales; row.gaps.push(...customerGaps); }
+      if (laterOrders.length) row.repurchasers.add(customerId);
+      if (laterKeys.has(key)) row.sameProductRepurchasers.add(customerId);
+      productBreakdowns.set(key, row);
+    }
+    const nextOrder = laterOrders[0];
+    if (nextOrder) for (const firstLine of firstLines) for (const nextLine of linesByOrder.get(nextOrder.id) ?? []) {
+      const key = `${firstLine.title}→${nextLine.title}`;
+      const journey = journeys.get(key) ?? { from: firstLine.title, to: nextLine.title, customers: new Set<string>() };
+      journey.customers.add(customerId); journeys.set(key, journey);
+    }
+  }
   const recentCustomers = await supabase
     .from("shopify_customers")
     .select("id,display_name,email,number_of_orders,amount_spent,currency,updated_at_shopify")
@@ -190,5 +248,12 @@ export async function GET(request: Request) {
     })),
     months: [...months.values()].sort((left, right) => left.key.localeCompare(right.key)),
     cohorts,
+    behavior: {
+      repurchaseWindows,
+      averageTimeBetweenOrders: gaps.length ? gaps.reduce((total, value) => total + value, 0) / gaps.length : null,
+      timeBetweenOrders,
+      productBreakdown: [...productBreakdowns.values()].map((row) => ({ product: row.product, sku: row.sku, customers: row.customers.size, repurchasers: row.repurchasers.size, averageSalesPerCustomer: row.customers.size ? row.sales / row.customers.size : 0, repurchasedAnythingRate: row.customers.size ? row.repurchasers.size / row.customers.size : 0, repurchasedSameProductRate: row.customers.size ? row.sameProductRepurchasers.size / row.customers.size : 0, averageDaysBetweenOrders: row.gaps.length ? row.gaps.reduce((total, value) => total + value, 0) / row.gaps.length : null })).sort((left, right) => right.customers - left.customers).slice(0, 50),
+      productJourneys: [...journeys.values()].map((journey) => ({ from: journey.from, to: journey.to, customers: journey.customers.size })).sort((left, right) => right.customers - left.customers).slice(0, 30),
+    },
   });
 }
