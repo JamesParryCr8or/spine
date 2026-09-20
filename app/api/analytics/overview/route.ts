@@ -6,7 +6,7 @@ import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExcha
 import { calculateAcquisitionMetrics } from "@/lib/analytics/acquisition";
 import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
 import { reportingDateKey, reportingMonthKey, reportingRangeToUtc } from "@/lib/analytics/reporting-range";
-import { refreshReportingData } from "@/lib/analytics/reporting-refresh";
+import { createReportingClient, refreshReportingData } from "@/lib/analytics/reporting-refresh";
 
 type Order = {
   id: string;
@@ -50,6 +50,7 @@ export async function GET(request: Request) {
   if (!workspace.ok) return workspace.response;
   const { supabase, store } = workspace;
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
+  const reportingSupabase = createReportingClient();
 
   if (fromDate && toDate) {
     try {
@@ -78,7 +79,7 @@ export async function GET(request: Request) {
     const [metaResult, googleResult, acquisitionResult] = await Promise.all([
       supabase.from("meta_ad_insights_daily").select("date_start,spend,currency").eq("store_id", store.id).gte("date_start", rangeStart).lte("date_start", rangeEnd),
       supabase.from("google_ads_insights_daily").select("insight_date,spend,currency").eq("store_id", store.id).gte("insight_date", rangeStart).lte("insight_date", rangeEnd),
-      supabase.from("shopify_acquisition_daily").select("new_customers,new_customer_sales,currency").eq("store_id", store.id).gte("sales_date", rangeStart).lte("sales_date", rangeEnd),
+      reportingSupabase.from("shopify_acquisition_daily").select("new_customers,new_customer_sales,currency").eq("store_id", store.id).gte("sales_date", rangeStart).lte("sales_date", rangeEnd),
     ]);
     const spendError = metaResult.error ?? googleResult.error ?? acquisitionResult.error;
     if (spendError) return NextResponse.json({ error: spendError.message }, { status: 500 });

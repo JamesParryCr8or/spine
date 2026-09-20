@@ -11,7 +11,7 @@ type GoogleAdsPayload = Array<{ results?: GoogleAdsRow[] }>;
 
 const freshAfter = () => new Date(Date.now() - 15 * 60 * 1000).toISOString();
 
-function createReportingClient() {
+export function createReportingClient() {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || process.env.SUPABASE_SECRET_KEY?.trim();
   if (!key) throw new Error("Server reporting credentials are not configured");
   const { url } = getSupabasePublicEnvironment();
