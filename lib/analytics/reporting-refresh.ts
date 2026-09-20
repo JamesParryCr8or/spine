@@ -44,10 +44,15 @@ async function needsRefresh(supabase: SupabaseClient, table: string, storeId: st
 }
 
 export async function refreshShopifyReporting(supabase: SupabaseClient, store: Store, from: string, to: string) {
-  if (!store.shopify_domain || !await needsRefresh(supabase, "shopify_sales_daily", store.id, "sales_date", from, to)) return;
+  if (!store.shopify_domain) return;
+  const [salesNeedsRefresh, acquisitionNeedsRefresh] = await Promise.all([
+    needsRefresh(supabase, "shopify_sales_daily", store.id, "sales_date", from, to),
+    needsRefresh(supabase, "shopify_acquisition_daily", store.id, "sales_date", from, to),
+  ]);
+  if (!salesNeedsRefresh && !acquisitionNeedsRefresh) return;
   const token = await readSecret(supabase, store.id, "shopify");
   if (!token) return;
-  const query = (source: string, metrics: string) => `FROM ${source}\nSHOW ${metrics}\nTIMESERIES day\nSINCE ${from} UNTIL ${to}\nORDER BY day ASC`;
+  const query = (source: string, metrics: string, where = "") => `FROM ${source}\nSHOW ${metrics}\n${where ? `${where}\n` : ""}TIMESERIES day\nSINCE ${from} UNTIL ${to}\nORDER BY day ASC`;
   const run = (shopifyQl: string) => shopifyGraph<ShopifyQlResult>(
     store.shopify_domain!, token,
     `query Reporting($shopifyQl:String!){ shopifyqlQuery(query:$shopifyQl){ tableData{ rows } parseErrors } }`,
@@ -56,6 +61,9 @@ export async function refreshShopifyReporting(supabase: SupabaseClient, store: S
   const sales = await run(query("sales", "gross_sales, discounts, sales_reversals, net_sales, shipping_charges, taxes, total_sales, orders, net_items_sold, cost_of_goods_sold, gross_profit, net_sales_with_cost_recorded, net_sales_without_cost_recorded"));
   const salesError = sales.shopifyqlQuery.parseErrors[0];
   if (salesError) throw new Error(`Shopify reporting query: ${salesError}`);
+  const acquisition = await run(query("sales", "customers, total_sales", "WHERE new_or_returning_customer = 'New'"))
+    .catch((error) => { console.warn("Shopify acquisition query was skipped", { message: error instanceof Error ? error.message : "Unknown error" }); return null; });
+  if (acquisition?.shopifyqlQuery.parseErrors[0]) console.warn("Shopify acquisition query was skipped", { message: acquisition.shopifyqlQuery.parseErrors[0] });
   const fees = await run(query("fees", "shopify_payments_processing_fees, foreign_exchange_fees, managed_markets_fees, international_fees"))
     .catch(() => null);
   const feesByDate = new Map((fees?.shopifyqlQuery.tableData?.rows ?? []).flatMap((row) => {
@@ -84,6 +92,19 @@ export async function refreshShopifyReporting(supabase: SupabaseClient, store: S
   });
   for (let index = 0; index < rows.length; index += 500) {
     const { error } = await supabase.from("shopify_sales_daily").upsert(rows.slice(index, index + 500), { onConflict: "store_id,sales_date" });
+    if (error) throw error;
+  }
+  const acquisitionRows = (acquisition?.shopifyqlQuery.parseErrors.length ? [] : acquisition?.shopifyqlQuery.tableData?.rows ?? []).flatMap((row) => {
+    const day = typeof row.day === "string" ? row.day.slice(0, 10) : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return [];
+    return [{
+      organization_id: store.organization_id, store_id: store.id, sales_date: day,
+      new_customers: Math.max(0, Math.trunc(numeric(row.customers))),
+      new_customer_sales: numeric(row.total_sales), currency: store.currency, synced_at: now,
+    }];
+  });
+  for (let index = 0; index < acquisitionRows.length; index += 500) {
+    const { error } = await supabase.from("shopify_acquisition_daily").upsert(acquisitionRows.slice(index, index + 500), { onConflict: "store_id,sales_date" });
     if (error) throw error;
   }
 }

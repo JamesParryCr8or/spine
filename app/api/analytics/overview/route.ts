@@ -75,11 +75,12 @@ export async function GET(request: Request) {
   if (dailyRows.length) {
     const rangeStart = fromDate || dailyRows[0].sales_date;
     const rangeEnd = toDate || dailyRows.at(-1)!.sales_date;
-    const [metaResult, googleResult] = await Promise.all([
+    const [metaResult, googleResult, acquisitionResult] = await Promise.all([
       supabase.from("meta_ad_insights_daily").select("date_start,spend,currency").eq("store_id", store.id).gte("date_start", rangeStart).lte("date_start", rangeEnd),
       supabase.from("google_ads_insights_daily").select("insight_date,spend,currency").eq("store_id", store.id).gte("insight_date", rangeStart).lte("insight_date", rangeEnd),
+      supabase.from("shopify_acquisition_daily").select("new_customers,new_customer_sales,currency").eq("store_id", store.id).gte("sales_date", rangeStart).lte("sales_date", rangeEnd),
     ]);
-    const spendError = metaResult.error ?? googleResult.error;
+    const spendError = metaResult.error ?? googleResult.error ?? acquisitionResult.error;
     if (spendError) return NextResponse.json({ error: spendError.message }, { status: 500 });
     const monthMap = new Map<string, { key: string; label: string; grossSales: number; discounts: number; netSales: number; shippingRevenue: number; orders: number }>();
     let grossSales = 0, discounts = 0, netSales = 0, shippingRevenue = 0, orderCount = 0, unitsSold = 0;
@@ -101,38 +102,11 @@ export async function GET(request: Request) {
     const metaDates = (metaResult.data ?? []).map((row) => row.date_start).sort();
     const googleDates = (googleResult.data ?? []).map((row) => row.insight_date).sort();
 
-    // ShopifyQL supplies the authoritative daily sales totals. Customer acquisition
-    // needs the imported order history, so use it only to identify first purchases.
-    const rangeUtc = reportingRangeToUtc(rangeStart, rangeEnd, timezone);
-    const history: Array<{ id: string; customer_id: string | null; processed_at: string | null }> = [];
-    const periodOrders: Array<{ id: string; customer_id: string | null; processed_at: string | null; net_product_sales: string; currency: string }> = [];
-    const pageSize = 1000;
-    for (let offset = 0; ; offset += pageSize) {
-      const { data, error } = await supabase.from("shopify_orders")
-        .select("id,customer_id,processed_at")
-        .eq("store_id", store.id).is("cancelled_at", null).eq("test", false)
-        .not("processed_at", "is", null).lt("processed_at", rangeUtc.endExclusive)
-        .order("processed_at", { ascending: true }).range(offset, offset + pageSize - 1);
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-      const page = data ?? [];
-      history.push(...page.map((order) => ({ id: order.id, customer_id: order.customer_id, processed_at: order.processed_at })));
-      if (page.length < pageSize) break;
-    }
-    for (let offset = 0; ; offset += pageSize) {
-      const { data, error } = await supabase.from("shopify_orders")
-        .select("id,customer_id,processed_at,net_product_sales,currency")
-        .eq("store_id", store.id).is("cancelled_at", null).eq("test", false)
-        .not("processed_at", "is", null).gte("processed_at", rangeUtc.start).lt("processed_at", rangeUtc.endExclusive)
-        .order("processed_at", { ascending: true }).range(offset, offset + pageSize - 1);
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-      const page = data ?? [];
-      periodOrders.push(...page);
-      if (page.length < pageSize) break;
-    }
-    const customerClasses = classifyCustomerOrders(history.map((order) => ({ id: order.id, customerId: order.customer_id, processedAt: order.processed_at })));
-    const newOrders = periodOrders.filter((order) => customerClasses.get(order.id) === "new");
-    const newCustomers = new Set(newOrders.flatMap((order) => order.customer_id ? [order.customer_id] : [])).size;
-    const newCustomerSales = newOrders.reduce((total, order) => order.currency === store.currency ? total + (Number(order.net_product_sales) || 0) : total, 0);
+    // ShopifyQL tracks first purchases using the same dates as the sales summary.
+    // That stays accurate even when detailed orders were imported only for an older window.
+    const acquisitionRows = acquisitionResult.data ?? [];
+    const newCustomers = acquisitionRows.reduce((total, row) => row.currency === store.currency ? total + Math.max(0, Number(row.new_customers) || 0) : total, 0);
+    const newCustomerSales = acquisitionRows.reduce((total, row) => row.currency === store.currency ? total + (Number(row.new_customer_sales) || 0) : total, 0);
     const acquisition = calculateAcquisitionMetrics({ netSales, newCustomerSales, marketingSpend, newCustomers });
     return NextResponse.json({
       hasData: true, currency: store.currency, timezone,
