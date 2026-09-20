@@ -5,11 +5,5 @@
   "env": {
     "NEXT_PUBLIC_SUPABASE_URL": "https://smtrzopjvbjzzqacjkrw.supabase.co",
     "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_HOLshJWsJOyQMj6RX4lzWQ_AXAL00Yo"
-  },
-  "crons": [
-    {
-      "path": "/api/cron/weekly-overview-report",
-      "schedule": "0 8 * * 1"
-    }
-  ]
+  }
 }
