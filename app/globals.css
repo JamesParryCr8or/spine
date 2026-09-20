@@ -139,3 +139,11 @@ button { cursor:pointer; }
 .filter-row > label input, .filter-row > label select { height: 37px; min-width: 120px; border: 1px solid #dfe3eb; border-radius: 8px; padding: 0 10px; background: #fff !important; color: #111827 !important; color-scheme: light; outline: none; }
 .filter-row > label input::placeholder { color: #6b7280; opacity: 1; }
 .filter-row > label input:focus, .filter-row > label select:focus { border-color: #7c66ff; box-shadow: 0 0 0 3px #7c66ff1f; }
+
+.nav-item.nav-sub-item { padding-left: 3.25rem; font-size: .88rem; min-height: 2.5rem; color: #a8b2c7; }
+.nav-item.nav-sub-item svg { width: 15px; height: 15px; opacity: .72; }
+.customer-focus-cohorts [data-customer-section]:not([data-customer-section="cohorts"]),
+.customer-focus-repurchase [data-customer-section]:not([data-customer-section="repurchase"]),
+.customer-focus-timing [data-customer-section]:not([data-customer-section="timing"]),
+.customer-focus-journeys [data-customer-section]:not([data-customer-section="journeys"]) { display: none; }
+.cohort-cell { transition: background .15s ease; }
