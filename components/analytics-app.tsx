@@ -1323,7 +1323,7 @@ function Connections() {
   const [metaSyncResult, setMetaSyncResult] = useState("");
   const [metaLastSync, setMetaLastSync] = useState<{ importedDays: number; latestDate: string | null; syncedAt: string | null } | null>(null);
   const [connectionError, setConnectionError] = useState("");
-  const [savingConnection, setSavingConnection] = useState(false);\n  const [currentBrandName, setCurrentBrandName] = useState("");\n  const [savingBrandName, setSavingBrandName] = useState(false);
+  const [savingConnection, setSavingConnection] = useState(false);
   const [shopDomain, setShopDomain] = useState("");
   const [shopifyToken, setShopifyToken] = useState("");
   const [shopifyConnected, setShopifyConnected] = useState(false);
@@ -1333,8 +1333,8 @@ function Connections() {
   const [shopifySyncResult, setShopifySyncResult] = useState("");
   const [shopifyLastSync, setShopifyLastSync] = useState<{ status: string; sync_mode: "initial" | "incremental"; window_start: string | null; window_end: string | null; pages_processed: number; records_processed: number; warnings: unknown[]; error_message: string | null; completed_at: string | null; updated_at: string } | null>(null);
   const [clock, setClock] = useState(0);
-  const shopifyImportPaused = shopifyLastSync?.status === "running" && Date.parse(shopifyLastSync.updated_at) < clock - 6 * 60 * 1000;\n
-  useEffect(() => { fetch("/api/workspace").then((response) => response.ok ? response.json() : null).then((payload) => { const store = payload?.stores?.find((item: { id: string }) => item.id === payload.activeStoreId); setCurrentBrandName(store?.name ?? ""); }).catch(() => undefined); }, []);\n  useEffect(() => {
+  const shopifyImportPaused = shopifyLastSync?.status === "running" && Date.parse(shopifyLastSync.updated_at) < clock - 6 * 60 * 1000;
+  useEffect(() => {
     const refreshClock = () => setClock(Date.now());
     const initial = window.setTimeout(refreshClock, 0);
     const interval = window.setInterval(refreshClock, 60_000);
