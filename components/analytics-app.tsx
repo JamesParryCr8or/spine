@@ -1227,6 +1227,8 @@ function Leads({ onOpenConnections }: { onOpenConnections: () => void }) {
   const [loading, setLoading] = useState(true);
   const [connectError, setConnectError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
   const [form, setForm] = useState({ apiKey: "", locationId: "", sourceType: "contacts" as "contacts" | "opportunities", selectionId: "", selectionName: "", metricLabel: "Qualified leads" });
   const load = useCallback(async () => {
     setLoading(true);
@@ -1246,7 +1248,16 @@ function Leads({ onOpenConnections }: { onOpenConnections: () => void }) {
     setForm((current) => ({ ...current, apiKey: "" }));
     await load();
   };
-  const sync = async () => {\n    setSyncing(true); setSyncMessage("");\n    const response = await fetch("/api/leads/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(range) });\n    const payload = await response.json().catch(() => ({}));\n    setSyncing(false);\n    if (!response.ok) { setSyncMessage(payload.error ?? "GoHighLevel could not be refreshed"); return; }\n    setSyncMessage(`Imported ${payload.conversions ?? 0} selected results from ${payload.imported ?? 0} records.`);\n    await load();\n  };\n  const maxSpend = Math.max(1, ...(data?.points.map((point) => point.metaSpend + point.googleSpend) ?? [1]));
+  const sync = async () => {
+    setSyncing(true); setSyncMessage("");
+    const response = await fetch("/api/leads/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(range) });
+    const payload = await response.json().catch(() => ({}));
+    setSyncing(false);
+    if (!response.ok) { setSyncMessage(payload.error ?? "GoHighLevel could not be refreshed"); return; }
+    setSyncMessage(`Imported ${payload.conversions ?? 0} selected results from ${payload.imported ?? 0} records.`);
+    await load();
+  };
+  const maxSpend = Math.max(1, ...(data?.points.map((point) => point.metaSpend + point.googleSpend) ?? [1]));
   const changeRange = (preset: FinanceDatePreset) => setRange(financeDateRange(preset));
   return <section className="leads-dashboard">
     <div className="report-toolbar">
@@ -1276,7 +1287,8 @@ function Leads({ onOpenConnections }: { onOpenConnections: () => void }) {
     </>}
   </section>;
 }
-\nfunction Connections() {
+
+function Connections() {
   const [showMetaSetup, setShowMetaSetup] = useState(false);
   const [showShopifySetup, setShowShopifySetup] = useState(false);
   const [showToken, setShowToken] = useState(false);
