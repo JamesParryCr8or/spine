@@ -80,6 +80,19 @@ export async function POST(request: Request) {
 }
 
 
+export async function PATCH(request: Request) {
+  const result = await requireWorkspace();
+  if (!result.ok) return result.response;
+  if (!result.store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
+  if (!["owner", "admin"].includes(result.membership.role)) return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
+  const input = await request.json().catch(() => null) as { name?: string } | null;
+  const name = input?.name?.trim() ?? "";
+  if (name.length < 2 || name.length > 80) return NextResponse.json({ error: "Brand name must be between 2 and 80 characters" }, { status: 400 });
+  const { data, error } = await result.supabase.from("stores").update({ name }).eq("id", result.store.id).select("id,name").single();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ store: data });
+}
+
 export async function PUT(request: Request) {
   const result = await requireWorkspace();
   if (!result.ok) return result.response;
