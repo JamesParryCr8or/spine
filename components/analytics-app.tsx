@@ -1352,6 +1352,17 @@ function Connections() {
   };
 
   const connectKlaviyo = async () => { const apiKey = window.prompt("Paste your Klaviyo private API key"); if (!apiKey) return; setSavingConnection(true); const response = await fetch("/api/connections/klaviyo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey }) }); setSavingConnection(false); if (!response.ok) { const payload = await response.json(); setConnectionError(payload.error || "Could not connect Klaviyo"); return; } setKlaviyoConnected(true); };
+  const connectGhl = async () => {
+    const apiKey = window.prompt("Paste your GoHighLevel private integration key"); if (!apiKey) return;
+    const locationId = window.prompt("Paste the GoHighLevel location ID"); if (!locationId) return;
+    const sourceType = window.confirm("Use pipeline opportunities? Choose Cancel for contacts or a smart list.") ? "opportunities" : "contacts";
+    const metricLabel = window.prompt("What should this cost be measured per?", sourceType === "opportunities" ? "Booked calls" : "Qualified leads"); if (!metricLabel) return;
+    setSavingConnection(true);
+    const response = await fetch("/api/connections/gohighlevel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey, locationId, sourceType, metricLabel }) });
+    setSavingConnection(false);
+    if (!response.ok) { const payload = await response.json(); setConnectionError(payload.error || "Could not connect GoHighLevel"); return; }
+    window.location.assign("/protected");
+  };
   const connectGoogleAds = () => { window.location.assign("/api/google-ads/authorize"); };
   const selectGoogleAdsAccount = async (customerId: string) => {
     setSelectingGoogleAdsAccount(true); setConnectionError("");
@@ -1368,11 +1379,12 @@ function Connections() {
     ["Meta Ads", "Campaign spend & performance", metaConnected ? "Connected" : "Connect", "M"],
     ["Google Ads", googleAdsConnected ? (googleAdsAccountName || "Google Ads account") : "Campaign and keyword reporting", googleAdsConnected ? "Connected" : "Connect", "G"],
     ["Klaviyo", "Campaign and flow analytics", klaviyoConnected ? "Connected" : "Connect", "K"],
+    ["GoHighLevel", "Lead, call and pipeline conversion reporting", "Connect", "H"],
   ];
 
   return <>
     <div className="connection-notice"><Info/><div><strong>Secure connection storage</strong><span>Access tokens are encrypted in Supabase Vault and are never returned to the browser after saving.</span></div></div>
-    <section className="connection-grid">{connections.map(([name,desc,status,letter])=><article className="connection-card" key={name}><div className={`source-logo ${letter.toLowerCase()}`}>{letter}</div><div><h3>{name}</h3><p>{desc}</p></div><button disabled={status === "Coming next"} onClick={() => { if (name === "Meta Ads") setShowMetaSetup(true); else if (name === "Shopify") setShowShopifySetup(true); else if (name === "Google Ads") { if (googleAdsConnected) setShowGoogleAdsAccounts(true); else connectGoogleAds(); } else if (name === "Klaviyo") void connectKlaviyo(); }} className={status==="Connected"?"connected":""}>{status==="Connected"&&<span/>}{status}</button></article>)}</section>
+    <section className="connection-grid">{connections.map(([name,desc,status,letter])=><article className="connection-card" key={name}><div className={`source-logo ${letter.toLowerCase()}`}>{letter}</div><div><h3>{name}</h3><p>{desc}</p></div><button disabled={status === "Coming next"} onClick={() => { if (name === "Meta Ads") setShowMetaSetup(true); else if (name === "Shopify") setShowShopifySetup(true); else if (name === "Google Ads") { if (googleAdsConnected) setShowGoogleAdsAccounts(true); else connectGoogleAds(); } else if (name === "Klaviyo") void connectKlaviyo(); else if (name === "GoHighLevel") void connectGhl(); }} className={status==="Connected"?"connected":""}>{status==="Connected"&&<span/>}{status}</button></article>)}</section>
     {showGoogleAdsAccounts && <div className="modal-backdrop" onMouseDown={() => setShowGoogleAdsAccounts(false)}><section className="connection-modal" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowGoogleAdsAccounts(false)}><X/></button><div className="modal-brand"><div className="source-logo g">G</div><div><span className="eyebrow">GOOGLE ADS</span><h2>Choose an ad account</h2></div></div><p className="modal-intro">Select the Google Ads account for this brand. Manager accounts and their enabled client accounts are listed separately.</p>{connectionError && <div className="connection-error">{connectionError}</div>}{googleAdsAccounts.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Account</th><th>Customer ID</th><th>Type</th><th/></tr></thead><tbody>{googleAdsAccounts.map((account) => <tr key={account.customer_id}><td><strong>{account.name}</strong>{account.direct_access && <small>Direct Google access</small>}</td><td>{account.customer_id}</td><td>{account.is_manager ? "Manager (MCC)" : "Client account"}</td><td><button className="primary" disabled={selectingGoogleAdsAccount} onClick={() => void selectGoogleAdsAccount(account.customer_id)}>{googleAdsAccountName === account.name ? "Selected" : "Use this account"}</button></td></tr>)}</tbody></table></div> : <div className="cost-empty"><Database/><strong>No Google Ads accounts have been loaded yet</strong><span>Reconnect Google Ads to load the MCC hierarchy.</span></div>}<div className="modal-actions"><button onClick={() => setShowGoogleAdsAccounts(false)}>Close</button><button className="primary" onClick={connectGoogleAds}>Reconnect and refresh accounts</button></div></section></div>}
     {showShopifySetup && <div className="modal-backdrop" onMouseDown={()=>setShowShopifySetup(false)}><section className="connection-modal" onMouseDown={(event)=>event.stopPropagation()}>
       <button className="modal-close" onClick={()=>setShowShopifySetup(false)}><X/></button><div className="modal-brand"><div className="source-logo s">S</div><div><span className="eyebrow">PRIMARY SALES SOURCE</span><h2>Connect Shopify</h2></div></div>
