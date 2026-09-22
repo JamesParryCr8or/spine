@@ -40,7 +40,7 @@ export async function POST(request: Request) {
   if (metricLabel.length > 80) return NextResponse.json({ error: "The conversion name must be 80 characters or fewer" }, { status: 400 });
 
   const verified = await fetch(`https://services.leadconnectorhq.com/locations/${encodeURIComponent(locationId)}`, {
-    headers: { Authorization: `Bearer ${apiKey}`, Version: "2021-07-28", Accept: "application/json" },
+    headers: { Authorization: `Bearer ${apiKey}`, Version: "v3", Accept: "application/json" },
     cache: "no-store",
   });
   const payload = await verified.json().catch(() => ({})) as { location?: { id?: string; name?: string }; message?: string; error?: string };
