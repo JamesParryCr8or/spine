@@ -995,7 +995,7 @@ function Costs({ focusSku }: { focusSku?: string | null }) {
   const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
   const [effectiveTo, setEffectiveTo] = useState("");
   const [notes, setNotes] = useState("");
-  const [saving, setSaving] = useState(false);\n  const [syncing, setSyncing] = useState(false);\n  const [syncMessage, setSyncMessage] = useState("");
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [costSearch, setCostSearch] = useState(focusSku ?? "");
   const [editingCost, setEditingCost] = useState<ProductCost | null>(null);
