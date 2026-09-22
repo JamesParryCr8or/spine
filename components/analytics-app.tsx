@@ -1223,6 +1223,9 @@ function Leads({ onOpenConnections }: { onOpenConnections: () => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [choosingStage, setChoosingStage] = useState(false);
+  const [stagePicker, setStagePicker] = useState<Array<{ id: string; name: string; stages: Array<{ id: string; name: string; position?: number }> }> | null>(null);
+  const [selectedStageIds, setSelectedStageIds] = useState<string[]>([]);
+  const [includeLaterStages, setIncludeLaterStages] = useState(true);
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try {
@@ -1236,21 +1239,15 @@ function Leads({ onOpenConnections }: { onOpenConnections: () => void }) {
   useEffect(() => { void load(); }, [load]);
   const choosePipelineStage = async () => {
     setChoosingStage(true); setError("");
-    try {
-      const response = await fetch("/api/connections/gohighlevel/pipelines");
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Could not load GoHighLevel pipelines");
-      const pipelines = payload.pipelines as Array<{ id: string; name: string; stages: Array<{ id: string; name: string }> }>;
-      const options = pipelines.flatMap((pipeline) => pipeline.stages.map((stage, index) => ({ pipeline, stage, label: `${pipeline.name} — ${stage.name}`, number: 0 }))).map((option, index) => ({ ...option, number: index + 1 }));
-      const answer = window.prompt(`Choose the conversion stage by number:\n${options.map((option) => `${option.number}. ${option.label}`).join("\n")}`);
-      const selected = options.find((option) => String(option.number) === answer?.trim());
-      if (!selected) return;
-      const saved = await fetch("/api/connections/gohighlevel", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pipelineId: selected.pipeline.id, pipelineName: selected.pipeline.name, stageId: selected.stage.id, stageName: selected.stage.name }) });
-      const savedPayload = await saved.json().catch(() => ({}));
-      if (!saved.ok) throw new Error(savedPayload.error || "Could not save the selected stage");
-      await load();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load GoHighLevel pipelines"); }
-    finally { setChoosingStage(false); }
+    try { const response = await fetch("/api/connections/gohighlevel/pipelines"); const payload = await response.json().catch(() => ({})); if (!response.ok) throw new Error(payload.error || "Could not load GoHighLevel pipelines"); setStagePicker(payload.pipelines ?? []); setSelectedStageIds([]); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load GoHighLevel pipelines"); } finally { setChoosingStage(false); }
+  };
+  const savePipelineStages = async () => {
+    const selected = (stagePicker ?? []).flatMap((pipeline) => pipeline.stages.map((stage) => ({ pipeline, stage }))).filter(({ stage }) => selectedStageIds.includes(stage.id));
+    if (!selected.length) { setError("Choose at least one pipeline stage"); return; }
+    setChoosingStage(true); setError("");
+    try { const response = await fetch("/api/connections/gohighlevel", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ selections: selected.map(({ pipeline, stage }) => ({ pipelineId: pipeline.id, pipelineName: pipeline.name, stageId: stage.id, stageName: stage.name, position: stage.position ?? 0 })), includeLaterStages }) }); const payload = await response.json().catch(() => ({})); if (!response.ok) throw new Error(payload.error || "Could not save the selected stages"); setStagePicker(null); await load(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save the selected stages"); } finally { setChoosingStage(false); }
   };
   const format = new Intl.NumberFormat("en-GB", { style: "currency", currency: data?.currency || "GBP", maximumFractionDigits: 0 });
   const configLabel = data?.config?.metric_label || "conversion";
@@ -1267,6 +1264,7 @@ function Leads({ onOpenConnections }: { onOpenConnections: () => void }) {
       <article className="metric-card"><div className="metric-label">Cost per {configLabel}</div><strong>{data?.totals.costPerConversion === null || data?.totals.costPerConversion === undefined ? "—" : format.format(data.totals.costPerConversion)}</strong><div className="metric-foot">{data?.totals.conversions ?? 0} {configLabel}{(data?.totals.conversions ?? 0) === 1 ? "" : "s"} imported</div></article>
     </div>
     <section className="panel lead-trend-panel"><div className="panel-head"><div><span className="eyebrow">TREND</span><h3>Spend and {configLabel}s</h3></div><div className="lead-selection"><span>{data?.config?.selection_name || data?.connection?.external_account_name || "GoHighLevel"}</span>{data?.connection && <button className="filter-button" onClick={() => void choosePipelineStage()} disabled={choosingStage}>{choosingStage ? "Loading…" : "Choose pipeline stage"}</button>}</div></div>{loading ? <div className="cost-empty"><RefreshCw className="spin"/><strong>Loading lead performance…</strong></div> : recent.length ? <div className="lead-bars">{recent.map((point) => <div className="lead-bar" key={point.date} title={`${point.date}: ${format.format(point.metaSpend + point.googleSpend)} spend, ${point.conversions} ${configLabel}s`}><div className="lead-bar-spend" style={{ height: `${Math.max(6, ((point.metaSpend + point.googleSpend) / maxSpend) * 150)}px` }}/><small>{point.date.slice(5)}</small></div>)}</div> : <div className="cost-empty"><BarChart3/><strong>No reporting data has been imported yet</strong><span>Your GoHighLevel connection is saved. The next step is to sync its selected contacts or opportunities into this dashboard.</span></div>}</section>
+    {stagePicker && <div className="modal-backdrop" onMouseDown={() => setStagePicker(null)}><section className="connection-modal lead-stage-picker" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setStagePicker(null)}><X/></button><span className="eyebrow">GOHIGHLEVEL</span><h2>Choose conversion stages</h2><p className="modal-intro">Select one or more stages. Include opportunities that have progressed beyond the selected stage.</p><div className="stage-options">{stagePicker.map((pipeline) => <div key={pipeline.id}><strong>{pipeline.name}</strong>{pipeline.stages.map((stage) => <label key={stage.id} className="stage-option"><input type="checkbox" checked={selectedStageIds.includes(stage.id)} onChange={() => setSelectedStageIds((ids) => ids.includes(stage.id) ? ids.filter((id) => id !== stage.id) : [...ids, stage.id])}/><span>{stage.name}</span></label>)}</div>)}</div><label className="stage-option include-later"><input type="checkbox" checked={includeLaterStages} onChange={(event) => setIncludeLaterStages(event.target.checked)}/><span>Include opportunities that progressed beyond selected stages</span></label><div className="modal-actions"><button onClick={() => setStagePicker(null)}>Cancel</button><button className="primary" disabled={choosingStage || !selectedStageIds.length} onClick={() => void savePipelineStages()}>{choosingStage ? "Saving…" : "Save stages"}</button></div></section></div>}
   </section>;
 }
 
