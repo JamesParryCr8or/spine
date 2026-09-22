@@ -995,7 +995,7 @@ function Costs({ focusSku }: { focusSku?: string | null }) {
   const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
   const [effectiveTo, setEffectiveTo] = useState("");
   const [notes, setNotes] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState(false);\n  const [syncing, setSyncing] = useState(false);\n  const [syncMessage, setSyncMessage] = useState("");
   const [error, setError] = useState("");
   const [costSearch, setCostSearch] = useState(focusSku ?? "");
   const [editingCost, setEditingCost] = useState<ProductCost | null>(null);
@@ -1246,7 +1246,7 @@ function Leads({ onOpenConnections }: { onOpenConnections: () => void }) {
     setForm((current) => ({ ...current, apiKey: "" }));
     await load();
   };
-  const maxSpend = Math.max(1, ...(data?.points.map((point) => point.metaSpend + point.googleSpend) ?? [1]));
+  const sync = async () => {\n    setSyncing(true); setSyncMessage("");\n    const response = await fetch("/api/leads/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(range) });\n    const payload = await response.json().catch(() => ({}));\n    setSyncing(false);\n    if (!response.ok) { setSyncMessage(payload.error ?? "GoHighLevel could not be refreshed"); return; }\n    setSyncMessage(`Imported ${payload.conversions ?? 0} selected results from ${payload.imported ?? 0} records.`);\n    await load();\n  };\n  const maxSpend = Math.max(1, ...(data?.points.map((point) => point.metaSpend + point.googleSpend) ?? [1]));
   const changeRange = (preset: FinanceDatePreset) => setRange(financeDateRange(preset));
   return <section className="leads-dashboard">
     <div className="report-toolbar">
@@ -1268,7 +1268,7 @@ function Leads({ onOpenConnections }: { onOpenConnections: () => void }) {
         {connectError && <p className="form-error">{connectError}</p>}
         <button className="primary" disabled={saving}>{saving ? "Connecting…" : "Connect GoHighLevel"}</button>
       </form>
-    </div> : <>{data?.connection && <div className="reconciliation"><Info/><div><b>Lead model: {data.config?.metric_label ?? "Choose a conversion"}</b><span>{data.config?.source_type === "opportunities" ? "Pipeline opportunities" : "Contacts / smart list"}{data.config?.selection_name ? ` · ${data.config.selection_name}` : ""} · {data.connection.external_account_name ?? "GoHighLevel connected"}</span></div><button onClick={onOpenConnections}>Manage connections</button></div>}
+    </div> : <>{data?.connection && <div className="reconciliation"><Info/><div><b>Lead model: {data.config?.metric_label ?? "Choose a conversion"}</b><span>{data.config?.source_type === "opportunities" ? "Pipeline opportunities" : "Contacts / smart list"}{data.config?.selection_name ? ` · ${data.config.selection_name}` : ""} · {data.connection.external_account_name ?? "GoHighLevel connected"}</span></div><button onClick={() => void sync()} disabled={syncing}>{syncing ? "Importing…" : "Refresh GoHighLevel"}</button><button onClick={onOpenConnections}>Manage connections</button></div>{syncMessage && <p className="form-error">{syncMessage}</p>}</div>}
       <div className="overview-grid leads-metrics">
         <LeadMetric label="Meta cost" value={loading ? "…" : formatter.format(data?.totals.metaSpend ?? 0)} delta="Facebook Ads" positive={false}/><LeadMetric label="Google cost" value={loading ? "…" : formatter.format(data?.totals.googleSpend ?? 0)} delta="Google Ads" positive={false}/><LeadMetric label="Total ad cost" value={loading ? "…" : formatter.format(data?.totals.totalSpend ?? 0)} delta="Meta + Google" positive={false}/><LeadMetric label={data?.config?.metric_label ?? "Conversions"} value={loading ? "…" : String(data?.totals.conversions ?? 0)} delta="GoHighLevel imported" positive/><LeadMetric label={`Cost per ${(data?.config?.metric_label ?? "conversion").toLowerCase()}`} value={loading ? "…" : data?.totals.costPerConversion == null ? "—" : formatter.format(data.totals.costPerConversion)} delta="Ad cost ÷ selected result" positive={false}/>
       </div>
