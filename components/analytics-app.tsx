@@ -1209,83 +1209,17 @@ function Expenses() {
   </>;
 }
 
-type LeadGenerationData = {
-  currency: string;
-  connection: { status: string; external_account_name: string | null; last_error: string | null } | null;
-  config: { source_type: "contacts" | "opportunities"; selection_id: string | null; selection_name: string | null; metric_label: string; updated_at: string } | null;
-  totals: { metaSpend: number; googleSpend: number; totalSpend: number; conversions: number; costPerConversion: number | null };
-  points: Array<{ date: string; metaSpend: number; googleSpend: number; conversions: number }>;
-};
-
-function LeadMetric({ label, value, delta, positive = true }: { label: string; value: string; delta: string; positive?: boolean }) {
-  return <article className="metric-card"><div className="metric-label">{label}</div><div className="metric-value">{value}</div><div className={positive ? "trend up" : "trend down"}>{delta}</div></article>;
-}
-
 function Leads({ onOpenConnections }: { onOpenConnections: () => void }) {
-  const [range, setRange] = useState(() => financeDateRange("last_30_days"));
-  const [data, setData] = useState<LeadGenerationData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [connectError, setConnectError] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState("");
-  const [form, setForm] = useState({ apiKey: "", locationId: "", sourceType: "contacts" as "contacts" | "opportunities", selectionId: "", selectionName: "", metricLabel: "Qualified leads" });
-  const load = useCallback(async () => {
-    setLoading(true);
-    const response = await fetch(`/api/analytics/leads?from=${range.from}&to=${range.to}`, { cache: "no-store" });
-    const payload = await response.json().catch(() => ({}));
-    if (response.ok) setData(payload);
-    setLoading(false);
-  }, [range.from, range.to]);
-  useEffect(() => { void load(); }, [load]);
-  const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: data?.currency ?? "GBP", maximumFractionDigits: 0 });
-  const connect = async (event: React.FormEvent) => {
-    event.preventDefault(); setSaving(true); setConnectError("");
-    const response = await fetch("/api/connections/gohighlevel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
-    const payload = await response.json().catch(() => ({}));
-    setSaving(false);
-    if (!response.ok) { setConnectError(payload.error ?? "GoHighLevel could not be connected"); return; }
-    setForm((current) => ({ ...current, apiKey: "" }));
-    await load();
-  };
-  const sync = async () => {
-    setSyncing(true); setSyncMessage("");
-    const response = await fetch("/api/leads/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(range) });
-    const payload = await response.json().catch(() => ({}));
-    setSyncing(false);
-    if (!response.ok) { setSyncMessage(payload.error ?? "GoHighLevel could not be refreshed"); return; }
-    setSyncMessage(`Imported ${payload.conversions ?? 0} selected results from ${payload.imported ?? 0} records.`);
-    await load();
-  };
-  const maxSpend = Math.max(1, ...(data?.points.map((point) => point.metaSpend + point.googleSpend) ?? [1]));
-  const changeRange = (preset: FinanceDatePreset) => setRange(financeDateRange(preset));
-  return <section className="leads-dashboard">
-    <div className="report-toolbar">
-      <label>Period<select value={range.from === financeDateRange("last_7_days").from ? "last_7_days" : "last_30_days"} onChange={(event) => changeRange(event.target.value as FinanceDatePreset)}><option value="last_7_days">Last 7 days</option><option value="last_30_days">Last 30 days</option><option value="last_90_days">Last 90 days</option><option value="last_365_days">Last 365 days</option></select></label>
-      <label>From<input type="date" value={range.from} onChange={(event) => setRange((current) => ({ ...current, from: event.target.value }))}/></label>
-      <label>To<input type="date" value={range.to} onChange={(event) => setRange((current) => ({ ...current, to: event.target.value }))}/></label>
-      <button className="icon-button" onClick={() => void load()} title="Refresh lead reporting"><RefreshCw/></button>
+  return <section className="cost-panel leads-dashboard">
+    <span className="eyebrow">LEAD GENERATION</span>
+    <h2>Lead performance</h2>
+    <p>Use this standalone dashboard to compare Meta and Google spend against the GoHighLevel result that matters: a qualified lead, booked call, or pipeline opportunity.</p>
+    <div className="metric-grid">
+      <article className="metric-card"><div className="metric-label">Meta cost</div><div className="metric-value">Connect ad data</div></article>
+      <article className="metric-card"><div className="metric-label">Google cost</div><div className="metric-value">Connect ad data</div></article>
+      <article className="metric-card"><div className="metric-label">Cost per result</div><div className="metric-value">Choose a GHL source</div></article>
     </div>
-    {!data?.connection && !loading ? <div className="cost-panel">
-      <span className="eyebrow">GOHIGHLEVEL INTEGRATION</span><h2>Connect your lead conversion source</h2>
-      <p>Keep your ecommerce reports separate. Choose the GoHighLevel count that represents a lead, booked call or pipeline conversion, then Spine will calculate ad cost per result.</p>
-      <form className="connection-form" onSubmit={connect}>
-        <label>Private integration key<input type="password" value={form.apiKey} onChange={(event) => setForm({ ...form, apiKey: event.target.value })} placeholder="pit-..." required/></label>
-        <label>GoHighLevel location ID<input value={form.locationId} onChange={(event) => setForm({ ...form, locationId: event.target.value })} required/></label>
-        <label>Conversion source<select value={form.sourceType} onChange={(event) => setForm({ ...form, sourceType: event.target.value as "contacts" | "opportunities" })}><option value="contacts">Contacts / smart list</option><option value="opportunities">Pipeline opportunities</option></select></label>
-        <label>{form.sourceType === "contacts" ? "Smart list ID (optional)" : "Pipeline or stage ID (optional)"}<input value={form.selectionId} onChange={(event) => setForm({ ...form, selectionId: event.target.value })}/></label>
-        <label>Source name<input value={form.selectionName} onChange={(event) => setForm({ ...form, selectionName: event.target.value })} placeholder={form.sourceType === "contacts" ? "e.g. Qualified leads" : "e.g. Booked calls"}/></label>
-        <label>Cost per conversion<input value={form.metricLabel} onChange={(event) => setForm({ ...form, metricLabel: event.target.value })} placeholder="e.g. Booked calls" required/></label>
-        {connectError && <p className="form-error">{connectError}</p>}
-        <button className="primary" disabled={saving}>{saving ? "Connecting…" : "Connect GoHighLevel"}</button>
-      </form>
-    </div> : <>
-      {data?.connection && <><div className="reconciliation"><Info/><div><b>Lead model: {data.config?.metric_label ?? "Choose a conversion"}</b><span>{data.config?.source_type === "opportunities" ? "Pipeline opportunities" : "Contacts / smart list"}{data.config?.selection_name ? ` · ${data.config.selection_name}` : ""} · {data.connection.external_account_name ?? "GoHighLevel connected"}</span></div><button onClick={() => void sync()} disabled={syncing}>{syncing ? "Importing…" : "Refresh GoHighLevel"}</button><button onClick={onOpenConnections}>Manage connections</button></div>{syncMessage && <p className="form-error">{syncMessage}</p>}</>}
-      <div className="overview-grid leads-metrics">
-        <LeadMetric label="Meta cost" value={loading ? "…" : formatter.format(data?.totals.metaSpend ?? 0)} delta="Facebook Ads" positive={false}/><LeadMetric label="Google cost" value={loading ? "…" : formatter.format(data?.totals.googleSpend ?? 0)} delta="Google Ads" positive={false}/><LeadMetric label="Total ad cost" value={loading ? "…" : formatter.format(data?.totals.totalSpend ?? 0)} delta="Meta + Google" positive={false}/><LeadMetric label={data?.config?.metric_label ?? "Conversions"} value={loading ? "…" : String(data?.totals.conversions ?? 0)} delta="GoHighLevel imported" positive/><LeadMetric label={`Cost per ${(data?.config?.metric_label ?? "conversion").toLowerCase()}`} value={loading ? "…" : data?.totals.costPerConversion == null ? "—" : formatter.format(data.totals.costPerConversion)} delta="Ad cost ÷ selected result" positive={false}/>
-      </div>
-      <div className="cost-panel"><span className="eyebrow">PERFORMANCE</span><h2>Spend and selected conversions</h2><p>Each bar shows daily Facebook and Google spend. Refresh GoHighLevel after its connection is set up to populate your selected lead or opportunity count.</p><div className="lead-bars">{data?.points.length ? data.points.map((point) => <div className="lead-bar" key={point.date} title={`${point.date}: ${formatter.format(point.metaSpend + point.googleSpend)} ad cost, ${point.conversions} conversions`}><div className="lead-spend" style={{ height: `${Math.max(3, ((point.metaSpend + point.googleSpend) / maxSpend) * 140)}px` }}><i style={{ height: `${point.metaSpend + point.googleSpend ? (point.metaSpend / (point.metaSpend + point.googleSpend)) * 100 : 0}%` }}/></div><b>{point.conversions}</b><small>{point.date.slice(5)}</small></div>) : <div className="cost-empty"><BarChart3/><strong>No advertising data in this period</strong></div>}</div></div>
-    </>}
+    <button className="primary" onClick={onOpenConnections}>Set up GoHighLevel</button>
   </section>;
 }
 
