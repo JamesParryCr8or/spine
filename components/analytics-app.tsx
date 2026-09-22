@@ -1210,17 +1210,44 @@ function Expenses() {
   </>;
 }
 
+type LeadDashboardData = {
+  currency: string;
+  connection: { status: string; external_account_name: string | null } | null;
+  config: { source_type: "contacts" | "opportunities"; metric_label: string; selection_name: string | null } | null;
+  totals: { metaSpend: number; googleSpend: number; totalSpend: number; conversions: number; costPerConversion: number | null };
+  points: Array<{ date: string; metaSpend: number; googleSpend: number; conversions: number }>;
+};
+
 function Leads({ onOpenConnections }: { onOpenConnections: () => void }) {
-  return <section className="cost-panel leads-dashboard">
-    <span className="eyebrow">LEAD GENERATION</span>
-    <h2>Lead performance</h2>
-    <p>Use this standalone dashboard to compare Meta and Google spend against the GoHighLevel result that matters: a qualified lead, booked call, or pipeline opportunity.</p>
+  const [data, setData] = useState<LeadDashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      const response = await fetch("/api/analytics/leads", { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Could not load lead performance");
+      setData(payload as LeadDashboardData);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load lead performance"); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+  const format = new Intl.NumberFormat("en-GB", { style: "currency", currency: data?.currency || "GBP", maximumFractionDigits: 0 });
+  const configLabel = data?.config?.metric_label || "conversion";
+  const recent = data?.points.slice(-12) ?? [];
+  const maxSpend = Math.max(1, ...recent.map((point) => point.metaSpend + point.googleSpend));
+  return <section className="leads-dashboard">
+    <div className="lead-dashboard-heading"><div><span className="eyebrow">LEAD GENERATION</span><h2>Lead performance</h2><p>Marketing cost against the GoHighLevel result selected for this account.</p></div><button className="filter-button" onClick={() => void load()} disabled={loading}><RefreshCw className={loading ? "spin" : ""}/>{loading ? "Refreshing" : "Refresh"}</button></div>
+    {error ? <div className="connection-error" role="alert">{error}</div> : null}
+    {!loading && !data?.connection ? <div className="connection-notice"><Info/><div><strong>Connect GoHighLevel to start lead reporting</strong><span>Choose contacts or pipeline opportunities, then Spine can calculate cost per result.</span></div><button className="primary" onClick={onOpenConnections}>Open Connections</button></div> : null}
     <div className="metric-grid">
-      <article className="metric-card"><div className="metric-label">Meta cost</div><div className="metric-value">Connect ad data</div></article>
-      <article className="metric-card"><div className="metric-label">Google cost</div><div className="metric-value">Connect ad data</div></article>
-      <article className="metric-card"><div className="metric-label">Cost per result</div><div className="metric-value">Choose a GHL source</div></article>
+      <article className="metric-card"><div className="metric-label">Meta cost</div><strong>{format.format(data?.totals.metaSpend ?? 0)}</strong><div className="metric-foot">Imported Meta Ads spend</div></article>
+      <article className="metric-card"><div className="metric-label">Google cost</div><strong>{format.format(data?.totals.googleSpend ?? 0)}</strong><div className="metric-foot">Imported Google Ads spend</div></article>
+      <article className="metric-card"><div className="metric-label">Total marketing cost</div><strong>{format.format(data?.totals.totalSpend ?? 0)}</strong><div className="metric-foot">Meta + Google</div></article>
+      <article className="metric-card"><div className="metric-label">Cost per {configLabel}</div><strong>{data?.totals.costPerConversion === null || data?.totals.costPerConversion === undefined ? "—" : format.format(data.totals.costPerConversion)}</strong><div className="metric-foot">{data?.totals.conversions ?? 0} {configLabel}{(data?.totals.conversions ?? 0) === 1 ? "" : "s"} imported</div></article>
     </div>
-    <button className="primary" onClick={onOpenConnections}>Set up GoHighLevel</button>
+    <section className="panel lead-trend-panel"><div className="panel-head"><div><span className="eyebrow">TREND</span><h3>Spend and {configLabel}s</h3></div><span>{data?.config?.selection_name || data?.connection?.external_account_name || "GoHighLevel"}</span></div>{loading ? <div className="cost-empty"><RefreshCw className="spin"/><strong>Loading lead performance…</strong></div> : recent.length ? <div className="lead-bars">{recent.map((point) => <div className="lead-bar" key={point.date} title={`${point.date}: ${format.format(point.metaSpend + point.googleSpend)} spend, ${point.conversions} ${configLabel}s`}><div className="lead-bar-spend" style={{ height: `${Math.max(6, ((point.metaSpend + point.googleSpend) / maxSpend) * 150)}px` }}/><small>{point.date.slice(5)}</small></div>)}</div> : <div className="cost-empty"><BarChart3/><strong>No reporting data has been imported yet</strong><span>Your GoHighLevel connection is saved. The next step is to sync its selected contacts or opportunities into this dashboard.</span></div>}</section>
   </section>;
 }
 
