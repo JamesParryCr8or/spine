@@ -63,6 +63,23 @@ export async function POST(request: Request) {
   return NextResponse.json({ connection: Array.isArray(saved.data) ? saved.data[0] : saved.data, config });
 }
 
+
+export async function PATCH(request: Request) {
+  const result = await context();
+  if (result.response) return result.response;
+  if (!["owner", "admin"].includes(result.membership.role)) return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
+  const body = await request.json().catch(() => ({})) as { pipelineId?: string; pipelineName?: string; stageId?: string; stageName?: string };
+  const selectionId = body.stageId?.trim();
+  const pipelineName = body.pipelineName?.trim();
+  const stageName = body.stageName?.trim();
+  if (!selectionId || !pipelineName || !stageName) return NextResponse.json({ error: "Choose a pipeline and stage" }, { status: 400 });
+  const { data, error } = await result.supabase.from("gohighlevel_reporting_configs").update({
+    source_type: "opportunities", selection_id: selectionId, selection_name: `${pipelineName} — ${stageName}`, metric_label: stageName, updated_by: result.userId, updated_at: new Date().toISOString(),
+  }).eq("store_id", result.store.id).select("source_type,selection_id,selection_name,metric_label,updated_at").single();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ config: data });
+}
+
 export async function DELETE() {
   const result = await context();
   if (result.response) return result.response;
