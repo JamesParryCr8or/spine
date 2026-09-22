@@ -20,11 +20,11 @@ import {
 import {
   ArrowDownRight, ArrowUpRight, BarChart3, CalendarDays, ChevronDown,
   CircleDollarSign, Database, Download, Eye, EyeOff, ExternalLink, FileBarChart, Info, KeyRound, LayoutDashboard,
-  LogOut, Megaphone, Menu, Package, Plus, RefreshCw, Search, Settings,
+  LogOut, Megaphone, Menu, Package, PhoneCall, Plus, RefreshCw, Search, Settings,
   ShoppingBag, Sparkles, Table2, TrendingUp, Upload, Users, WalletCards, X, Trash2,
 } from "lucide-react";
 
-type View = "Overview" | "Profit & Loss" | "Sales" | "UTM Analysis" | "Products" | "Customers" | "Customer cohorts" | "Repurchase rates" | "Time between orders" | "Product journeys" | "Costs" | "Expenses" | "Reports" | "Connections" | "Settings";
+type View = "Overview" | "Profit & Loss" | "Sales" | "UTM Analysis" | "Products" | "Leads" | "Customers" | "Customer cohorts" | "Repurchase rates" | "Time between orders" | "Product journeys" | "Costs" | "Expenses" | "Reports" | "Connections" | "Settings";
 type CustomerFocus = "summary" | "cohorts" | "repurchase" | "timing" | "journeys";
 type DrilldownContext = { from?: string; to?: string; search?: string; source?: string; medium?: string; campaign?: string; landingPage?: string; customerType?: string; country?: string; product?: string; comparisonMode?: "previous_period" | "previous_year"; attributionModel?: "first_touch" | "last_touch" };
 type OverviewWidgetId = "channel" | "products" | "customers" | "costs";
@@ -66,6 +66,7 @@ function financeDateRange(preset: FinanceDatePreset) {
 
 const nav: { label: View; display?: string; icon: typeof LayoutDashboard; section?: string; subItem?: boolean }[] = [
   { label: "Overview", icon: LayoutDashboard },
+  { label: "Leads", icon: PhoneCall, section: "LEAD GENERATION" },
   { label: "Profit & Loss", icon: FileBarChart, section: "REPORTING" },
   { label: "Sales", icon: ShoppingBag },
   { label: "UTM Analysis", icon: Megaphone },
@@ -1208,7 +1209,70 @@ function Expenses() {
   </>;
 }
 
-function Connections() {
+type LeadGenerationData = {
+  currency: string;
+  connection: { status: string; external_account_name: string | null; last_error: string | null } | null;
+  config: { source_type: "contacts" | "opportunities"; selection_id: string | null; selection_name: string | null; metric_label: string; updated_at: string } | null;
+  totals: { metaSpend: number; googleSpend: number; totalSpend: number; conversions: number; costPerConversion: number | null };
+  points: Array<{ date: string; metaSpend: number; googleSpend: number; conversions: number }>;
+};
+
+function Leads({ onOpenConnections }: { onOpenConnections: () => void }) {
+  const [range, setRange] = useState(() => financeDateRange("last_30_days"));
+  const [data, setData] = useState<LeadGenerationData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [connectError, setConnectError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ apiKey: "", locationId: "", sourceType: "contacts" as "contacts" | "opportunities", selectionId: "", selectionName: "", metricLabel: "Qualified leads" });
+  const load = useCallback(async () => {
+    setLoading(true);
+    const response = await fetch(`/api/analytics/leads?from=${range.from}&to=${range.to}`, { cache: "no-store" });
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok) setData(payload);
+    setLoading(false);
+  }, [range.from, range.to]);
+  useEffect(() => { void load(); }, [load]);
+  const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: data?.currency ?? "GBP", maximumFractionDigits: 0 });
+  const connect = async (event: React.FormEvent) => {
+    event.preventDefault(); setSaving(true); setConnectError("");
+    const response = await fetch("/api/connections/gohighlevel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+    const payload = await response.json().catch(() => ({}));
+    setSaving(false);
+    if (!response.ok) { setConnectError(payload.error ?? "GoHighLevel could not be connected"); return; }
+    setForm((current) => ({ ...current, apiKey: "" }));
+    await load();
+  };
+  const maxSpend = Math.max(1, ...(data?.points.map((point) => point.metaSpend + point.googleSpend) ?? [1]));
+  const changeRange = (preset: FinanceDatePreset) => setRange(financeDateRange(preset));
+  return <section className="leads-dashboard">
+    <div className="report-toolbar">
+      <label>Period<select value={range.from === financeDateRange("last_7_days").from ? "last_7_days" : "last_30_days"} onChange={(event) => changeRange(event.target.value as FinanceDatePreset)}><option value="last_7_days">Last 7 days</option><option value="last_30_days">Last 30 days</option><option value="last_90_days">Last 90 days</option><option value="last_365_days">Last 365 days</option></select></label>
+      <label>From<input type="date" value={range.from} onChange={(event) => setRange((current) => ({ ...current, from: event.target.value }))}/></label>
+      <label>To<input type="date" value={range.to} onChange={(event) => setRange((current) => ({ ...current, to: event.target.value }))}/></label>
+      <button className="icon-button" onClick={() => void load()} title="Refresh lead reporting"><RefreshCw/></button>
+    </div>
+    {!data?.connection && !loading ? <div className="cost-panel">
+      <span className="eyebrow">GOHIGHLEVEL INTEGRATION</span><h2>Connect your lead conversion source</h2>
+      <p>Keep your ecommerce reports separate. Choose the GoHighLevel count that represents a lead, booked call or pipeline conversion, then Spine will calculate ad cost per result.</p>
+      <form className="connection-form" onSubmit={connect}>
+        <label>Private integration key<input type="password" value={form.apiKey} onChange={(event) => setForm({ ...form, apiKey: event.target.value })} placeholder="pit-..." required/></label>
+        <label>GoHighLevel location ID<input value={form.locationId} onChange={(event) => setForm({ ...form, locationId: event.target.value })} required/></label>
+        <label>Conversion source<select value={form.sourceType} onChange={(event) => setForm({ ...form, sourceType: event.target.value as "contacts" | "opportunities" })}><option value="contacts">Contacts / smart list</option><option value="opportunities">Pipeline opportunities</option></select></label>
+        <label>{form.sourceType === "contacts" ? "Smart list ID (optional)" : "Pipeline or stage ID (optional)"}<input value={form.selectionId} onChange={(event) => setForm({ ...form, selectionId: event.target.value })}/></label>
+        <label>Source name<input value={form.selectionName} onChange={(event) => setForm({ ...form, selectionName: event.target.value })} placeholder={form.sourceType === "contacts" ? "e.g. Qualified leads" : "e.g. Booked calls"}/></label>
+        <label>Cost per<label className="visually-hidden">Conversion name</label><input value={form.metricLabel} onChange={(event) => setForm({ ...form, metricLabel: event.target.value })} placeholder="e.g. Booked calls" required/></label>
+        {connectError && <p className="form-error">{connectError}</p>}
+        <button className="primary" disabled={saving}>{saving ? "Connecting…" : "Connect GoHighLevel"}</button>
+      </form>
+    </div> : <>{data?.connection && <div className="reconciliation"><Info/><div><b>Lead model: {data.config?.metric_label ?? "Choose a conversion"}</b><span>{data.config?.source_type === "opportunities" ? "Pipeline opportunities" : "Contacts / smart list"}{data.config?.selection_name ? ` · ${data.config.selection_name}` : ""} · {data.connection.external_account_name ?? "GoHighLevel connected"}</span></div><button onClick={onOpenConnections}>Manage connections</button></div>}
+      <div className="overview-grid leads-metrics">
+        <Metric label="Meta cost" value={loading ? "…" : formatter.format(data?.totals.metaSpend ?? 0)} delta="Facebook Ads" positive={false}/><Metric label="Google cost" value={loading ? "…" : formatter.format(data?.totals.googleSpend ?? 0)} delta="Google Ads" positive={false}/><Metric label="Total ad cost" value={loading ? "…" : formatter.format(data?.totals.totalSpend ?? 0)} delta="Meta + Google" positive={false}/><Metric label={data?.config?.metric_label ?? "Conversions"} value={loading ? "…" : String(data?.totals.conversions ?? 0)} delta="GoHighLevel imported" positive/><Metric label={`Cost per ${(data?.config?.metric_label ?? "conversion").toLowerCase()}`} value={loading ? "…" : data?.totals.costPerConversion == null ? "—" : formatter.format(data.totals.costPerConversion)} delta="Ad cost ÷ selected result" positive={false}/>
+      </div>
+      <div className="cost-panel"><span className="eyebrow">PERFORMANCE</span><h2>Spend and selected conversions</h2><p>Each bar shows daily Facebook and Google spend. Refresh GoHighLevel after its connection is set up to populate your selected lead or opportunity count.</p><div className="lead-bars">{data?.points.length ? data.points.map((point) => <div className="lead-bar" key={point.date} title={`${point.date}: ${formatter.format(point.metaSpend + point.googleSpend)} ad cost, ${point.conversions} conversions`}><div className="lead-spend" style={{ height: `${Math.max(3, ((point.metaSpend + point.googleSpend) / maxSpend) * 140)}px` }}><i style={{ height: `${point.metaSpend + point.googleSpend ? (point.metaSpend / (point.metaSpend + point.googleSpend)) * 100 : 0}%` }}/></div><b>{point.conversions}</b><small>{point.date.slice(5)}</small></div>) : <div className="cost-empty"><BarChart3/><strong>No advertising data in this period</strong></div>}</div></div>
+    </>}
+  </section>;
+}
+\nfunction Connections() {
   const [showMetaSetup, setShowMetaSetup] = useState(false);
   const [showShopifySetup, setShowShopifySetup] = useState(false);
   const [showToken, setShowToken] = useState(false);
@@ -1731,8 +1795,8 @@ export function AnalyticsApp() {
   return <div className="app-shell">
     <aside className={mobileOpen?"sidebar open":"sidebar"}><div className="brand"><span className="brand-mark"><Image src="/spine-logo.png" alt="" width={34} height={34} priority /></span><span><b>Spine</b><small>The backbone of your business</small></span><button className="mobile-close" onClick={()=>setMobileOpen(false)}><X/></button></div><label className="store-switcher"><span className="store-icon"><ShoppingBag/></span><span><small>STORE</small><b>{switchingStore ? "Switching…" : activeStoreName}</b></span><select aria-label="Active store" value={workspace?.activeStoreId ?? ""} disabled={!workspace || switchingStore || workspace.stores.length < 2} onChange={(event)=>void switchStore(event.target.value)}>{workspace?.stores.map((store)=>{const organization=workspace?.organizations.find((candidate)=>candidate.id===store.organizationId);return <option key={store.id} value={store.id}>{organization && (workspace?.organizations.length ?? 0) > 1 ? `${organization.name} · ` : ""}{store.name}</option>})}</select><ChevronDown/></label><nav>{nav.map((item)=><div key={item.label}>{item.section&&<span className="nav-section">{item.section}</span>}<button className={`${view===item.label ? "nav-item active" : "nav-item"}${item.subItem ? " nav-sub-item" : ""}`} onClick={()=>{setActiveReportRun(null);setDrilldown(null);setView(item.label);setMobileOpen(false)}}><item.icon/><span>{item.display ?? item.label}</span></button></div>)}</nav><div className="sidebar-bottom"><button className={view==="Settings"?"nav-item active":"nav-item"} onClick={()=>{setActiveReportRun(null);setDrilldown(null);setView("Settings");setMobileOpen(false)}}><Settings/><span>Settings</span></button><button className="nav-item" onClick={logout}><LogOut/><span>Sign out</span></button><div className="user-card"><div>{account.name.slice(0, 2).toUpperCase()}</div><span><b>{account.name}</b><small>{account.email}</small></span></div></div></aside>
     <main className="main"><header className="topbar"><button className="menu-button" onClick={()=>setMobileOpen(true)}><Menu/></button><div className="breadcrumb"><span>{activeStoreName}</span><b>/</b><strong>{view}</strong></div><div className="top-actions"><button className="date-button" title="Date filtering is coming next"><CalendarDays/><span>All imported data</span><ChevronDown/></button><button className="icon-button" onClick={openSync} title="Open Shopify sync"><RefreshCw/></button><button className="export-button" onClick={()=>setView("Reports")}><Table2/> Reports</button></div></header>
-      <div className="content"><div className="page-heading"><div><span className="eyebrow">ECOMMERCE INTELLIGENCE</span><h1>{view}</h1><p>{view==="Overview"?"A clear view of what your store earned—not just what it sold.":view==="UTM Analysis"?"Understand which traffic sources create profitable customers.":view==="Profit & Loss"?"Your ecommerce income statement, based on all imported Shopify data.":`Manage and analyse your ${view.toLowerCase()}.`}</p></div><div className="freshness"><span className={freshness?.latestStatus === "failed" ? "sync-dot syncing" : "sync-dot"}/><div><small>{freshnessHeading}</small><b>{freshnessDetail}</b></div></div></div>
-        {view==="Overview"?<Overview reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} onDrilldown={openDrilldown}/>:view==="Profit & Loss"?<ProfitLoss savedPreset={pnlPreset} initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Sales"?<Sales reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="UTM Analysis"?<UTMAnalysis initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Products"?<Products initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} openCosts={(sku) => { setCostSku(sku); setDrilldown(null); setView("Costs"); }}/>:(["Customers", "Customer cohorts", "Repurchase rates", "Time between orders", "Product journeys"] as View[]).includes(view)?<Customers initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} focus={view === "Customer cohorts" ? "cohorts" : view === "Repurchase rates" ? "repurchase" : view === "Time between orders" ? "timing" : view === "Product journeys" ? "journeys" : "summary"}/>:view==="Costs"?<Costs focusSku={costSku}/>:view==="Expenses"?<Expenses/>:view==="Reports"?<Reports openReport={(target, preset, runId, filters) => { setPnlPreset(preset); setDrilldown(filters ?? null); setActiveReportRun({ id: runId, view: target }); setView(target); }}/> :view==="Connections"?<Connections/>:view==="Settings"?<SettingsView/>:<Generic view={view}/>}</div>
+      <div className="content"><div className="page-heading"><div><span className="eyebrow">{view==="Leads" ? "LEAD GENERATION INTELLIGENCE" : "ECOMMERCE INTELLIGENCE"}</span><h1>{view}</h1><p>{view==="Leads"?"A standalone view of ad cost against your selected GoHighLevel conversion.":view==="Overview"?"A clear view of what your store earned—not just what it sold.":view==="UTM Analysis"?"Understand which traffic sources create profitable customers.":view==="Profit & Loss"?"Your ecommerce income statement, based on all imported Shopify data.":`Manage and analyse your ${view.toLowerCase()}.`}</p></div><div className="freshness"><span className={freshness?.latestStatus === "failed" ? "sync-dot syncing" : "sync-dot"}/><div><small>{freshnessHeading}</small><b>{freshnessDetail}</b></div></div></div>
+        {view==="Overview"?<Overview reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} onDrilldown={openDrilldown}/>:view==="Leads"?<Leads onOpenConnections={() => setView("Connections")}/>:view==="Profit & Loss"?<ProfitLoss savedPreset={pnlPreset} initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Sales"?<Sales reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="UTM Analysis"?<UTMAnalysis initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Products"?<Products initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} openCosts={(sku) => { setCostSku(sku); setDrilldown(null); setView("Costs"); }}/>:(["Customers", "Customer cohorts", "Repurchase rates", "Time between orders", "Product journeys"] as View[]).includes(view)?<Customers initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} focus={view === "Customer cohorts" ? "cohorts" : view === "Repurchase rates" ? "repurchase" : view === "Time between orders" ? "timing" : view === "Product journeys" ? "journeys" : "summary"}/>:view==="Costs"?<Costs focusSku={costSku}/>:view==="Expenses"?<Expenses/>:view==="Reports"?<Reports openReport={(target, preset, runId, filters) => { setPnlPreset(preset); setDrilldown(filters ?? null); setActiveReportRun({ id: runId, view: target }); setView(target); }}/> :view==="Connections"?<Connections/>:view==="Settings"?<SettingsView/>:<Generic view={view}/>}</div>
     </main>
   </div>;
 }
