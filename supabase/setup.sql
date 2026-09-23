@@ -35,6 +35,7 @@ create table if not exists public.stores (
   timezone text not null default 'Europe/London',
   currency text not null default 'GBP',
   reporting_currency text not null default 'GBP',
+  business_model text not null default 'ecommerce' check (business_model in ('ecommerce', 'lead_generation')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
