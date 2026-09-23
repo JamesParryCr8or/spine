@@ -46,6 +46,7 @@ export async function GET() {
       currency: store.currency,
       reportingCurrency: store.reporting_currency,
       timezone: store.timezone,
+      businessModel: store.business_model ?? "ecommerce",
     })),
   });
 }
@@ -85,10 +86,19 @@ export async function PATCH(request: Request) {
   if (!result.ok) return result.response;
   if (!result.store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
   if (!["owner", "admin"].includes(result.membership.role)) return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
-  const input = await request.json().catch(() => null) as { name?: string } | null;
-  const name = input?.name?.trim() ?? "";
-  if (name.length < 2 || name.length > 80) return NextResponse.json({ error: "Brand name must be between 2 and 80 characters" }, { status: 400 });
-  const { data, error } = await result.supabase.from("stores").update({ name }).eq("id", result.store.id).select("id,name").single();
+  const input = await request.json().catch(() => null) as { name?: string; businessModel?: unknown } | null;
+  const changes: { name?: string; business_model?: "ecommerce" | "lead_generation" } = {};
+  if (typeof input?.name === "string") {
+    const name = input.name.trim();
+    if (name.length < 2 || name.length > 80) return NextResponse.json({ error: "Brand name must be between 2 and 80 characters" }, { status: 400 });
+    changes.name = name;
+  }
+  if (input && "businessModel" in input) {
+    if (input.businessModel !== "ecommerce" && input.businessModel !== "lead_generation") return NextResponse.json({ error: "Choose ecommerce or lead generation" }, { status: 400 });
+    changes.business_model = input.businessModel;
+  }
+  if (!Object.keys(changes).length) return NextResponse.json({ error: "Choose a brand name or business model to save" }, { status: 400 });
+  const { data, error } = await result.supabase.from("stores").update(changes).eq("id", result.store.id).select("id,name,business_model").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ store: data });
 }
@@ -111,7 +121,8 @@ export async function PUT(request: Request) {
     currency: templateStore?.currency ?? "GBP",
     reporting_currency: templateStore?.reporting_currency ?? templateStore?.currency ?? "GBP",
     timezone: templateStore?.timezone ?? "Europe/London",
-  }).select("id,organization_id,name,currency,reporting_currency,timezone").single();
+    business_model: "ecommerce",
+  }).select("id,organization_id,name,currency,reporting_currency,timezone,business_model").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const cookieStore = await cookies();
@@ -125,6 +136,7 @@ export async function PUT(request: Request) {
       currency: store.currency,
       reportingCurrency: store.reporting_currency,
       timezone: store.timezone,
+      businessModel: store.business_model ?? "ecommerce",
     },
   }, { status: 201 });
 }
