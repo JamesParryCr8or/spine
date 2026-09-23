@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireWorkspace } from "@/lib/workspace/server";
 
-const isDate = (value: string) => /^\\d{4}-\\d{2}-\\d{2}$/.test(value);
+const isDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
 const amount = (value: unknown) => Number(value ?? 0) || 0;
 
 export async function GET(request: Request) {
