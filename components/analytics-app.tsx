@@ -124,14 +124,19 @@ type FinanceTrendPoint = {
 function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrendPoint[]; formatter: Intl.NumberFormat; onOpen: (point: FinanceTrendPoint) => void }) {
   const [hovered, setHovered] = useState<number | null>(null);
   if (!points.length) return <div className="cost-empty"><BarChart3/><strong>No trend data in this period</strong></div>;
-  const width = 920, height = 330, left = 58, right = 18, top = 18, zeroY = 164, bottom = 292;
+  const width = 920, height = 330, left = 58, right = 18, top = 18, bottom = 292;
+  const zeroY = (top + bottom) / 2;
   const plotWidth = width - left - right;
   const step = plotWidth / points.length;
-  const positiveMax = Math.max(...points.flatMap((point) => [point.revenue, point.profit, 1]));
-  const negativeMax = Math.max(...points.map((point) => point.cogs + point.marketing + point.paymentFees + point.shipping + point.operating), ...points.map((point) => Math.max(-point.profit, 0)), 1);
-  const y = (value: number) => value >= 0 ? zeroY - value / positiveMax * (zeroY - top) : zeroY + Math.abs(value) / negativeMax * (bottom - zeroY);
-  const positiveTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => ({ ratio, y: zeroY - (zeroY - top) * ratio, value: positiveMax * ratio }));
-  const negativeTicks = [0.25, 0.5, 0.75, 1].map((ratio) => ({ ratio, y: zeroY + (bottom - zeroY) * ratio, value: -negativeMax * ratio }));
+  const axisMaximum = Math.max(
+    ...points.flatMap((point) => [point.revenue, point.profit]),
+    ...points.map((point) => point.cogs + point.marketing + point.paymentFees + point.shipping + point.operating),
+    ...points.map((point) => Math.abs(point.profit)),
+    1,
+  );
+  const y = (value: number) => zeroY - value / axisMaximum * (zeroY - top);
+  const positiveTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => ({ ratio, y: zeroY - (zeroY - top) * ratio, value: axisMaximum * ratio }));
+  const negativeTicks = [0.25, 0.5, 0.75, 1].map((ratio) => ({ ratio, y: zeroY + (bottom - zeroY) * ratio, value: -axisMaximum * ratio }));
   const line = points.map((point, index) => `${left + step * index + step / 2},${y(point.profit)}`).join(" ");
   const costColors = ["#f59e0b", "#ef6c63", "#a855f7", "#3b82f6", "#64748b"];
   const active = hovered === null ? null : points[hovered];
