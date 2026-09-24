@@ -128,23 +128,42 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
   const zeroY = (top + bottom) / 2;
   const plotWidth = width - left - right;
   const step = plotWidth / points.length;
-  const axisMaximum = Math.max(
-    ...points.flatMap((point) => [point.revenue, point.profit]),
+  const dataMaximum = Math.max(
+    ...points.flatMap((point) => [point.revenue, Math.abs(point.profit)]),
     ...points.map((point) => point.cogs + point.marketing + point.paymentFees + point.shipping + point.operating),
-    ...points.map((point) => Math.abs(point.profit)),
     1,
   );
+  const niceStep = (value: number) => {
+    const magnitude = 10 ** Math.floor(Math.log10(value));
+    const normalized = value / magnitude;
+    const rounded = [1, 2, 2.5, 5, 10].find((candidate) => normalized <= candidate) ?? 10;
+    return rounded * magnitude;
+  };
+  const axisStep = niceStep(dataMaximum / 4);
+  const axisMaximum = axisStep * 4;
+  const axisLabel = (value: number) => {
+    const absolute = Math.abs(value);
+    const symbol = formatter.formatToParts(0).find((part) => part.type === "currency")?.value ?? "";
+    const prefix = value < 0 ? "-" : "";
+    const compact = (divisor: number, suffix: string) => {
+      const scaled = absolute / divisor;
+      return `${prefix}${symbol}${scaled % 1 === 0 ? scaled.toFixed(0) : scaled.toFixed(1)}${suffix}`;
+    };
+    if (absolute >= 1_000_000) return compact(1_000_000, "M");
+    if (absolute >= 1_000) return compact(1_000, "K");
+    return formatter.format(value);
+  };
   const y = (value: number) => zeroY - value / axisMaximum * (zeroY - top);
-  const positiveTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => ({ ratio, y: zeroY - (zeroY - top) * ratio, value: axisMaximum * ratio }));
-  const negativeTicks = [0.25, 0.5, 0.75, 1].map((ratio) => ({ ratio, y: zeroY + (bottom - zeroY) * ratio, value: -axisMaximum * ratio }));
+  const positiveTicks = [0, 1, 2, 3, 4].map((index) => ({ index, y: zeroY - (zeroY - top) * index / 4, value: axisStep * index }));
+  const negativeTicks = [1, 2, 3, 4].map((index) => ({ index, y: zeroY + (bottom - zeroY) * index / 4, value: -axisStep * index }));
   const line = points.map((point, index) => `${left + step * index + step / 2},${y(point.profit)}`).join(" ");
   const costColors = ["#f59e0b", "#ef6c63", "#a855f7", "#3b82f6", "#64748b"];
   const active = hovered === null ? null : points[hovered];
   return <div className="finance-chart">
     <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Revenue, costs and profit over time">
       <line x1={left} x2={left} y1={top} y2={bottom} className="finance-axis"/>
-      {positiveTicks.map((tick) => <g key={`positive-${tick.ratio}`}><line x1={left} x2={width-right} y1={tick.y} y2={tick.y} className={tick.ratio === 0 ? "finance-zero" : "finance-grid"}/><text x={left-10} y={tick.y+3} textAnchor="end" className="finance-axis-label">{formatter.format(tick.value)}</text></g>)}
-      {negativeTicks.map((tick) => <g key={`negative-${tick.ratio}`}><line x1={left} x2={width-right} y1={tick.y} y2={tick.y} className="finance-grid"/><text x={left-10} y={tick.y+3} textAnchor="end" className="finance-axis-label">{formatter.format(tick.value)}</text></g>)}
+      {positiveTicks.map((tick) => <g key={`positive-${tick.index}`}><line x1={left} x2={width-right} y1={tick.y} y2={tick.y} className={tick.index === 0 ? "finance-zero" : "finance-grid"}/><text x={left-10} y={tick.y+3} textAnchor="end" className="finance-axis-label">{axisLabel(tick.value)}</text></g>)}
+      {negativeTicks.map((tick) => <g key={`negative-${tick.index}`}><line x1={left} x2={width-right} y1={tick.y} y2={tick.y} className="finance-grid"/><text x={left-10} y={tick.y+3} textAnchor="end" className="finance-axis-label">{axisLabel(tick.value)}</text></g>)}
       {points.map((point,index) => {
         const center = left + step * index + step / 2;
         const barWidth = Math.min(30, step * .44);
