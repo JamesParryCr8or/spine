@@ -140,3 +140,32 @@ export async function PUT(request: Request) {
     },
   }, { status: 201 });
 }
+
+export async function DELETE() {
+  const result = await requireWorkspace();
+  if (!result.ok) return result.response;
+  if (!result.store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
+  if (!["owner", "admin"].includes(result.membership.role)) {
+    return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
+  }
+
+  const { data: stores, error: storesError } = await result.supabase
+    .from("stores")
+    .select("id,organization_id")
+    .eq("organization_id", result.membership.organizationId)
+    .order("created_at", { ascending: true });
+  if (storesError) return NextResponse.json({ error: storesError.message }, { status: 500 });
+
+  const replacement = (stores ?? []).find((store) => store.id !== result.store!.id);
+  if (!replacement) {
+    return NextResponse.json({ error: "You cannot delete the only brand in this account" }, { status: 400 });
+  }
+
+  const { error } = await result.supabase.from("stores").delete().eq("id", result.store.id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  const cookieStore = await cookies();
+  cookieStore.set(activeOrganizationCookie, replacement.organization_id, cookieOptions);
+  cookieStore.set(activeStoreCookie, replacement.id, cookieOptions);
+  return NextResponse.json({ activeStoreId: replacement.id });
+}
