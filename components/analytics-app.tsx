@@ -154,7 +154,7 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
         return <g key={`${point.start}-${index}`} onMouseEnter={() => setHovered(index)} onMouseLeave={() => setHovered(null)} onFocus={() => setHovered(index)} onBlur={() => setHovered(null)} onClick={() => onOpen(point)} tabIndex={0} role="button" aria-label={`${point.label}: revenue ${formatter.format(point.revenue)}, costs ${formatter.format(costs.reduce((sum,value)=>sum+value,0))}, profit ${formatter.format(point.profit)}`}>
           <rect x={center-barWidth/2} y={revenueTop} width={barWidth} height={Math.max(zeroY-revenueTop,1)} rx="4" className="finance-revenue"/>
           {costs.map((cost,costIndex) => {
-            const segmentHeight = cost / negativeMax * (bottom-zeroY);
+            const segmentHeight = cost / axisMaximum * (bottom-zeroY);
             const rect = <rect key={costIndex} x={center-barWidth/2} y={currentY} width={barWidth} height={Math.max(segmentHeight,0)} fill={costColors[costIndex]} />;
             currentY += segmentHeight;
             return rect;
