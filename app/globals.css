@@ -204,3 +204,9 @@ button { cursor:pointer; }
 .danger-button{height:36px;border:1px solid #e8a4aa;border-radius:8px;background:#fff;color:#b4232f;padding:0 13px;font:700 11px inherit;cursor:pointer;white-space:nowrap;transition:background .15s ease,color .15s ease}
 .danger-button:hover:not(:disabled){background:#b4232f;color:#fff}.danger-button:disabled{opacity:.55;cursor:not-allowed}
 @media(max-width:760px){.brand-danger{align-items:flex-start;flex-direction:column}.brand-settings .filter-row select{width:100%}.danger-button{width:100%}}
+
+.finance-axis{stroke:#c6ced9;stroke-width:1.2}
+.finance-axis-label{font-variant-numeric:tabular-nums}
+.meta-oauth-notice{align-items:center;margin:16px 0;padding:13px 14px}
+.meta-oauth-notice>div{flex:1}.meta-oauth-notice .primary{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+@media(max-width:760px){.meta-oauth-notice{align-items:flex-start;flex-direction:column}.meta-oauth-notice .primary{width:100%;justify-content:center}}
