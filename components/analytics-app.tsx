@@ -130,13 +130,16 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
   const positiveMax = Math.max(...points.flatMap((point) => [point.revenue, point.profit, 1]));
   const negativeMax = Math.max(...points.map((point) => point.cogs + point.marketing + point.paymentFees + point.shipping + point.operating), ...points.map((point) => Math.max(-point.profit, 0)), 1);
   const y = (value: number) => value >= 0 ? zeroY - value / positiveMax * (zeroY - top) : zeroY + Math.abs(value) / negativeMax * (bottom - zeroY);
+  const positiveTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => ({ ratio, y: zeroY - (zeroY - top) * ratio, value: positiveMax * ratio }));
+  const negativeTicks = [0.25, 0.5, 0.75, 1].map((ratio) => ({ ratio, y: zeroY + (bottom - zeroY) * ratio, value: -negativeMax * ratio }));
   const line = points.map((point, index) => `${left + step * index + step / 2},${y(point.profit)}`).join(" ");
   const costColors = ["#f59e0b", "#ef6c63", "#a855f7", "#3b82f6", "#64748b"];
   const active = hovered === null ? null : points[hovered];
   return <div className="finance-chart">
     <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Revenue, costs and profit over time">
-      <line x1={left} x2={width-right} y1={zeroY} y2={zeroY} className="finance-zero"/>
-      {[0.25,0.5,0.75,1].map((ratio) => <line key={ratio} x1={left} x2={width-right} y1={zeroY-(zeroY-top)*ratio} y2={zeroY-(zeroY-top)*ratio} className="finance-grid"/>)}
+      <line x1={left} x2={left} y1={top} y2={bottom} className="finance-axis"/>
+      {positiveTicks.map((tick) => <g key={`positive-${tick.ratio}`}><line x1={left} x2={width-right} y1={tick.y} y2={tick.y} className={tick.ratio === 0 ? "finance-zero" : "finance-grid"}/><text x={left-10} y={tick.y+3} textAnchor="end" className="finance-axis-label">{formatter.format(tick.value)}</text></g>)}
+      {negativeTicks.map((tick) => <g key={`negative-${tick.ratio}`}><line x1={left} x2={width-right} y1={tick.y} y2={tick.y} className="finance-grid"/><text x={left-10} y={tick.y+3} textAnchor="end" className="finance-axis-label">{formatter.format(tick.value)}</text></g>)}
       {points.map((point,index) => {
         const center = left + step * index + step / 2;
         const barWidth = Math.min(30, step * .44);
@@ -157,9 +160,6 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
       })}
       <polyline points={line} className="finance-profit-line"/>
       {points.map((point,index) => <circle key={point.start} cx={left+step*index+step/2} cy={y(point.profit)} r={hovered===index?5:3.5} className="finance-profit-dot"/>)}
-      <text x={8} y={top+5} className="finance-axis-label">{formatter.format(positiveMax)}</text>
-      <text x={8} y={zeroY+4} className="finance-axis-label">0</text>
-      <text x={8} y={bottom} className="finance-axis-label">-{formatter.format(negativeMax)}</text>
     </svg>
     {active ? <div className="finance-tooltip"><strong>{active.label}</strong><span>Revenue <b>{formatter.format(active.revenue)}</b></span><span>COGS <b>-{formatter.format(active.cogs)}</b></span><span>Marketing <b>-{formatter.format(active.marketing)}</b></span><span>Payment fees <b>-{formatter.format(active.paymentFees)}</b></span><span>Shipping & handling <b>-{formatter.format(active.shipping)}</b></span><span>Operating costs <b>-{formatter.format(active.operating)}</b></span><span className="tooltip-profit">{active.complete ? "Net profit" : "Provisional profit"} <b>{formatter.format(active.profit)}</b></span></div> : null}
   </div>;
@@ -1406,6 +1406,26 @@ function Connections() {
       .catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    const status = query.get("metaOAuth");
+    if (!status) return;
+    const message = status === "connected" ? query.get("metaAccount") : query.get("metaError");
+    const timeout = window.setTimeout(() => {
+      setShowMetaSetup(true);
+      if (status === "connected") setMetaSyncResult(`Connected through Facebook${message ? ` to ${message}` : ""}. Your selected spend history has been imported.`);
+      else setConnectionError(message || "Facebook could not be connected.");
+      window.history.replaceState({}, "", "/protected");
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, []);
+
+  const connectMetaWithFacebook = () => {
+    setConnectionError("");
+    const params = new URLSearchParams({ lookbackMonths: metaLookbackMonths });
+    window.location.assign(`/api/connections/meta/authorize?${params}`);
+  };
+
   const saveMeta = async () => {
     if (!token.trim()) return;
     setSavingConnection(true);
@@ -1514,15 +1534,16 @@ function Connections() {
     {showMetaSetup && <div className="modal-backdrop" onMouseDown={()=>setShowMetaSetup(false)}><section className="connection-modal" onMouseDown={(event)=>event.stopPropagation()}>
       <button className="modal-close" onClick={()=>setShowMetaSetup(false)}><X/></button>
       <div className="modal-brand"><div className="source-logo m">M</div><div><span className="eyebrow">DATA CONNECTION</span><h2>Connect Meta Ads</h2></div></div>
-      <p className="modal-intro">Paste a Meta access token from the Graph API Explorer. We&apos;ll verify it against Meta, discover the ad account, securely save the connection, and import daily ad spend for the rolling period you choose. Meta allows a maximum 37-month lookback.</p>
+      <p className="modal-intro">Connect with Facebook to grant Spine read-only access to your Meta Ads account. There is no Graph API Explorer token to copy and your Facebook password never reaches Spine.</p>
+      <div className="connection-notice meta-oauth-notice"><Info/><div><strong>Connect your own Facebook account</strong><span>Choose the Meta ad account you manage, then Spine securely saves the approved connection and imports its daily spend.</span></div><button className="primary" disabled={savingConnection} onClick={connectMetaWithFacebook}><ExternalLink/>Connect Facebook</button></div>
       {metaConnected && metaAccountName && <div className="connected-account"><span/><div><small>CURRENT ACCOUNT</small><strong>{metaAccountName}</strong>{metaLastSync ? <small>{metaLastSync.importedDays.toLocaleString()} daily spend records · latest {metaLastSync.latestDate ? new Date(`${metaLastSync.latestDate}T00:00:00Z`).toLocaleDateString("en-GB") : "date unavailable"}</small> : <small>Spend data has not been imported yet.</small>}</div></div>}
-      <div className="help-card"><Info/><div><strong>Where do I find my token?</strong><ol><li>Open Meta&apos;s Graph API Explorer.</li><li>Select your Meta app and user.</li><li>Add <code>ads_read</code> and <code>read_insights</code> permissions.</li><li>Click Generate Access Token, then paste it below.</li></ol><a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noreferrer">Open Graph API Explorer <ExternalLink/></a></div></div>
-      <label className="form-field"><span>Access token <b className="tooltip-trigger">?<em>Generate this in Meta Graph API Explorer with ads_read and read_insights permissions.</em></b></span><div className="secret-input"><KeyRound/><input value={token} onChange={(event)=>setToken(event.target.value)} type={showToken?"text":"password"} placeholder="EAAB..." autoComplete="off"/><button onClick={()=>setShowToken(!showToken)}>{showToken?<EyeOff/>:<Eye/>}</button></div></label>
+      <div className="help-card"><Info/><div><strong>Alternative for agency-managed accounts</strong><p>Use a Meta system-user token only if your business manages the connection centrally. For normal use, choose <b>Connect Facebook</b> above.</p></div></div>
+      <label className="form-field"><span>System-user token <small>Optional alternative</small><b className="tooltip-trigger">?<em>Use this only for a centrally managed Meta system user with ads_read and read_insights.</em></b></span><div className="secret-input"><KeyRound/><input value={token} onChange={(event)=>setToken(event.target.value)} type={showToken?"text":"password"} placeholder="EAAB..." autoComplete="off"/><button onClick={()=>setShowToken(!showToken)}>{showToken?<EyeOff/>:<Eye/>}</button></div></label>
       <label className="form-field"><span>Ad account ID <small>Optional</small></span><input value={accountId} onChange={(event)=>setAccountId(event.target.value)} placeholder="act_123456789"/></label>
       <label className="form-field"><span>Spend history to import</span><select value={metaLookbackMonths} onChange={(event)=>setMetaLookbackMonths(event.target.value)}><option value="3">Last 3 months</option><option value="6">Last 6 months</option><option value="12">Last 12 months</option><option value="24">Last 24 months</option><option value="36">Last 36 months</option></select><small>New connections default to the last 365 days. Meta supports up to 37 months when you need more history.</small></label>
       <div className="permission-note"><KeyRound/><span><strong>Required permissions:</strong> ads_read, read_insights</span></div>
       {metaSyncResult && <div className="connected-account"><span/><div><small>SPEND IMPORT COMPLETE</small><strong>{metaSyncResult}</strong></div></div>}{connectionError && <div className="connection-error">{connectionError}</div>}
-      <div className="modal-actions">{metaConnected&&<button className="danger-button" disabled={savingConnection} onClick={disconnectMeta}>Disconnect</button>}<button onClick={()=>setShowMetaSetup(false)}>Cancel</button><button className="primary" disabled={!token.trim() || savingConnection} onClick={saveMeta}>{savingConnection?"Importing…":metaConnected?"Reconnect & import":"Verify, save & import"}</button></div>
+      <div className="modal-actions">{metaConnected&&<button className="danger-button" disabled={savingConnection} onClick={disconnectMeta}>Disconnect</button>}<button onClick={()=>setShowMetaSetup(false)}>Cancel</button><button className="primary" disabled={!token.trim() || savingConnection} onClick={saveMeta}>{savingConnection?"Importing…":metaConnected?"Save manual token":"Save manual token"}</button></div>
     </section></div>}
   </>;
 }
