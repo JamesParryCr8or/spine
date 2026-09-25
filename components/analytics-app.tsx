@@ -313,7 +313,7 @@ function Overview({ reportRunId, onDrilldown }: { reportRunId?: string; onDrilld
     const controller = new AbortController();
     const timeout = window.setTimeout(() => {
       if (!pnlSummary?.period || !pnlSummary.hasData) { setTrendData([]); return; }
-      const periods = reportingPeriods(pnlSummary.period.start, pnlSummary.period.end, granularity, 12);
+      const periods = reportingPeriods(pnlSummary.period.start, pnlSummary.period.end, granularity, granularity === "daily" ? 31 : 60);
       setTrendLoading(true);
       Promise.all(periods.map(async (period) => {
         if (period.start === pnlSummary.period?.start && period.end === pnlSummary.period?.end) return { period, data: pnlSummary };
