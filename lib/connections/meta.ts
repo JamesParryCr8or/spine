@@ -33,14 +33,21 @@ const numeric = (value: string | undefined) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-export async function discoverMetaAccounts(accessToken: string) {
-  const response = await fetch(
-    `https://graph.facebook.com/${graphVersion}/me/adaccounts?fields=id,name,account_status,currency,timezone_name&limit=100`,
-    { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" },
-  );
-  const payload = await response.json().catch(() => ({})) as { data?: MetaAccount[]; error?: { message?: string } };
-  if (!response.ok) throw new Error(payload.error?.message ?? "Meta rejected this connection");
-  return payload.data ?? [];
+export async function discoverMetaAccounts(accessToken: string, includeAllPages = false) {
+  const accounts: MetaAccount[] = [];
+  let next: string | undefined = `https://graph.facebook.com/${graphVersion}/me/adaccounts?fields=id,name,account_status,currency,timezone_name&limit=100`;
+
+  for (let page = 0; next && page < (includeAllPages ? 10 : 1); page += 1) {
+    const response = await fetch(next, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: "no-store",
+    });
+    const payload = await response.json().catch(() => ({})) as { data?: MetaAccount[]; paging?: { next?: string }; error?: { message?: string } };
+    if (!response.ok) throw new Error(payload.error?.message ?? "Meta rejected this connection");
+    accounts.push(...(payload.data ?? []));
+    next = payload.paging?.next;
+  }
+  return accounts;
 }
 
 export async function importMetaInsights({
