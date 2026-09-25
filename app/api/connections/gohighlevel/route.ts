@@ -71,7 +71,19 @@ export async function PATCH(request: Request) {
   const body = await request.json().catch(() => ({})) as { selections?: Array<{ pipelineId?: string; pipelineName?: string; stageId?: string; stageName?: string; position?: number }>; includeLaterStages?: boolean };
   const selections = (body.selections ?? []).filter((selection) => selection.stageId?.trim() && selection.pipelineId?.trim() && selection.pipelineName?.trim() && selection.stageName?.trim());
   if (!selections.length) return NextResponse.json({ error: "Choose at least one pipeline stage" }, { status: 400 });
-  const selectionId = JSON.stringify({ selections: selections.map((selection) => ({ pipelineId: selection.pipelineId!.trim(), stageId: selection.stageId!.trim(), position: Number(selection.position) || 0 })), includeLaterStages: body.includeLaterStages !== false });
+  const { data: existingConfig, error: existingConfigError } = await result.supabase
+    .from("gohighlevel_reporting_configs").select("selection_id").eq("store_id", result.store.id).maybeSingle();
+  if (existingConfigError) return NextResponse.json({ error: existingConfigError.message }, { status: 500 });
+  let defaultPipelineId: string | undefined;
+  try {
+    const parsed = JSON.parse(existingConfig?.selection_id ?? "") as { defaultPipelineId?: string };
+    defaultPipelineId = parsed.defaultPipelineId;
+  } catch { /* Older stage selections have no saved default pipeline. */ }
+  const selectionId = JSON.stringify({
+    selections: selections.map((selection) => ({ pipelineId: selection.pipelineId!.trim(), stageId: selection.stageId!.trim(), position: Number(selection.position) || 0 })),
+    includeLaterStages: body.includeLaterStages !== false,
+    ...(defaultPipelineId ? { defaultPipelineId } : {}),
+  });
   const selectionName = selections.map((selection) => `${selection.pipelineName!.trim()} — ${selection.stageName!.trim()}`).join(", ");
   const metricLabel = selections.length === 1 ? selections[0].stageName!.trim() : "selected stages";
   const { data, error } = await result.supabase.from("gohighlevel_reporting_configs").update({
