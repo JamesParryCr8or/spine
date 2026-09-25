@@ -661,13 +661,22 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange }: { savedPreset?: 
     const controller = new AbortController();
     setCustomerPeriodError(false);
     const params = new URLSearchParams({ from: pnl.period.start, to: pnl.period.end, granularity });
-    fetch(`/api/analytics/pnl-customer-kpis?${params}`, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Customer KPI query failed");
-        return response.json() as Promise<{ periods: PnlCustomerPeriod[] }>;
-      })
-      .then((payload) => { if (!controller.signal.aborted) setCustomerPeriods(payload.periods); })
-      .catch((error) => { if (!controller.signal.aborted && !(error instanceof Error && error.name === "AbortError")) { setCustomerPeriods([]); setCustomerPeriodError(true); } });
+    const loadCustomerPeriods = async () => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const response = await fetch(`/api/analytics/pnl-customer-kpis?${params}`, { signal: controller.signal });
+          if (!response.ok) throw new Error("Customer KPI query failed");
+          const payload = await response.json() as { periods: PnlCustomerPeriod[] };
+          if (!controller.signal.aborted) setCustomerPeriods(payload.periods);
+          return;
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          if (attempt === 2) { setCustomerPeriods([]); setCustomerPeriodError(true); return; }
+          await new Promise((resolve) => window.setTimeout(resolve, (attempt + 1) * 2000));
+        }
+      }
+    };
+    void loadCustomerPeriods();
     return () => controller.abort();
   }, [pnl?.period?.start, pnl?.period?.end, pnl?.hasData, granularity]);
 
