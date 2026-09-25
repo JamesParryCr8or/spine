@@ -128,6 +128,7 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
   const zeroY = (top + bottom) / 2;
   const plotWidth = width - left - right;
   const step = plotWidth / points.length;
+  const labelEvery = Math.max(1, Math.ceil(points.length / 8));
   const dataMaximum = Math.max(
     ...points.flatMap((point) => [point.revenue, Math.abs(point.profit)]),
     ...points.map((point) => point.cogs + point.metaMarketing + point.googleMarketing + point.paymentFees + point.shipping + point.operating),
@@ -179,7 +180,7 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
             return rect;
           })}
           <rect x={center-step/2} y={top} width={step} height={bottom-top+20} fill="transparent"/>
-          {(index === 0 || index === points.length - 1 || index % Math.ceil(points.length / 8) === 0) && <text x={center} y={318} textAnchor="middle" className="finance-label">{point.label}</text>}
+          {(index === 0 || index === points.length - 1 || (index % labelEvery === 0 && index < points.length - 1 - Math.floor(labelEvery / 2))) && <text x={center} y={318} textAnchor="middle" className="finance-label">{point.label}</text>}
         </g>;
       })}
       <polyline points={line} className="finance-profit-line"/>
