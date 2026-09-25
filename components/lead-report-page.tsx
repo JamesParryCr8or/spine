@@ -78,7 +78,34 @@ export function LeadReportPage({ view, range }: { view: LeadView; range: Range }
     const list = [...cohorts.entries()].sort((a,b)=>a[0].localeCompare(b[0]));
     const won = rows.filter(o => (o.status || "").toLowerCase() === "won").length;
     const closed = rows.filter(o => ["won","lost","abandoned"].includes((o.status || "").toLowerCase())).length;
-    content = <><div className="lead-overview-kpis">{kpi("Opportunities created", count(rows.length), range.label, Users)}{kpi("Won", count(won), "Current status of opportunities created in range", BarChart3)}{kpi("Win rate", closed ? ((won/closed)*100).toFixed(1)+"%" : "—", "Won ÷ won and lost", CircleDollarSign)}</div><section className="panel lead-report-panel"><div className="panel-head"><div><span className="eyebrow">CREATION COHORTS</span><h3>Outcome by month created</h3><p>Each cohort is grouped by opportunity creation month; statuses reflect the latest GHL snapshot.</p></div></div>{table(["Created month","Opportunities","Won","Lost","Open","Win rate","Won value"], list.map(([key,c])=>[monthLabel(key),bar(c.total,Math.max(...list.map(([,x])=>x.total)),count(c.total)),bar(c.won,Math.max(...list.map(([,x])=>x.won)),count(c.won),"#10a779"),bar(c.lost,Math.max(...list.map(([,x])=>x.lost)),count(c.lost),"#e36b72"),bar(c.open,Math.max(...list.map(([,x])=>x.open)),count(c.open),"#f0a323"),c.won+c.lost?bar(c.won/(c.won+c.lost)*100,100,((c.won/(c.won+c.lost))*100).toFixed(1)+"%","#10a779"):"—",bar([...opportunities].filter(o=>safeDate(o.createdAt)?.toISOString().slice(0,7)===key.slice(0,7)&&(o.status||"").toLowerCase()==="won").reduce((s,o)=>s+num(o.monetaryValue),0),Math.max(...list.map(([,x])=>x.value)),formatMoney([...opportunities].filter(o=>safeDate(o.createdAt)?.toISOString().slice(0,7)===key.slice(0,7)&&(o.status||"").toLowerCase()==="won").reduce((s,o)=>s+num(o.monetaryValue),0)))])}</section></>;
+    const maxCohortCount = Math.max(1, ...list.map(([, cohort]) => cohort.total));
+    const maxWonValue = Math.max(1, ...list.map(([key]) => [...opportunities]
+      .filter((o) => safeDate(o.createdAt)?.toISOString().slice(0, 7) === key.slice(0, 7) && (o.status || "").toLowerCase() === "won")
+      .reduce((sum, o) => sum + num(o.monetaryValue), 0)));
+    content = <>
+      <div className="lead-overview-kpis">
+        {kpi("Opportunities created", count(rows.length), range.label, Users)}
+        {kpi("Won", count(won), "Current status of opportunities created in range", BarChart3)}
+        {kpi("Win rate", closed ? ((won / closed) * 100).toFixed(1) + "%" : "—", "Won ÷ won and lost", CircleDollarSign)}
+      </div>
+      <section className="panel lead-report-panel">
+        <div className="panel-head"><div><span className="eyebrow">CREATION COHORTS</span><h3>Outcome by month created</h3><p>Each cohort is grouped by opportunity creation month; statuses reflect the latest GHL snapshot.</p></div></div>
+        {table(["Created month", "Opportunities", "Won", "Lost", "Open", "Win rate", "Won value"], list.map(([key, cohort]) => {
+          const wonValue = [...opportunities]
+            .filter((o) => safeDate(o.createdAt)?.toISOString().slice(0, 7) === key.slice(0, 7) && (o.status || "").toLowerCase() === "won")
+            .reduce((sum, o) => sum + num(o.monetaryValue), 0);
+          return [
+            monthLabel(key),
+            bar(cohort.total, maxCohortCount, count(cohort.total)),
+            bar(cohort.won, Math.max(1, ...list.map(([, item]) => item.won)), count(cohort.won), "#10a779"),
+            bar(cohort.lost, Math.max(1, ...list.map(([, item]) => item.lost)), count(cohort.lost), "#e36b72"),
+            bar(cohort.open, Math.max(1, ...list.map(([, item]) => item.open)), count(cohort.open), "#f0a323"),
+            cohort.won + cohort.lost ? bar(cohort.won / (cohort.won + cohort.lost) * 100, 100, ((cohort.won / (cohort.won + cohort.lost)) * 100).toFixed(1) + "%", "#10a779") : "—",
+            bar(wonValue, maxWonValue, formatMoney(wonValue), "#3186db"),
+          ];
+        }))}
+      </section>
+    </>;
   } else if (view === "Stage ageing") {
     const groups = new Map<string, { count:number; value:number; ages:number[]; stale:number }>();
     for (const o of opportunities) {
