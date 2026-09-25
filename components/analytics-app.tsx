@@ -1797,7 +1797,7 @@ function CustomerBehaviorChart({ behavior, kind }: { behavior: CustomerData["beh
           {row.value!==null&&<rect x={x(i)-Math.min(22,260/rows.length)} y={y(row.value)} width={Math.min(44,520/rows.length)} height={250*row.value/100} rx="4" fill={kind==="timing"?"#25a8da":"#7660ed"}/>}
           {kind==="timing"&&<circle cx={x(i)} cy={y(row.cumulative??0)} r="4" fill="white" stroke="#25b59b" strokeWidth="2"/>}
           <text x={x(i)} y={row.value===null?292:y(row.value)-9} textAnchor="middle" className="customer-viz-label">{row.value===null?"N/A":pct(row.value)}</text>
-          <text x={x(i)} y="330" textAnchor="middle" className="customer-viz-label">{row.label}</text>
+          <text x={x(i)} y="330" textAnchor="middle" className="customer-viz-label customer-viz-x-label">{kind==="timing" ? row.label.replace(" days", "") : row.label}</text>
         </g>)}
         <text x="454" y="359" textAnchor="middle" className="customer-viz-label">{kind==="timing"?"Days between consecutive orders":"Days after the first order"}</text>
       </svg>}
