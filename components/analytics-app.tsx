@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { reportingPeriods, type ReportingGranularity, type ReportingPeriod } from "@/lib/analytics/reporting-periods";
 import { buildCampaignUrl } from "@/lib/analytics/utm-builder";
+import { fetchCachedJson } from "@/lib/analytics/client-response-cache";
 import { calculateProfitPerNewCustomer } from "@/lib/analytics/customer-profit";
 import { downloadXlsx } from "@/lib/exports/xlsx";
 import { starterReports } from "@/lib/reports/starter-templates";
@@ -1283,7 +1284,7 @@ function Costs({ focusSku }: { focusSku?: string | null }) {
       const response = await fetch(`/api/costs/shipping?id=${encodeURIComponent(cost.id)}`, { method: "DELETE" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Could not delete shipping override");
-      await load();
+      await load(true);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not delete shipping override"); }
   };
   const beginEdit = (cost: ProductCost) => {
@@ -1514,13 +1515,13 @@ function Leads({ onOpenConnections, range, onRangeChange }: { onOpenConnections:
   const [selectedStageIds, setSelectedStageIds] = useState<string[]>([]);
   const [includeLaterStages, setIncludeLaterStages] = useState(true);
   const [granularity, setGranularity] = useState<ReportingGranularity>("daily");
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     setLoading(true); setError("");
     try {
-      const params = new URLSearchParams(); if (range.from) params.set("from", range.from); if (range.to) params.set("to", range.to); const response = await fetch(`/api/analytics/leads${params.size ? `?${params}` : ""}`, { cache: "no-store" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Could not load lead performance");
-      setData(payload as LeadDashboardData);
+      const params = new URLSearchParams(); if (range.from) params.set("from", range.from); if (range.to) params.set("to", range.to);
+      const url = `/api/analytics/leads${params.size ? `?${params}` : ""}`;
+      const payload = await fetchCachedJson<LeadDashboardData>(url, { force });
+      setData(payload);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not load lead performance"); }
     finally { setLoading(false); }
   }, [range.from, range.to]);
@@ -2262,10 +2263,31 @@ export function AnalyticsApp() {
   const [leadFrom, setLeadFrom] = useState("");
   const [leadTo, setLeadTo] = useState("");
   const [leadDatePickerOpen, setLeadDatePickerOpen] = useState(false);
+  const [leadDateReady, setLeadDateReady] = useState(false);
   const router = useRouter();
   const activeStore = workspace?.stores.find((store) => store.id === workspace.activeStoreId);
   const activeStoreName = activeStore?.name || freshness?.storeName || "Your store";
   const businessModel = activeStore?.businessModel ?? "ecommerce";
+  useEffect(() => {
+    if (!activeStore?.id) return;
+    const key = `spine:lead-period:${activeStore.id}`;
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        const value = JSON.parse(saved) as { preset?: FinanceDatePreset; from?: string; to?: string };
+        if (value.preset && ["today", "yesterday", "last_7_days", "last_7_complete_days", "last_30_days", "last_30_complete_days", "last_90_days", "last_365_days", "this_month", "last_month", "all_imported", "custom"].includes(value.preset)) {
+          setLeadDatePreset(value.preset);
+          setLeadFrom(value.from ?? "");
+          setLeadTo(value.to ?? "");
+        }
+      }
+    } catch { /* Ignore a malformed saved date filter. */ }
+    setLeadDateReady(true);
+  }, [activeStore?.id]);
+  useEffect(() => {
+    if (!leadDateReady || !activeStore?.id) return;
+    localStorage.setItem(`spine:lead-period:${activeStore.id}`, JSON.stringify({ preset: leadDatePreset, from: leadFrom, to: leadTo }));
+  }, [activeStore?.id, leadDatePreset, leadFrom, leadTo, leadDateReady]);
   const availableNav = businessModel === "lead_generation" ? leadGenerationNav : ecommerceNav;
   useEffect(() => {
     if (!availableNav.some((item) => item.label === view)) setView("Overview");
