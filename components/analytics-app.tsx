@@ -1284,7 +1284,7 @@ function Costs({ focusSku }: { focusSku?: string | null }) {
       const response = await fetch(`/api/costs/shipping?id=${encodeURIComponent(cost.id)}`, { method: "DELETE" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Could not delete shipping override");
-      await load(true);
+      await load();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not delete shipping override"); }
   };
   const beginEdit = (cost: ProductCost) => {
@@ -1532,7 +1532,7 @@ function Leads({ onOpenConnections, range, onRangeChange }: { onOpenConnections:
       const response = await fetch("/api/connections/gohighlevel/sync", { method: "POST" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Could not sync GoHighLevel opportunities");
-      await load();
+      await load(true);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not sync GoHighLevel opportunities");
     } finally {
