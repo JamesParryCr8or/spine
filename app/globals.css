@@ -315,3 +315,17 @@ button { cursor:pointer; }
 .pnl-table.period-table .indent{display:block;padding-left:0}
 .pnl-table.period-table .pnl-section td{text-align:left}
 .pnl-kpi-table .pnl-section td{padding:11px 16px!important;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#363f52}
+
+/* Keep stored and password-manager-filled connection secrets readable. */
+.secret-input input{
+  min-width:0;background:#fff!important;color:#172033!important;
+  -webkit-text-fill-color:#172033!important;caret-color:#172033;color-scheme:light;
+}
+.secret-input input:-webkit-autofill,
+.secret-input input:-webkit-autofill:hover,
+.secret-input input:-webkit-autofill:focus{
+  -webkit-text-fill-color:#172033!important;
+  -webkit-box-shadow:0 0 0 1000px #fff inset!important;
+  box-shadow:0 0 0 1000px #fff inset!important;
+  caret-color:#172033;
+}
