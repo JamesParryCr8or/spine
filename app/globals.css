@@ -303,3 +303,15 @@ button { cursor:pointer; }
 .geography-country.has-sales:hover,.geography-country.has-sales:focus{fill:#12a98c;outline:none}
 .geography-map-loading{position:absolute;inset:0;display:grid;place-items:center;color:#74849b;background:#eaf3fb}
 .geography-globe-card>.report-note a{color:#6657e8;text-decoration:underline}
+
+/* Keep P&L row names legible when many reporting periods are visible. */
+.pnl-table.period-table{min-width:max-content;table-layout:auto}
+.pnl-table.period-table th:first-child,.pnl-table.period-table tbody tr:not(.pnl-section) td:first-child{
+  min-width:224px;width:224px;max-width:224px;text-align:left;white-space:normal;line-height:1.45
+}
+.pnl-table.period-table th:not(:first-child),.pnl-table.period-table td:not(:first-child){
+  min-width:132px;text-align:right
+}
+.pnl-table.period-table .indent{display:block;padding-left:0}
+.pnl-table.period-table .pnl-section td{text-align:left}
+.pnl-kpi-table .pnl-section td{padding:11px 16px!important;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#363f52}
