@@ -58,6 +58,7 @@ export async function POST(request: Request) {
 
     const balance = new Map<string, number>();
     let balanceWarning = "";
+    if (reported.size === 0) {
     try {
       const { data: rates, error: ratesError } = await supabase.from("exchange_rates")
         .select("base_currency,quote_currency,rate,effective_date").eq("store_id", store.id)
@@ -85,6 +86,7 @@ export async function POST(request: Request) {
       }
     } catch {
       balanceWarning = "Shopify payout transactions were unavailable; ShopifyQL fee totals were still checked.";
+    }
     }
 
     const { data: existing, error: dailyError } = await supabase.from("shopify_sales_daily").select("*")
