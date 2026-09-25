@@ -160,10 +160,19 @@ ORDER BY day ASC` },
         return /^\d{4}-\d{2}-\d{2}$/.test(day) ? [[day, row] as const] : [];
       }),
     );
+    const existingFeesByDate = new Map<string, Record<string, string | number | null>>();
+    for (let offset = 0; ; offset += 1000) {
+      const { data: existingFees, error: existingFeesError } = await supabase.from("shopify_sales_daily")
+        .select("sales_date,shopify_payments_processing_fees,foreign_exchange_fees,managed_markets_fees,international_fees")
+        .eq("store_id", store.id).order("sales_date", { ascending: true }).range(offset, offset + 999);
+      if (existingFeesError) throw new Error(existingFeesError.message);
+      for (const row of existingFees ?? []) existingFeesByDate.set(row.sales_date, row);
+      if ((existingFees ?? []).length < 1000) break;
+    }
     const dailyRows = (dailySales.shopifyqlQuery.tableData?.rows ?? []).flatMap((row) => {
       const salesDate = typeof row.day === "string" ? row.day.slice(0, 10) : "";
       if (!/^\d{4}-\d{2}-\d{2}$/.test(salesDate)) return [];
-      const feeRow = feesByDate.get(salesDate);
+      const feeRow = feesByDate.get(salesDate) ?? existingFeesByDate.get(salesDate);
       const processingFees = numeric(feeRow, "shopify_payments_processing_fees");
       const internationalFees = numeric(feeRow, "international_fees");
       return [{
