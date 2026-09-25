@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createReportingClient } from "@/lib/analytics/reporting-refresh";
 
 import { shopifyGraph } from "@/lib/shopify/graphql";
 import { requireWorkspace } from "@/lib/workspace/server";
@@ -23,9 +24,9 @@ export async function GET(request: Request) {
   }
   const workspace = await requireWorkspace();
   if (!workspace.ok) return workspace.response;
-  const { supabase, store } = workspace;
+  const { store } = workspace;
   if (!store?.shopify_domain) return NextResponse.json({ error: "Connect Shopify to load these reports" }, { status: 409 });
-  const { data: token, error: secretError } = await supabase.rpc("read_connection_secret_for_server", {
+  const { data: token, error: secretError } = await createReportingClient().rpc("read_connection_secret_for_server", {
     requested_store_id: store.id,
     connection_provider: "shopify",
   });
