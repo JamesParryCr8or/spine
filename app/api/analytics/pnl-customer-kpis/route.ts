@@ -83,14 +83,42 @@ export async function GET(request: Request) {
       if (granularity === "annual") return date.slice(0, 4);
       return date;
     };
+    const resultPeriodKey = (value: unknown): string | null => {
+      const raw = String(value ?? "").trim();
+      if (granularity === "daily" || granularity === "weekly") {
+        const day = raw.slice(0, 10);
+        return validDate(day) ? day : null;
+      }
+      if (granularity === "monthly") {
+        const month = raw.match(/^(\\d{4})-(\\d{1,2})(?:-|$)/);
+        if (month) return `${month[1]}-${month[2].padStart(2, "0")}`;
+      }
+      if (granularity === "quarterly") {
+        const quarter = raw.match(/^(\\d{4})-?Q([1-4])$/i) ?? raw.match(/^Q([1-4])\\s+(\\d{4})$/i);
+        if (quarter) return raw.toUpperCase().startsWith("Q")
+          ? `${quarter[2]}-Q${quarter[1]}`
+          : `${quarter[1]}-Q${quarter[2]}`;
+      }
+      if (granularity === "annual") {
+        const year = raw.match(/^(\\d{4})$/);
+        if (year) return year[1];
+      }
+      const parsed = new Date(raw);
+      if (!Number.isNaN(parsed.getTime())) {
+        const day = parsed.toISOString().slice(0, 10);
+        return periodKey(day);
+      }
+      return null;
+    };
     const periodByKey = new Map(granularity === "daily" || granularity === "weekly" ? [] :
       rows.map((row) => [periodKey(row.start), row] as const));
     for (const item of result.shopifyqlQuery.tableData?.rows ?? []) {
-      const date = String(item[unit] ?? "").slice(0, 10);
-      if (!validDate(date)) continue;
+      const periodValue = item[unit];
+      const resultKey = resultPeriodKey(periodValue);
+      if (!resultKey) continue;
       const row = granularity === "daily" || granularity === "weekly"
-        ? rows.find((period) => date >= period.start && date <= period.end)
-        : periodByKey.get(periodKey(date));
+        ? rows.find((period) => resultKey >= period.start && resultKey <= period.end)
+        : periodByKey.get(resultKey);
       if (!row) continue;
       const kind = String(item.new_or_returning_customer ?? "").trim().toLowerCase();
       if (kind === "new") {
