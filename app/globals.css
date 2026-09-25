@@ -253,3 +253,44 @@ button { cursor:pointer; }
 .cohort-table tbody tr:hover .cohort-month,.cohort-table tbody tr:hover .cohort-size{background:#f8f9ff}
 .cohort-table tbody tr:hover .cohort-cell{box-shadow:inset 0 0 0 2px #6b5ce777}
 @media(max-width:800px){.cohort-panel .cohort-panel-head{align-items:flex-start;flex-direction:column}.cohort-metric-select{width:100%}.cohort-metric-select select{flex:1}.cohort-legend{flex-wrap:wrap}.cohort-legend-note{width:100%;margin-left:0;text-align:left}.cohort-table .cohort-size{position:static;box-shadow:none}.cohort-table th:nth-child(2),.cohort-table td:nth-child(2){width:90px}}
+
+
+.top-customers-table th:first-child,.top-customers-table td:first-child{width:56px}
+.top-customers-table td{font-size:12px}
+.top-customer-rank{font-weight:700;color:#9a91c3}
+.top-customer-sales,.geography-bar-cell{position:relative;display:flex;align-items:center;min-width:150px;min-height:26px;padding:2px 8px;border-radius:6px;overflow:hidden}
+.top-customer-sales-bar,.geography-bar-cell>span{position:absolute;inset:0 auto 0 0;background:linear-gradient(90deg,#e4dfff,#beb3ff);border-radius:6px;opacity:.72}
+.top-customer-sales strong,.geography-bar-cell strong{position:relative;margin-left:auto;color:#273047;font-variant-numeric:tabular-nums}
+.top-customers-table tbody tr:nth-child(-n+3) .top-customer-sales-bar{background:linear-gradient(90deg,#c9c0ff,#7864eb)}
+.geography-report{padding:18px;display:grid;gap:18px}
+.geography-layout{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(270px,.7fr);gap:18px}
+.geography-globe-card,.geography-pie-card,.geography-table-card{border:1px solid #e7e9f2;border-radius:14px;padding:20px;background:#fff}
+.geography-globe-card{background:linear-gradient(150deg,#fbfaff,#f4f8ff)}
+.geography-card-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start}
+.geography-card-head h3,.geography-pie-card h3{font-size:18px;margin:5px 0 8px}
+.geography-card-head p{color:#79839a;font-size:12px;margin:0}
+.geography-card-head label{display:grid;gap:5px;color:#66728a;font-size:11px}
+.geography-card-head select{border:1px solid #dce1ee;border-radius:8px;padding:8px;background:white;color:#263149}
+.geography-globe-wrap{display:flex;justify-content:center;align-items:center;min-height:300px}
+.geography-globe{width:min(100%,420px);filter:drop-shadow(0 15px 25px #6778a02a)}
+.geography-point{cursor:pointer}
+.geography-point:focus{outline:none}
+.geography-point:focus circle:last-of-type{stroke:#21324e;stroke-width:3}
+.geography-selected{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:10px;padding:12px;background:white;border:1px solid #e3e6f2;border-radius:10px;font-size:12px}
+.geography-selected strong{font-size:15px}
+.geography-selected span{color:#5c4de1;font-weight:750}
+.geography-selected small{color:#7b8599}
+.geography-globe-card>.report-note{display:block;margin-top:12px}
+.geography-pie-card{display:flex;flex-direction:column;align-items:center}
+.geography-pie-card>.eyebrow,.geography-pie-card>h3{align-self:flex-start}
+.geography-donut{width:min(230px,75%);aspect-ratio:1;border-radius:50%;display:grid;place-items:center;margin:22px 0;box-shadow:0 12px 30px #364c851a}
+.geography-donut>div{width:69%;height:69%;border-radius:50%;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.geography-donut strong{font-size:32px;color:#222b45}
+.geography-donut span{font-size:11px;color:#8791a4}
+.geography-pie-legend{width:100%;display:grid;gap:4px}
+.geography-pie-legend button{display:grid;grid-template-columns:10px minmax(0,1fr) auto;align-items:center;gap:8px;border:0;background:transparent;padding:7px 4px;text-align:left;color:#59647c;cursor:pointer;font-size:11px}
+.geography-pie-legend button:hover{background:#f5f3ff}
+.geography-pie-legend i{width:9px;height:9px;border-radius:3px}
+.geography-table tbody tr{cursor:pointer}
+.geography-table tbody tr:hover,.geography-table tbody tr.selected{background:#f5f3ff}
+@media(max-width:850px){.geography-layout{grid-template-columns:1fr}.geography-report{padding:12px}.geography-card-head{flex-wrap:wrap}}
