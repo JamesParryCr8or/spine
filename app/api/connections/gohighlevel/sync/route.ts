@@ -53,7 +53,7 @@ export async function POST() {
   const stagePositions = new Map<string, Map<string, number>>();
   for (const pipeline of pipelinesPayload.pipelines ?? []) {
     if (!pipeline.id) continue;
-    stagePositions.set(pipeline.id, new Map((pipeline.stages ?? []).filter((stage) => stage.id).map((stage, index) => [stage.id!, stage.position ?? index])));
+    stagePositions.set(pipeline.id, new Map((pipeline.stages ?? []).filter((stage) => stage.id).map((stage, index) => [stage.id!, stage.position ?? index] as const)));
   }
   const selectionsByPipeline = new Map<string, StageSelection[]>();
   for (const selection of selections) selectionsByPipeline.set(selection.pipelineId, [...(selectionsByPipeline.get(selection.pipelineId) ?? []), selection]);
