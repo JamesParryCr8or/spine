@@ -329,3 +329,10 @@ button { cursor:pointer; }
   box-shadow:0 0 0 1000px #fff inset!important;
   caret-color:#172033;
 }
+
+
+.meta-account-discovery{display:flex;align-items:center;gap:12px;margin:-4px 0 16px}
+.meta-account-discovery button{flex:none;border:1px solid #d8ddec;border-radius:9px;background:#fff;color:#28354b;padding:10px 14px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.meta-account-discovery button:hover:not(:disabled){border-color:#6b55e8;color:#5b46d6}
+.meta-account-discovery button:disabled{opacity:.55;cursor:not-allowed}
+.meta-account-discovery small{color:#71809a;font-size:12px;line-height:1.45}
