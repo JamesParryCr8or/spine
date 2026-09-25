@@ -538,12 +538,20 @@ type PnlData = {
   timezone: string;
   currencyCoverage: CurrencyCoverage;
   marketingCurrencyCoverage: CurrencyConversionCoverage;
-  metrics: { grossSales: number; discounts: number; refunds: number; netProductSales: number; shippingRevenue: number; tax: number; duties: number; totalSales: number; cogs: number; grossProfit: number; grossMargin: number | null; marketingSpend: number; metaMarketingSpend: number; googleMarketingSpend: number; transactionFees: number; merchantShippingCosts: number; variantShippingCosts: number; shippingFallbackCosts: number; handlingCosts: number; fixedOperatingExpenses: number; variableOperatingExpenses: number; operatingExpenses: number; contributionMarginBeforeShipping: number; contributionMarginBeforeShippingPercentage: number | null; contributionMargin: number; contributionMarginPercentage: number | null; profitAfterOperatingCosts: number; profitAfterKnownCosts: number; profitAfterMarketingSpend: number; netProfit: number | null; netMargin: number | null; orders: number; missingCostLines: number; missingShippingLines: number; shippingOverrideLines: number; shippingFallbackLines: number; shippingFallbackRate: number | null; unallocatedOperatingCosts: number };
-  availability: { marketingSpend: boolean; metaMarketingSpend: boolean; googleMarketingSpend: boolean; transactionFees: boolean; shippingCosts: boolean; handlingCosts: boolean; operatingExpenses: boolean; netProfit: boolean };
+  transactionFeeCoverage?: { salesDays: number; reportedFeeDays: number; latestReportedFeeDate: string | null };
+  metrics: { grossSales: number; discounts: number; refunds: number; netProductSales: number; shippingRevenue: number; tax: number; duties: number; totalSales: number; cogs: number; grossProfit: number; grossMargin: number | null; marketingSpend: number; metaMarketingSpend: number; googleMarketingSpend: number; transactionFees: number; merchantShippingCosts: number; variantShippingCosts: number; shippingFallbackCosts: number; handlingCosts: number; fixedOperatingExpenses: number; variableOperatingExpenses: number; operatingExpenses: number; contributionMarginBeforeShipping: number; contributionMarginBeforeShippingPercentage: number | null; contributionMargin: number; contributionMarginPercentage: number | null; profitAfterOperatingCosts: number; profitAfterKnownCosts: number; profitAfterMarketingSpend: number; netProfit: number | null; netMargin: number | null; orders: number; unitsSold: number; missingCostLines: number; missingShippingLines: number; shippingOverrideLines: number; shippingFallbackLines: number; shippingFallbackRate: number | null; unallocatedOperatingCosts: number };
+  availability: { marketingSpend: boolean; metaMarketingSpend: boolean; googleMarketingSpend: boolean; transactionFees: boolean; transactionFeesComplete?: boolean; shippingCosts: boolean; handlingCosts: boolean; operatingExpenses: boolean; netProfit: boolean };
   period: { start: string; end: string } | null;
 };
 type PnlPeriodData = { period: ReportingPeriod; data: PnlData };
 type PnlRow = { section: string; label: string; value: (data: PnlData) => string };
+
+type PnlCustomerPeriod = {
+  start: string; end: string; label: string;
+  newCustomers: number; newOrders: number; newSales: number;
+  repeatCustomers: number; repeatOrders: number; repeatSales: number;
+  guestOrders: number; guestSales: number; excludedCurrencyOrders: number;
+};
 
 function ProfitLoss({ savedPreset, reportRunId, initialRange }: { savedPreset?: "all_imported" | "latest_30_days" | "latest_90_days" | "latest_365_days"; reportRunId?: string; initialRange?: DrilldownContext }) {
   const finishReportRun = useReportRun(reportRunId);
@@ -557,6 +565,8 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange }: { savedPreset?: 
   const [granularity, setGranularity] = useState<ReportingGranularity>("monthly");
   const [periodData, setPeriodData] = useState<PnlPeriodData[]>([]);
   const [periodLoading, setPeriodLoading] = useState(false);
+  const [customerPeriods, setCustomerPeriods] = useState<PnlCustomerPeriod[]>([]);
+  const [customerPeriodError, setCustomerPeriodError] = useState(false);
   const [viewMode, setViewMode] = useState<"table" | "chart">("table");
   const [showComparison, setShowComparison] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
@@ -618,6 +628,21 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange }: { savedPreset?: 
     }, 0);
     return () => { window.clearTimeout(timeout); controller.abort(); };
   }, [granularity, pnl]);
+
+  useEffect(() => {
+    if (!pnl?.period || !pnl.hasData) { setCustomerPeriods([]); return; }
+    const controller = new AbortController();
+    setCustomerPeriodError(false);
+    const params = new URLSearchParams({ from: pnl.period.start, to: pnl.period.end, granularity });
+    fetch(`/api/analytics/pnl-customer-kpis?${params}`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Customer KPI query failed");
+        return response.json() as Promise<{ periods: PnlCustomerPeriod[] }>;
+      })
+      .then((payload) => { if (!controller.signal.aborted) setCustomerPeriods(payload.periods); })
+      .catch((error) => { if (!controller.signal.aborted && !(error instanceof Error && error.name === "AbortError")) { setCustomerPeriods([]); setCustomerPeriodError(true); } });
+    return () => controller.abort();
+  }, [pnl?.period?.start, pnl?.period?.end, pnl?.hasData, granularity]);
 
   const hasLiveData = Boolean(pnl?.hasData);
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: pnl?.currency || "GBP", maximumFractionDigits: 0 });
@@ -721,6 +746,41 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange }: { savedPreset?: 
     ]);
   };
 
+  const customerPeriodByRange = new Map(customerPeriods.map((period) => [`${period.start}:${period.end}`, period]));
+  const pct = (value: number | null) => value === null || !Number.isFinite(value) ? "—" : `${(value * 100).toFixed(1)}%`;
+  const ratio = (numerator: number, denominator: number) => denominator > 0 ? numerator / denominator : null;
+  const multiple = (numerator: number, denominator: number) => denominator > 0 ? `${(numerator / denominator).toFixed(2)}x` : "—";
+  const kpiMoney = (numerator: number, denominator: number) => denominator > 0 ? formatter.format(numerator / denominator) : "—";
+  const customerValue = (customer: PnlCustomerPeriod | null, key: keyof PnlCustomerPeriod) => customer ? Number(customer[key]).toLocaleString("en-GB") : "—";
+  const pnlKpiGroups: Array<{ heading: string; rows: Array<{ label: string; value: (data: PnlData, customer: PnlCustomerPeriod | null) => string }> }> = [
+    { heading: "KPIs", rows: [
+      { label: "Gross margin", value: (data) => pct(data.metrics.grossMargin) },
+      { label: "Net margin", value: (data) => pct(data.metrics.netMargin) },
+      { label: "Refunds / gross sales", value: (data) => pct(ratio(data.metrics.refunds, data.metrics.grossSales)) },
+      { label: "COGS / net product sales", value: (data) => pct(ratio(data.metrics.cogs, data.metrics.netProductSales - data.metrics.refunds)) },
+      { label: "Marketing / net product sales", value: (data) => data.availability.marketingSpend ? pct(ratio(data.metrics.marketingSpend, data.metrics.netProductSales - data.metrics.refunds)) : "—" },
+    ] },
+    { heading: "Acquisition and retention", rows: [
+      { label: "Blended CAC", value: (data, customer) => data.availability.marketingSpend && customer ? kpiMoney(data.metrics.marketingSpend, customer.newCustomers) : "—" },
+      { label: "Blended ROAS", value: (data) => data.availability.marketingSpend ? multiple(data.metrics.totalSales, data.metrics.marketingSpend) : "—" },
+      { label: "New customer ROAS", value: (data, customer) => data.availability.marketingSpend && customer ? multiple(customer.newSales, data.metrics.marketingSpend) : "—" },
+      { label: "New customers", value: (_, customer) => customerValue(customer, "newCustomers") },
+      { label: "New customer sales", value: (_, customer) => customer ? formatter.format(customer.newSales) : "—" },
+      { label: "Profit per new customer", value: (data, customer) => data.availability.netProfit && data.metrics.netProfit !== null && customer ? kpiMoney(data.metrics.netProfit, customer.newCustomers) : "—" },
+      { label: "Repeat customers", value: (_, customer) => customerValue(customer, "repeatCustomers") },
+      { label: "Repeat customer sales", value: (_, customer) => customer ? formatter.format(customer.repeatSales) : "—" },
+      { label: "Repeat orders", value: (_, customer) => customer ? pct(ratio(customer.repeatOrders, customer.newOrders + customer.repeatOrders)) : "—" },
+      { label: "Repeat sales", value: (_, customer) => customer ? pct(ratio(customer.repeatSales, customer.newSales + customer.repeatSales)) : "—" },
+    ] },
+    { heading: "Orders", rows: [
+      { label: "Orders", value: (data) => data.metrics.orders.toLocaleString("en-GB") },
+      { label: "Average order value", value: (data) => kpiMoney(data.metrics.totalSales, data.metrics.orders) },
+      { label: "New customer AOV", value: (_, customer) => customer ? kpiMoney(customer.newSales, customer.newOrders) : "—" },
+      { label: "Repeat customer AOV", value: (_, customer) => customer ? kpiMoney(customer.repeatSales, customer.repeatOrders) : "—" },
+      { label: "Average items per order", value: (data) => data.metrics.orders > 0 ? (data.metrics.unitsSold / data.metrics.orders).toFixed(1) : "—" },
+    ] },
+  ];
+
   const applyPnlDatePreset = (preset: FinanceDatePreset) => {
     setDatePreset(preset);
     if (preset === "custom") return;
@@ -752,6 +812,12 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange }: { savedPreset?: 
       {viewMode === "table" ? <div className="table-scroll"><table className="data-table pnl-table period-table"><thead><tr><th>Income statement</th>{displayedColumns.map((column, index) => <th key={column.period.start + "-" + column.period.end + "-" + index}>{column.period.label}</th>)}</tr></thead><tbody>{sections.map((section) => [<tr className="pnl-section" key={section + "-heading"}><td colSpan={displayedColumns.length + 1}><button onClick={() => toggleSection(section)}><ChevronDown className={collapsedSections.has(section) ? "collapsed" : ""}/>{section}</button></td></tr>, ...(collapsedSections.has(section) ? [] : pnlRows.filter((row) => row.section === section).map((row) => <tr className={row.label.includes("profit") || row.label.includes("margin") || row.label === "Total sales" || row.label === "Total marketing spend" ? "total" : ""} key={section + "-" + row.label}><td><span className="indent">{row.label}</span></td>{displayedColumns.map((column, index) => <td key={row.label + "-" + index}>{row.value(column.data)}</td>)}</tr>))])}</tbody></table></div> : null}
       <div className="table-footer"><span>{periodData.length >= 12 ? "Showing the latest 12 " + granularity + " periods" : displayPeriods.length + " " + granularity + " period" + (displayPeriods.length === 1 ? "" : "s")}</span><span>{showComparison ? "Previous-period overlay on" : "Comparison overlay off"}</span></div>
     </section>
+    {pnl.hasData ? <section className="panel report-panel pnl-kpi-panel">
+      <div className="panel-head"><div><span className="eyebrow">OPERATING METRICS</span><h2>Margins, acquisition and orders</h2><p>Calculated for the same periods as the income statement.</p></div></div>
+      {customerPeriodError ? <div className="connection-notice"><Info/><div><strong>Customer metrics could not be loaded</strong><span>Margin and order metrics remain available. Refresh to retry customer metrics.</span></div></div> : null}
+      <div className="table-scroll"><table className="data-table pnl-table period-table"><thead><tr><th>Metric</th>{displayedColumns.map((column, index) => <th key={column.period.start + "-" + column.period.end + "-kpi-" + index}>{column.period.label}</th>)}</tr></thead><tbody>{pnlKpiGroups.map((group) => [<tr className="pnl-section" key={group.heading + "-heading"}><td colSpan={displayedColumns.length + 1}>{group.heading}</td></tr>, ...group.rows.map((row) => <tr key={group.heading + "-" + row.label}><td><span className="indent">{row.label}</span></td>{displayedColumns.map((column, index) => <td key={row.label + "-" + index}>{row.value(column.data, customerPeriodByRange.get(`${column.period.start}:${column.period.end}`) ?? null)}</td>)}</tr>)] )}</tbody></table></div>
+      <div className="table-footer"><span>New = first valid imported order for an identified customer; repeat = later orders. Guest orders are excluded from the new/repeat split.</span><span>— means no denominator or incomplete source coverage.</span></div>
+    </section> : null}
   </>;
 
   return <>{comparison?.hasData && pnl?.hasData ? <section className="cost-grid live pnl-comparison"><div><strong>{change(pnl.metrics.netProductSales, comparison.metrics.netProductSales) === null ? "—" : `${change(pnl.metrics.netProductSales, comparison.metrics.netProductSales)!.toFixed(1)}%`}</strong><span>Net product sales vs previous period</span></div><div><strong>{change(pnl.metrics.grossProfit, comparison.metrics.grossProfit) === null ? "—" : `${change(pnl.metrics.grossProfit, comparison.metrics.grossProfit)!.toFixed(1)}%`}</strong><span>Gross profit vs previous period</span></div><div><strong>{pnl.metrics.orders - comparison.metrics.orders >= 0 ? "+" : ""}{(pnl.metrics.orders - comparison.metrics.orders).toLocaleString()}</strong><span>Orders vs previous period</span></div></section> : null}{yearComparison?.hasData && pnl?.hasData ? <section className="cost-grid live pnl-comparison"><div><strong>{change(pnl.metrics.netProductSales, yearComparison.metrics.netProductSales) === null ? "—" : `${change(pnl.metrics.netProductSales, yearComparison.metrics.netProductSales)!.toFixed(1)}%`}</strong><span>Net product sales vs previous year</span></div><div><strong>{change(pnl.metrics.grossProfit, yearComparison.metrics.grossProfit) === null ? "—" : `${change(pnl.metrics.grossProfit, yearComparison.metrics.grossProfit)!.toFixed(1)}%`}</strong><span>Gross profit vs previous year</span></div><div><strong>{pnl.metrics.orders - yearComparison.metrics.orders >= 0 ? "+" : ""}{(pnl.metrics.orders - yearComparison.metrics.orders).toLocaleString()}</strong><span>Orders vs previous year</span></div></section> : null}<section className="filter-row pnl-period finance-date-controls"><label>Period<select aria-label="P&L date period" value={datePreset} onChange={(event) => applyPnlDatePreset(event.target.value as FinanceDatePreset)}><option value="last_7_days">Last 7 days (today)</option><option value="last_7_complete_days">Last 7 complete days</option><option value="last_30_days">Last 30 days (today)</option><option value="last_30_complete_days">Last 30 complete days</option><option value="last_90_days">Last 90 days</option><option value="last_365_days">Last 365 days</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="this_month">This month</option><option value="last_month">Last month</option><option value="all_imported">All imported data</option><option value="custom">Custom dates</option></select></label><label>From<input type="date" value={fromDate} onChange={(event) => { setDatePreset("custom"); setFromDate(event.target.value); }} /></label><label>To<input type="date" value={toDate} onChange={(event) => { setDatePreset("custom"); setToDate(event.target.value); }} /></label></section>{loading ? <div className="data-loading">Calculating your income statement…</div> : !hasLiveData && pnl ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to build your income statement</strong><span>The preview will be replaced with reconciled sales and cost data after your first sync.</span></div></div> : null}{hasLiveData ? <div className="connection-notice"><Info/><div><strong>How this P&amp;L is calculated</strong><span>Total sales are net product sales plus shipping revenue. Gross profit is Shopify net product sales, less refunds and effective-dated product costs. Tax and duties are shown for reconciliation but excluded from profit. Operating expenses include your fixed, per-order, per-unit, and revenue-rate rules. Actual Shopify payment fees take priority; matching gateway rules estimate missing fees. Imported Meta and Google Ads spend is deducted when it overlaps the selected period. Fulfilment, handling, and pick/pack rules provide the remaining direct costs.</span></div></div> : null}{hasLiveData && pnl!.metrics.missingCostLines > 0 ? <div className="connection-notice"><Info/><div><strong>{pnl!.metrics.missingCostLines} order lines are missing a product cost</strong><span>Gross profit is provisional until you add an effective-dated product cost for these variants.</span></div></div> : null}{hasLiveData && pnl!.metrics.unallocatedOperatingCosts > 0 ? <div className="connection-notice"><Info/><div><strong>{pnl!.metrics.unallocatedOperatingCosts} operating costs still need an allocation rule</strong><span>The P&amp;L excludes these costs because their currency or effective dates need attention.</span></div></div> : null}{hasLiveData ? <><div className="report-export"><button className="export-button" onClick={exportPnl}><Download/> Export P&amp;L CSV</button></div><details className="metric-dictionary"><summary>Metric definitions</summary><dl><div><dt>Total sales</dt><dd>Net product sales plus customer shipping revenue. Tax and duties are shown separately.</dd></div><div><dt>Gross profit</dt><dd>Net product sales after refunds, less effective-dated product costs. It is marked provisional when a line has no cost.</dd></div><div><dt>Profit after known costs</dt><dd>Gross profit less payment fees, merchant shipping, handling, pick/pack, fixed operating costs, and variable operating costs available to Spine.</dd></div><div><dt>Profit after marketing spend</dt><dd>Profit after known costs less imported Meta and Google Ads spend in the selected period.</dd></div><div><dt>Net profit</dt><dd>Available only after marketing, merchant shipping, handling, product costs, and operating-cost coverage are complete.</dd></div></dl></details></> : null}<section className="panel report-panel"><div className="report-summary">{summary.map(([label, value, hint])=><div key={label}><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>)}</div><div className="table-scroll"><table className="data-table pnl-table"><thead><tr><th>Income statement</th><th>{hasLiveData ? pnl?.period ? `${pnl.period.start} to ${pnl.period.end}` : "Selected period" : "Apr 2026"}</th>{!hasLiveData&&months.slice(1).map(month=><th key={month}>{month} 2026</th>)}</tr></thead><tbody>{liveRows.map((row,index)=><tr className={totalRows.has(index)?"total":""} key={row[0]}>{row.map((cell,i)=><td key={`${cell}-${i}`}>{i===0 && !totalRows.has(index)?<span className="indent">{cell}</span>:cell}</td>)}</tr>)}</tbody></table></div></section></>;
