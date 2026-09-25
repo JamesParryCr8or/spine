@@ -97,10 +97,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
   }
   const body = await request.json().catch(() => null) as { shopDomain?: string; accessToken?: string } | null;
-  const shopDomain = normalizeShopDomain(body?.shopDomain ?? "");
-  const accessToken = body?.accessToken?.trim();
+  const suppliedToken = body?.accessToken?.trim();
+  const shopDomain = normalizeShopDomain(suppliedToken ? body?.shopDomain ?? "" : store.shopify_domain ?? "");
+  const savedSecret = suppliedToken ? null : await supabase.rpc("read_connection_secret_for_server", { requested_store_id: store.id, connection_provider: "shopify" });
+  const accessToken = suppliedToken || (typeof savedSecret?.data === "string" ? savedSecret.data : "");
   if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shopDomain)) return NextResponse.json({ error: "Use your-store.myshopify.com" }, { status: 400 });
-  if (!accessToken) return NextResponse.json({ error: "Admin API access token is required" }, { status: 400 });
+  if (!accessToken) return NextResponse.json({ error: "Shopify token is unavailable. Reconnect the store." }, { status: 409 });
 
   let runId: string | null = null;
   try {
@@ -247,7 +249,7 @@ ORDER BY day ASC` },
     let ordersProcessed = 0, orderLinesProcessed = 0, customersProcessed = 0, refundsProcessed = 0, refundLinesProcessed = 0, transactionsProcessed = 0, attributionProcessed = 0;
     const warnings: string[] = [];
     do {
-      const result: { orders: { nodes: ShopifyOrder[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await shopifyGraph(shopDomain, accessToken, `query Orders($cursor:String,$query:String){ orders(first:25,after:$cursor,sortKey:UPDATED_AT,query:$query){ nodes{
+      const result: { orders: { nodes: ShopifyOrder[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await shopifyGraph(shopDomain, accessToken, `query Orders($cursor:String,$query:String){ orders(first:25,after:$cursor,sortKey:UPDATED_AT,reverse:true,query:$query){ nodes{
         id legacyResourceId name displayFinancialStatus displayFulfillmentStatus sourceName displayAddress{countryCodeV2} discountCodes test cancelledAt processedAt createdAt updatedAt currencyCode
         currentSubtotalPriceSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} currentTotalDiscountsSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} currentShippingPriceSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} currentTotalTaxSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} currentTotalDutiesSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} currentTotalPriceSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}}
         customer{id legacyResourceId displayName defaultEmailAddress{emailAddress} numberOfOrders amountSpent{amount currencyCode} createdAt updatedAt}
