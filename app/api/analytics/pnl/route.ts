@@ -54,7 +54,7 @@ export async function GET(request: Request) {
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
   const dateRange = fromDate && toDate ? reportingRangeToUtc(fromDate, toDate, store.timezone || "UTC") : null;
 
-  if (fromDate && toDate) {
+  if (fromDate && toDate && params.get("refresh") !== "0") {
     try {
       await refreshReportingData(supabase, store, fromDate, toDate);
     } catch (error) {
