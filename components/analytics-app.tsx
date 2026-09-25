@@ -596,6 +596,7 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange }: { savedPreset?: 
   const [feeRefreshStatus, setFeeRefreshStatus] = useState("");
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const appliedSavedPreset = useRef<string | null>(null);
+  const autoFeeRefreshRanges = useRef(new Set<string>());
   useEffect(() => {
     const params = new URLSearchParams();
     if (fromDate) params.set("from", fromDate);
@@ -824,6 +825,14 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange }: { savedPreset?: 
     finally { setFeeRefreshBusy(false); }
   };
 
+  useEffect(() => {
+    if (!pnl?.hasData || !pnl.period || pnl.availability.transactionFeesComplete) return;
+    const key = `${pnl.period.start}:${pnl.period.end}`;
+    if (autoFeeRefreshRanges.current.has(key)) return;
+    autoFeeRefreshRanges.current.add(key);
+    void refreshShopifyFees();
+  }, [pnl?.period?.start, pnl?.period?.end, pnl?.hasData, pnl?.availability.transactionFeesComplete]);
+
   const applyPnlDatePreset = (preset: FinanceDatePreset) => {
     setDatePreset(preset);
     if (preset === "custom") return;
@@ -859,7 +868,7 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange }: { savedPreset?: 
     {pnl.hasData ? <section className="panel report-panel pnl-kpi-panel">
       <div className="panel-head"><div><span className="eyebrow">OPERATING METRICS</span><h2>Margins, acquisition and orders</h2><p>Calculated for the same periods as the income statement.</p></div></div>
       {customerPeriodError ? <div className="connection-notice"><Info/><div><strong>Customer metrics could not be loaded</strong><span>Margin and order metrics remain available. Refresh to retry customer metrics.</span></div></div> : null}
-      <div className="table-scroll"><table className="data-table pnl-table period-table"><thead><tr><th>Metric</th>{displayedColumns.map((column, index) => <th key={column.period.start + "-" + column.period.end + "-kpi-" + index}>{column.period.label}</th>)}</tr></thead><tbody>{pnlKpiGroups.map((group) => [<tr className="pnl-section" key={group.heading + "-heading"}><td colSpan={displayedColumns.length + 1}>{group.heading}</td></tr>, ...group.rows.map((row) => <tr key={group.heading + "-" + row.label}><td><span className="indent">{row.label}</span></td>{displayedColumns.map((column, index) => <td key={row.label + "-" + index}>{row.value(column.data, customerPeriodByRange.get(`${column.period.start}:${column.period.end}`) ?? null)}</td>)}</tr>)] )}</tbody></table></div>
+      <div className="table-scroll"><table className="data-table pnl-table period-table pnl-kpi-table"><thead><tr><th>Metric</th>{displayedColumns.map((column, index) => <th key={column.period.start + "-" + column.period.end + "-kpi-" + index}>{column.period.label}</th>)}</tr></thead><tbody>{pnlKpiGroups.map((group) => [<tr className="pnl-section" key={group.heading + "-heading"}><td colSpan={displayedColumns.length + 1}>{group.heading}</td></tr>, ...group.rows.map((row) => <tr key={group.heading + "-" + row.label}><td><span className="indent">{row.label}</span></td>{displayedColumns.map((column, index) => <td key={row.label + "-" + index}>{row.value(column.data, customerPeriodByRange.get(`${column.period.start}:${column.period.end}`) ?? null)}</td>)}</tr>)] )}</tbody></table></div>
       <div className="table-footer"><span>New = first valid imported order for an identified customer; repeat = later orders. Guest orders are excluded from the new/repeat split.</span><span>— means no denominator or incomplete source coverage.</span></div>
     </section> : null}
   </>;
