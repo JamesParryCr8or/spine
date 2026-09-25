@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, RefreshCw, Target, Users } from "lucide-react";
 
 type PipelinePayload = {
-  currency?: string;\n  connection?: { name: string | null; status: string };
+  currency?: string;
+  connection?: { name: string | null; status: string };
   pipelines?: Array<{ id: string; name: string; stages: Array<{ id: string; name: string; position: number }> }>;
   pipelineId?: string;
   pipelineName?: string;
