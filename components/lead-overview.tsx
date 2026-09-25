@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, RefreshCw, Target, Users } from "lucide-react";
+import { fetchCachedJson } from "@/lib/analytics/client-response-cache";
 
 type PipelinePayload = {
   currency?: string;
@@ -27,7 +28,7 @@ export function LeadOverview({ range, onOpenConnections, onOpenLeads }: LeadOver
   const [loading, setLoading] = useState(true);
   const [savingPipeline, setSavingPipeline] = useState(false);
   const [error, setError] = useState("");
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     setLoading(true);
     setError("");
     try {
@@ -35,9 +36,8 @@ export function LeadOverview({ range, onOpenConnections, onOpenLeads }: LeadOver
       if (range.from) params.set("from", range.from);
       if (range.to) params.set("to", range.to);
       if (pipelineId) params.set("pipelineId", pipelineId);
-      const response = await fetch(`/api/analytics/leads/pipeline?${params}`, { cache: "no-store" });
-      const payload = await response.json() as PipelinePayload;
-      if (!response.ok) throw new Error(payload.error || "Could not load this GoHighLevel pipeline");
+      const url = `/api/analytics/leads/pipeline?${params}`;
+      const payload = await fetchCachedJson<PipelinePayload>(url, { force });
       setData(payload);
       if (payload.pipelineId && payload.pipelineId !== pipelineId) setPipelineId(payload.pipelineId);
     } catch (reason) {
@@ -92,7 +92,7 @@ export function LeadOverview({ range, onOpenConnections, onOpenLeads }: LeadOver
             {(data?.pipelines ?? []).map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name}</option>)}
           </select>
         </label>
-        <button className="filter-button" onClick={() => void load()} disabled={loading || savingPipeline}><RefreshCw className={loading ? "spin" : ""}/>{savingPipeline ? "Saving…" : loading ? "Loading…" : "Refresh"}</button>
+        <button className="filter-button" onClick={() => void load(true)} disabled={loading || savingPipeline}><RefreshCw className={loading ? "spin" : ""}/>{savingPipeline ? "Saving…" : loading ? "Loading…" : "Refresh"}</button>
       </div>
     </div>
 
