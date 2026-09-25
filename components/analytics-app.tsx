@@ -233,6 +233,8 @@ type OverviewData = {
   google?: { importedDays: number; start: string | null; end: string | null };
 };
 
+type ShopifyOverviewWidgets = { channels: Array<{ channel: string; sales: number; orders: number }>; products: Array<{ key: string; product: string; variant: string; units: number; netRevenue: number }>; customers: Array<{ label: string; sales: number; orders: number }> };
+
 function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId?: string; onDrilldown: (target: View, context?: DrilldownContext) => void; storageKey: string }) {
   const finishReportRun = useReportRun(reportRunId);
   const [liveData, setLiveData] = useState<OverviewData | null>(null);
@@ -242,6 +244,8 @@ function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId?: stri
   const [overviewProducts, setOverviewProducts] = useState<ProductData | null>(null);
   const [overviewCustomers, setOverviewCustomers] = useState<CustomerData | null>(null);
   const [overviewUtm, setOverviewUtm] = useState<UtmData | null>(null);
+  const [shopifyWidgets, setShopifyWidgets] = useState<ShopifyOverviewWidgets | null>(null);
+  const [shopifyWidgetError, setShopifyWidgetError] = useState("");
   const [fromDate, setFromDate] = useState(default365DayRange.from);
   const [toDate, setToDate] = useState(default365DayRange.to);
   const [datePreset, setDatePreset] = useState<FinanceDatePreset>("last_365_days");
@@ -403,20 +407,37 @@ function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId?: stri
       operating: data.metrics.operatingExpenses,
     };
   });
+  useEffect(() => {
+    if ((fromDate && !toDate) || (!fromDate && toDate)) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams();
+    if (fromDate) params.set("from", fromDate);
+    if (toDate) params.set("to", toDate);
+    setShopifyWidgets(null);
+    setShopifyWidgetError("");
+    fetch(`/api/analytics/shopify-overview-widgets?${params}`, { signal: controller.signal })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "Shopify reports could not be loaded");
+        setShopifyWidgets(payload as ShopifyOverviewWidgets);
+      })
+      .catch((error) => { if (!controller.signal.aborted) setShopifyWidgetError(error instanceof Error ? error.message : "Shopify reports could not be loaded"); });
+    return () => controller.abort();
+  }, [fromDate, toDate]);
   const channelPalette = ["#7357ff", "#18b981", "#ff9f43", "#37a3ff", "#e85d75"];
   const channelMap = new Map<string, { sales: number; orders: number }>();
   for (const row of overviewUtm?.rows ?? []) {
     const current = channelMap.get(row.channel) ?? { sales: 0, orders: 0 };
     current.sales += row.sales; current.orders += row.orders; channelMap.set(row.channel, current);
   }
-  const channelRows = [...channelMap.entries()].map(([channel, values]) => ({ channel, ...values })).sort((left, right) => right.sales - left.sales).slice(0, 5);
+  const channelRows = (shopifyWidgets?.channels ?? [...channelMap.entries()].map(([channel, values]) => ({ channel, ...values }))).sort((left, right) => right.sales - left.sales).slice(0, 5);
   const channelSales = channelRows.reduce((total, row) => total + row.sales, 0);
-  const topProducts = overviewProducts?.products.slice(0, 5) ?? [];
-  const customerSplit = overviewCustomers ? [
+  const topProducts = shopifyWidgets?.products.map((item) => ({ ...item, missingCostUnits: 1, contributionProfit: 0 })) ?? overviewProducts?.products.slice(0, 5) ?? [];
+  const customerSplit = shopifyWidgets?.customers ?? (overviewCustomers ? [
     { label: "New", sales: overviewCustomers.metrics.newCustomerSales, orders: overviewCustomers.metrics.newCustomerOrders },
     { label: "Repeat", sales: overviewCustomers.metrics.repeatCustomerSales, orders: overviewCustomers.metrics.repeatCustomerOrders },
     { label: "Guest", sales: overviewCustomers.metrics.guestSales, orders: overviewCustomers.metrics.guestOrders },
-  ] : [];
+  ] : []);
   const customerSales = customerSplit.reduce((total, row) => total + row.sales, 0);
   const costBreakdown = pnlSummary ? [
     { label: "Product COGS", amount: pnlSummary.metrics.cogs },
@@ -497,10 +518,10 @@ function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId?: stri
         {hasLiveData ? <ul className="health-list"><li><span className="status success"/>Shopify sales loaded <b>{liveData!.metrics.orders.toLocaleString()} orders</b></li><li><span className="status success"/>Data window <b>{liveData!.range.start} – {liveData!.range.end}</b></li><li><span className={(liveData!.meta?.importedDays || liveData!.google?.importedDays) ? "status success" : "status warn"}/>Marketing spend <b>{(liveData!.meta?.importedDays || liveData!.google?.importedDays) ? `${liveData!.meta?.importedDays ?? 0} Meta days · ${liveData!.google?.importedDays ?? 0} Google days` : "No spend loaded"}</b></li></ul> : <ul className="health-list"><li><span className="status success"/>Shopify synced <b>2m ago</b></li><li><span className="status success"/>Ad accounts connected <b>2 of 2</b></li><li><span className="status warn"/>Missing product costs <b>14 SKUs</b></li></ul>}
       </article>
       {widgetVisible("channel") ? <article className="panel channel-panel" style={{ order: widgetOrder("channel") }}><div className="panel-head"><div><span className="eyebrow">ACQUISITION</span><h2>Channel mix</h2></div><button className="panel-drilldown" onClick={() => onDrilldown("UTM Analysis", drilldownRange)}>View report <ExternalLink/></button></div>
-        {channelRows.length ? <div className="channel-table"><div className="channel-row header"><span>Channel</span><span>Orders</span><span>Revenue</span><span>Share</span><span>Revenue mix</span></div>{channelRows.map((channel, index) => { const share = channelSales ? channel.sales / channelSales * 100 : 0; const color = channelPalette[index % channelPalette.length]; return <div className="channel-row" key={channel.channel}><span className="channel-name"><i style={{background:color}}/>{channel.channel}</span><span>{channel.orders.toLocaleString()}</span><strong>{formatter.format(channel.sales)}</strong><span>{share.toFixed(1)}%</span><span className="mix"><i style={{width:`${share}%`, background:color}}/></span></div>; })}</div> : <div className="cost-empty"><Megaphone/><strong>No attributed orders in this period</strong><span>Run Shopify attribution sync to populate channel mix.</span></div>}
+        {channelRows.length ? <div className="channel-table"><div className="channel-row header"><span>Channel</span><span>Orders</span><span>Revenue</span><span>Share</span><span>Revenue mix</span></div>{channelRows.map((channel, index) => { const share = channelSales ? channel.sales / channelSales * 100 : 0; const color = channelPalette[index % channelPalette.length]; return <div className="channel-row" key={channel.channel}><span className="channel-name"><i style={{background:color}}/>{channel.channel}</span><span>{channel.orders.toLocaleString()}</span><strong>{formatter.format(channel.sales)}</strong><span>{share.toFixed(1)}%</span><span className="mix"><i style={{width:`${share}%`, background:color}}/></span></div>; })}</div> : <div className="cost-empty"><Megaphone/><strong>No attributed orders in this period</strong><span>{shopifyWidgetError || "Shopify reported no referrer data for these dates."}</span></div>}
       </article> : null}
-      {widgetVisible("products") ? <article className="panel report-panel" style={{ order: widgetOrder("products") }}><div className="panel-head"><div><span className="eyebrow">PRODUCTS</span><h2>Top products by net revenue</h2></div><button className="panel-drilldown" onClick={() => onDrilldown("Products", drilldownRange)}>View report <ExternalLink/></button></div>{topProducts.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Product</th><th>Units</th><th>Net revenue</th><th>Contribution profit</th></tr></thead><tbody>{topProducts.map((product) => <tr key={product.key}><td><strong>{product.product}</strong><small>{product.variant}</small></td><td>{product.units.toLocaleString()}</td><td>{formatter.format(product.netRevenue)}</td><td>{product.missingCostUnits ? "Costs missing" : formatter.format(product.contributionProfit)}</td></tr>)}</tbody></table></div> : <div className="cost-empty"><Package/><strong>No product sales in this period</strong></div>}</article> : null}
-      {widgetVisible("customers") ? <article className="panel report-panel" style={{ order: widgetOrder("customers") }}><div className="panel-head"><div><span className="eyebrow">CUSTOMERS</span><h2>Customer sales split</h2></div><button className="panel-drilldown" onClick={() => onDrilldown("Customers", drilldownRange)}>View report <ExternalLink/></button></div>{customerSplit.length ? <div className="report-summary">{customerSplit.map((row) => <div key={row.label}><span>{row.label}</span><strong>{formatter.format(row.sales)}</strong><small>{row.orders.toLocaleString()} orders · {customerSales ? (row.sales / customerSales * 100).toFixed(1) : "0.0"}%</small></div>)}</div> : <div className="cost-empty"><Users/><strong>No customer sales in this period</strong></div>}</article> : null}
+      {widgetVisible("products") ? <article className="panel report-panel" style={{ order: widgetOrder("products") }}><div className="panel-head"><div><span className="eyebrow">PRODUCTS</span><h2>Top products by net revenue</h2></div><button className="panel-drilldown" onClick={() => onDrilldown("Products", drilldownRange)}>View report <ExternalLink/></button></div>{topProducts.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Product</th><th>Units</th><th>Net revenue</th><th>Contribution profit</th></tr></thead><tbody>{topProducts.map((product) => <tr key={product.key}><td><strong>{product.product}</strong><small>{product.variant}</small></td><td>{product.units.toLocaleString()}</td><td>{formatter.format(product.netRevenue)}</td><td>{product.missingCostUnits ? "Costs missing" : formatter.format(product.contributionProfit)}</td></tr>)}</tbody></table></div> : <div className="cost-empty"><Package/><strong>No product sales in this period</strong><span>{shopifyWidgetError}</span></div>}</article> : null}
+      {widgetVisible("customers") ? <article className="panel report-panel" style={{ order: widgetOrder("customers") }}><div className="panel-head"><div><span className="eyebrow">CUSTOMERS</span><h2>Customer sales split</h2></div><button className="panel-drilldown" onClick={() => onDrilldown("Customers", drilldownRange)}>View report <ExternalLink/></button></div>{customerSplit.length ? <div className="report-summary">{customerSplit.map((row) => <div key={row.label}><span>{row.label}</span><strong>{formatter.format(row.sales)}</strong><small>{row.orders.toLocaleString()} orders · {customerSales ? (row.sales / customerSales * 100).toFixed(1) : "0.0"}%</small></div>)}</div> : <div className="cost-empty"><Users/><strong>No customer sales in this period</strong><span>{shopifyWidgetError}</span></div>}</article> : null}
       {widgetVisible("costs") ? <article className="panel report-panel" style={{ order: widgetOrder("costs") }}><div className="panel-head"><div><span className="eyebrow">COSTS</span><h2>Known cost breakdown</h2></div><button className="panel-drilldown" onClick={() => onDrilldown("Profit & Loss", drilldownRange)}>View report <ExternalLink/></button></div>{costBreakdown.length ? <div className="report-summary">{costBreakdown.map((row) => <div key={row.label}><span>{row.label}</span><strong>{formatter.format(row.amount)}</strong><small>{totalKnownCosts ? (row.amount / totalKnownCosts * 100).toFixed(1) : "0.0"}% of known costs</small></div>)}</div> : <div className="cost-empty"><WalletCards/><strong>No cost data in this period</strong></div>}</article> : null}
       <article className="panel activity-panel" style={{ order: 10 }}><div className="panel-head"><div><span className="eyebrow">NEXT STEPS</span><h2>{hasLiveData ? "Complete your profit picture" : "Profit opportunities"}</h2></div></div>
         {hasLiveData ? <><div className="opportunity"><span className="opp-icon purple"><WalletCards/></span><div><strong>Add effective-dated product costs</strong><p>Product profitability becomes more precise as cost coverage improves.</p></div></div><div className="opportunity"><span className="opp-icon green"><Megaphone/></span><div><strong>Review your UTM analysis</strong><p>See the sources, mediums, and campaigns attached to imported orders.</p></div></div><div className="opportunity"><span className="opp-icon orange"><CircleDollarSign/></span><div><strong>Connect marketing spend</strong><p>ROAS and final net profit need trusted campaign spend and merchant shipping costs.</p></div></div></> : <><div className="opportunity"><span className="opp-icon purple"><Sparkles/></span><div><strong>14 products need costs</strong><p>£8,420 revenue has unknown margin.</p></div><button>Add costs</button></div><div className="opportunity"><span className="opp-icon green"><TrendingUp/></span><div><strong>Google Brand is outperforming</strong><p>ROAS improved 22% this period.</p></div><button>Explore</button></div><div className="opportunity"><span className="opp-icon orange"><Megaphone/></span><div><strong>Campaign naming mismatch</strong><p>3 campaigns need UTM mapping.</p></div><button>Fix</button></div></>}
