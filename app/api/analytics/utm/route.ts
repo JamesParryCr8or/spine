@@ -19,17 +19,31 @@ type Diagnostic = { orders: number; sales: number };
 
 const chunks = <T,>(items: T[], size: number) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, index * size + size));
 const cleanLandingPage = (value: string | null) => value?.trim() || "Unknown";
-const monthKey = (value: string, timeZone: string) => new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit" }).format(new Date(value));
+const trendPeriodKey = (value: string, timeZone: string, groupBy: string) => {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(value));
+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? "";
+  const year = part("year"), month = part("month"), day = part("day");
+  if (groupBy === "daily") return `${year}-${month}-${day}`;
+  if (groupBy === "weekly") {
+    const monday = new Date(`${year}-${month}-${day}T00:00:00Z`);
+    monday.setUTCDate(monday.getUTCDate() - (monday.getUTCDay() + 6) % 7);
+    return monday.toISOString().slice(0, 10);
+  }
+  if (groupBy === "quarterly") return `${year} Q${Math.floor((Number(month) - 1) / 3) + 1}`;
+  if (groupBy === "annual") return year;
+  return `${year}-${month}`;
+};
 
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const attributionModel = params.get("attribution") === "first_touch" ? "first_touch" : "last_touch";
   const fromDate = params.get("from") ?? "";
   const toDate = params.get("to") ?? "";
+  const groupBy = params.get("groupBy") ?? "monthly";
   const countryFilter = params.get("country")?.trim().toUpperCase() ?? "";
   const productFilter = params.get("product")?.trim() ?? "";
   const isDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
-  if ((fromDate && !isDate(fromDate)) || (toDate && !isDate(toDate)) || (fromDate && toDate && fromDate > toDate)) return NextResponse.json({ error: "Use a valid start and end date" }, { status: 400 });
+  if (!["daily", "weekly", "monthly", "quarterly", "annual"].includes(groupBy) || (fromDate && !isDate(fromDate)) || (toDate && !isDate(toDate)) || (fromDate && toDate && fromDate > toDate)) return NextResponse.json({ error: "Use a valid start and end date" }, { status: 400 });
 
   const workspace = await requireWorkspace();
   if (!workspace.ok) return workspace.response;
@@ -137,7 +151,7 @@ export async function GET(request: Request) {
     if (order.customer_id) group.customerIds.add(order.customer_id);
     groups.set(key, group);
 
-    const period = monthKey(order.processed_at, store.timezone || "UTC");
+    const period = trendPeriodKey(order.processed_at, store.timezone || "UTC", groupBy);
     const trend = trends.get(period) ?? { period, sales: 0, orders: 0, newCustomerSales: 0, customerIds: new Set<string>() };
     trend.sales += sales;
     trend.orders += 1;
