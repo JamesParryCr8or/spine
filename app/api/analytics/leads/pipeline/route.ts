@@ -90,6 +90,7 @@ export async function GET(request: Request) {
 
     const headers = { Authorization: `Bearer ${token}`, Version: "v3", Accept: "application/json" };
     const opportunities: Opportunity[] = [];
+    let followupsNote: string | undefined;
     let page = 1;
     for (let pageCount = 0; pageCount < 100; pageCount += 1) {
       const search = new URLSearchParams({
@@ -102,8 +103,16 @@ export async function GET(request: Request) {
         getNotes: "false",
         getCalendarEvents: String(includeFollowups),
       });
-      const response = await fetch(`${base}/opportunities/search?${search}`, { headers, cache: "no-store" });
-      const payload = await response.json().catch(() => ({})) as OpportunityPage;
+      let response = await fetch(`${base}/opportunities/search?${search}`, { headers, cache: "no-store" });
+      let payload = await response.json().catch(() => ({})) as OpportunityPage;
+      if (!response.ok && includeFollowups) {
+        const fallback = new URLSearchParams(search);
+        fallback.set("getTasks", "false");
+        fallback.set("getCalendarEvents", "false");
+        response = await fetch(`${base}/opportunities/search?${fallback}`, { headers, cache: "no-store" });
+        payload = await response.json().catch(() => ({})) as OpportunityPage;
+        if (response.ok) followupsNote = "GHL did not allow embedded task or appointment details. Opportunity reports still work; check task/calendar permissions to enable follow-ups.";
+      }
       if (!response.ok) return NextResponse.json({ error: payload.message ?? payload.error ?? "GoHighLevel could not load opportunities. Check opportunities.readonly access." }, { status: 502 });
       const items = payload.opportunities ?? [];
       opportunities.push(...items);
@@ -167,7 +176,7 @@ export async function GET(request: Request) {
         forecastProbability: opportunity.forecastProbability, effectiveProbability: opportunity.effectiveProbability,
         lostReasonId: opportunity.lostReasonId, lostReason: opportunity.lostReason,
         ...(includeFollowups ? { tasks: Array.isArray(opportunity.tasks) ? opportunity.tasks : [], calendarEvents: Array.isArray(opportunity.calendarEvents) ? opportunity.calendarEvents : [] } : {}),
-      })), lostReasons, ...(includeFollowups ? { followupsAvailable: opportunities.some((o) => (o.tasks?.length ?? 0) + (o.calendarEvents?.length ?? 0) > 0), followupsNote: opportunities.some((o) => (o.tasks?.length ?? 0) + (o.calendarEvents?.length ?? 0) > 0) ? undefined : "GoHighLevel did not return tasks or calendar events for these opportunities. Confirm task/calendar permissions and that records are linked to pipeline contacts." } : {}) } : {}),
+      })), lostReasons, ...(includeFollowups ? { followupsAvailable: opportunities.some((o) => (o.tasks?.length ?? 0) + (o.calendarEvents?.length ?? 0) > 0), followupsNote: followupsNote ?? (opportunities.some((o) => (o.tasks?.length ?? 0) + (o.calendarEvents?.length ?? 0) > 0) ? undefined : "GoHighLevel did not return tasks or calendar events for these opportunities. Confirm task/calendar permissions and that records are linked to pipeline contacts.") } : {}) } : {}),
       totals: {
         openCount, wonCount, lostCount, totalCount: opportunities.length,
         openValue, wonValue, averageWonValue: wonCount ? wonValue / wonCount : null,
