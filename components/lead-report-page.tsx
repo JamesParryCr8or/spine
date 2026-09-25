@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { ArrowDownRight, BarChart3, CalendarClock, CircleDollarSign, RefreshCw, Users } from "lucide-react";
 
 type LeadView = "Pipeline outcomes" | "Stage ageing" | "Lead sources" | "Sales team" | "Forecast" | "Lost reasons" | "Follow-ups";
@@ -51,10 +52,10 @@ export function LeadReportPage({ view, range }: { view: LeadView; range: Range }
   const inRange = (o: Opportunity) => { const created = safeDate(o.createdAt); return !created || ((!range.from || created.toISOString().slice(0,10) >= range.from) && (!range.to || created.toISOString().slice(0,10) <= range.to)); };
   const rows = opportunities.filter(inRange);
 
-  const table = (headers: string[], body: Array<Array<React.ReactNode>>) => <div className="table-scroll"><table className="data-table"><thead><tr>{headers.map((h) => <th key={h}>{h}</th>)}</tr></thead><tbody>{body.length ? body.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>) : <tr><td colSpan={headers.length}>No matching opportunities in this date range.</td></tr>}</tbody></table></div>;
+  const table = (headers: string[], body: Array<Array<ReactNode>>) => <div className="table-scroll"><table className="data-table"><thead><tr>{headers.map((h) => <th key={h}>{h}</th>)}</tr></thead><tbody>{body.length ? body.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>) : <tr><td colSpan={headers.length}>No matching opportunities in this date range.</td></tr>}</tbody></table></div>;
   const kpi = (label: string, value: string, note: string, Icon: typeof Users) => <article className="metric-card"><div className="metric-label"><Icon/>{label}</div><strong>{value}</strong><div className="metric-foot">{note}</div></article>;
 
-  let content: React.ReactNode = null;
+  let content: ReactNode = null;
   if (view === "Pipeline outcomes") {
     const cohorts = new Map<string, { total: number; won: number; lost: number; open: number; value: number }>();
     for (const o of rows) {
@@ -69,7 +70,7 @@ export function LeadReportPage({ view, range }: { view: LeadView; range: Range }
     const list = [...cohorts.entries()].sort((a,b)=>a[0].localeCompare(b[0]));
     const won = rows.filter(o => (o.status || "").toLowerCase() === "won").length;
     const closed = rows.filter(o => ["won","lost","abandoned"].includes((o.status || "").toLowerCase())).length;
-    content = <><div className="lead-overview-kpis">{kpi("Opportunities created", count(rows.length), range.label, Users)}{kpi("Won", count(won), "Current status of opportunities created in range", BarChart3)}{kpi("Win rate", closed ? ((won/closed)*100).toFixed(1)+"%" : "—", "Won ÷ won and lost", CircleDollarSign)}</div><section className="panel lead-report-panel"><div className="panel-head"><div><span className="eyebrow">CREATION COHORTS</span><h3>Outcome by month created</h3><p>Each cohort is grouped by opportunity creation month; statuses reflect the latest GHL snapshot.</p></div></div>{table(["Created","Created","Won","Lost","Open","Win rate","Won value"], list.map(([key,c])=>[monthLabel(key),count(c.total),count(c.won),count(c.lost),count(c.open),c.won+c.lost?((c.won/(c.won+c.lost))*100).toFixed(1)+"%":"—",formatMoney([...opportunities].filter(o=>safeDate(o.createdAt)?.toISOString().slice(0,7)===key.slice(0,7)&&(o.status||"").toLowerCase()==="won").reduce((s,o)=>s+num(o.monetaryValue),0))]))}</section></>;
+    content = <><div className="lead-overview-kpis">{kpi("Opportunities created", count(rows.length), range.label, Users)}{kpi("Won", count(won), "Current status of opportunities created in range", BarChart3)}{kpi("Win rate", closed ? ((won/closed)*100).toFixed(1)+"%" : "—", "Won ÷ won and lost", CircleDollarSign)}</div><section className="panel lead-report-panel"><div className="panel-head"><div><span className="eyebrow">CREATION COHORTS</span><h3>Outcome by month created</h3><p>Each cohort is grouped by opportunity creation month; statuses reflect the latest GHL snapshot.</p></div></div>{table(["Created month","Opportunities","Won","Lost","Open","Win rate","Won value"], list.map(([key,c])=>[monthLabel(key),count(c.total),count(c.won),count(c.lost),count(c.open),c.won+c.lost?((c.won/(c.won+c.lost))*100).toFixed(1)+"%":"—",formatMoney([...opportunities].filter(o=>safeDate(o.createdAt)?.toISOString().slice(0,7)===key.slice(0,7)&&(o.status||"").toLowerCase()==="won").reduce((s,o)=>s+num(o.monetaryValue),0))]))}</section></>;
   } else if (view === "Stage ageing") {
     const groups = new Map<string, { count:number; value:number; ages:number[]; stale:number }>();
     for (const o of opportunities) {
