@@ -108,7 +108,7 @@ button { cursor:pointer; }
 .finance-legend{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:7px 11px;color:#6f7890;font-size:8px}
 .finance-legend span{display:inline-flex;align-items:center;gap:4px}
 .finance-legend i{width:7px;height:7px;border-radius:2px}
-.legend-revenue{background:#7357ff}.legend-cogs{background:#f59e0b}.legend-marketing{background:#ef6c63}.legend-fees{background:#a855f7}.legend-shipping{background:#3b82f6}.legend-operating{background:#64748b}.legend-profit{background:#19b981;border-radius:50%!important}
+.legend-revenue{background:#7357ff}.legend-cogs{background:#f59e0b}.legend-meta{background:#1877f2}.legend-google{background:#34a853}.legend-fees{background:#a855f7}.legend-shipping{background:#06b6d4}.legend-operating{background:#64748b}.legend-profit{background:#19b981;border-radius:50%!important}
 .finance-chart{position:relative;width:100%;min-height:330px}
 .finance-chart svg{display:block;width:100%;height:330px;overflow:visible}
 .finance-grid{stroke:#edf0f5;stroke-width:1}
