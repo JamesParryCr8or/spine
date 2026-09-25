@@ -191,6 +191,8 @@ export async function GET(request: Request) {
   const timeBetweenOrders = bucketRepeatOrderGaps(gaps);
   const productBreakdowns = new Map<string, { product: string; sku: string | null; customers: Set<string>; repurchasers: Set<string>; sameProductRepurchasers: Set<string>; sales: number; gaps: number[] }>();
   const journeys = new Map<string, { from: string; to: string; customers: Set<string> }>();
+  const journeyPaths = new Map<string, { depth: number; products: string[]; customers: number }>();
+  const journeyCountsByDepth = new Map<number, number>();
   for (const [customerId, customerOrders] of ordersByCustomer) {
     const firstOrder = customerOrders[0];
     if (!firstOrder) continue;
@@ -209,6 +211,19 @@ export async function GET(request: Request) {
       if (laterOrders.length) row.repurchasers.add(customerId);
       if (laterKeys.has(key)) row.sameProductRepurchasers.add(customerId);
       productBreakdowns.set(key, row);
+    }
+    // Each customer contributes one sequence: the first product on each order.
+    // Aggregate every prefix so the selected order depth can change without a new fetch.
+    const orderProducts = customerOrders.slice(0, 6).map((order) => (linesByOrder.get(order.id) ?? [])[0]?.title ?? null);
+    for (let depth = 2; depth <= orderProducts.length; depth += 1) {
+      const products = orderProducts.slice(0, depth);
+      if (products.some((product) => !product)) break;
+      const path = products as string[];
+      const key = JSON.stringify(path);
+      const existing = journeyPaths.get(key);
+      if (existing) existing.customers += 1;
+      else journeyPaths.set(key, { depth, products: path, customers: 1 });
+      journeyCountsByDepth.set(depth, (journeyCountsByDepth.get(depth) ?? 0) + 1);
     }
     const nextOrder = laterOrders[0];
     if (nextOrder) for (const firstLine of firstLines) for (const nextLine of linesByOrder.get(nextOrder.id) ?? []) {
@@ -273,6 +288,8 @@ export async function GET(request: Request) {
       timeBetweenOrders,
       productBreakdown: [...productBreakdowns.values()].map((row) => ({ product: row.product, sku: row.sku, customers: row.customers.size, repurchasers: row.repurchasers.size, averageSalesPerCustomer: row.customers.size ? row.sales / row.customers.size : 0, repurchasedAnythingRate: row.customers.size ? row.repurchasers.size / row.customers.size : 0, repurchasedSameProductRate: row.customers.size ? row.sameProductRepurchasers.size / row.customers.size : 0, averageDaysBetweenOrders: row.gaps.length ? row.gaps.reduce((total, value) => total + value, 0) / row.gaps.length : null })).sort((left, right) => right.customers - left.customers).slice(0, 50),
       productJourneys: [...journeys.values()].map((journey) => ({ from: journey.from, to: journey.to, customers: journey.customers.size })).sort((left, right) => right.customers - left.customers).slice(0, 30),
+      journeyPaths: [...journeyPaths.values()].sort((left, right) => right.customers - left.customers).reduce<Array<{ depth: number; products: string[]; customers: number }>>((rows, path) => { if (rows.filter((row) => row.depth === path.depth).length < 50) rows.push(path); return rows; }, []),
+      journeyCountsByDepth: [...journeyCountsByDepth].map(([depth, customers]) => ({ depth, customers })),
     },
   });
 }
