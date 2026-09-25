@@ -4,6 +4,7 @@ import { requireWorkspace } from "@/lib/workspace/server";
 import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 import { convertDatedAmount, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
+import { bucketRepeatOrderGaps } from "@/lib/analytics/repeat-order-gaps";
 import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 
 type Order = {
@@ -187,10 +188,7 @@ export async function GET(request: Request) {
     const previous = customerOrders[index]?.processed_at;
     return previous && order.processed_at ? [(Date.parse(order.processed_at) - Date.parse(previous)) / 86400000] : [];
   })).filter((value) => value >= 0);
-  const gapBuckets = Array.from({ length: 20 }, (_, index) => ({ label: index === 19 ? "95+ days" : `${index * 5}-${index * 5 + 4} days`, start: index * 5, end: index === 19 ? Infinity : index * 5 + 4, count: 0 }));
-  for (const gap of gaps) (gapBuckets.find((bucket) => gap >= bucket.start && gap <= bucket.end) ?? gapBuckets.at(-1)!).count += 1;
-  let cumulative = 0;
-  const timeBetweenOrders = gapBuckets.map((bucket) => { cumulative += bucket.count; return { ...bucket, share: gaps.length ? bucket.count / gaps.length : 0, cumulativeShare: gaps.length ? cumulative / gaps.length : 0 }; });
+  const timeBetweenOrders = bucketRepeatOrderGaps(gaps);
   const productBreakdowns = new Map<string, { product: string; sku: string | null; customers: Set<string>; repurchasers: Set<string>; sameProductRepurchasers: Set<string>; sales: number; gaps: number[] }>();
   const journeys = new Map<string, { from: string; to: string; customers: Set<string> }>();
   for (const [customerId, customerOrders] of ordersByCustomer) {
