@@ -69,9 +69,9 @@ export function LeadOverview({ range, onOpenConnections, onOpenLeads }: LeadOver
 
   const format = useMemo(() => new Intl.NumberFormat("en-GB", {
     style: "currency",
-    currency: "GBP",
+    currency: data?.currency || "GBP",
     maximumFractionDigits: 0,
-  }), []);
+  }), [data?.currency]);
   const totals = data?.totals;
   const maxStageCount = Math.max(1, ...(data?.stages ?? []).map((stage) => stage.count));
   const stageValues = data?.stages ?? [];
