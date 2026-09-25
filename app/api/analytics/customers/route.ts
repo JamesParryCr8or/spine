@@ -219,13 +219,20 @@ export async function GET(request: Request) {
       journey.customers.add(customerId); journeys.set(key, journey);
     }
   }
-  const recentCustomers = await supabase
-    .from("shopify_customers")
-    .select("id,display_name,email,number_of_orders,amount_spent,currency,updated_at_shopify")
-    .eq("store_id", store.id)
-    .order("amount_spent", { ascending: false })
-    .limit(50);
-  if (recentCustomers.error) return NextResponse.json({ error: recentCustomers.error.message }, { status: 500 });
+  const rankedCustomers = [...ordersByCustomer.entries()]
+    .map(([id, customerOrders]) => ({
+      id,
+      number_of_orders: customerOrders.length,
+      amount_spent: customerOrders.reduce((total, order) => total + convertDatedAmount(money(order.net_product_sales) + money(order.shipping_revenue), order.exchange_rate, store.currency), 0),
+      last_order_at: customerOrders.at(-1)?.processed_at ?? null,
+    }))
+    .sort((left, right) => right.amount_spent - left.amount_spent || left.id.localeCompare(right.id))
+    .slice(0, 50);
+  const customerProfiles = rankedCustomers.length
+    ? await supabase.from("shopify_customers").select("id,display_name").eq("store_id", store.id).in("id", rankedCustomers.map((customer) => customer.id))
+    : { data: [] as Array<{ id: string; display_name: string | null }>, error: null };
+  if (customerProfiles.error) return NextResponse.json({ error: customerProfiles.error.message }, { status: 500 });
+  const profilesById = new Map((customerProfiles.data ?? []).map((customer) => [customer.id, customer.display_name]));
 
   return NextResponse.json({
     hasData: orders.length > 0,
@@ -252,11 +259,12 @@ export async function GET(request: Request) {
       averageDaysToSecondOrder: timeToSecondOrderDays.length ? timeToSecondOrderDays.reduce((total, days) => total + days, 0) / timeToSecondOrderDays.length : null,
     },
     customerDetailsMasked: !["owner", "admin", "analyst"].includes(membership.role),
-    customers: (recentCustomers.data ?? []).map((customer, index) => ({
+    customers: rankedCustomers.map((customer, index) => ({
       ...customer,
+      amount_spent: Math.round(customer.amount_spent * 100) / 100,
+      currency: store.currency,
       country_code: latestCountryByCustomer.get(customer.id) ?? null,
-      display_name: ["owner", "admin", "analyst"].includes(membership.role) ? customer.display_name : `Customer ${index + 1}`,
-      email: null,
+      display_name: ["owner", "admin", "analyst"].includes(membership.role) ? profilesById.get(customer.id) ?? null : `Customer ${index + 1}`,
     })),
     locations: [...locationTotals.entries()].map(([countryCode, location]) => ({ countryCode, orders: location.orders, customers: location.customers.size, sales: Math.round(location.sales * 100) / 100 })).sort((left, right) => right.orders - left.orders),
     months: [...months.values()].sort((left, right) => left.key.localeCompare(right.key)),
