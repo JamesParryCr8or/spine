@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createReportingClient } from "@/lib/analytics/reporting-refresh";
 
 import { requireWorkspace } from "@/lib/workspace/server";
 import { shopifyGraph } from "@/lib/shopify/graphql";
@@ -99,7 +100,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null) as { shopDomain?: string; accessToken?: string } | null;
   const suppliedToken = body?.accessToken?.trim();
   const shopDomain = normalizeShopDomain(suppliedToken ? body?.shopDomain ?? "" : store.shopify_domain ?? "");
-  const savedSecret = suppliedToken ? null : await supabase.rpc("read_connection_secret_for_server", { requested_store_id: store.id, connection_provider: "shopify" });
+  const savedSecret = suppliedToken ? null : await createReportingClient().rpc("read_connection_secret_for_server", { requested_store_id: store.id, connection_provider: "shopify" });
   const accessToken = suppliedToken || (typeof savedSecret?.data === "string" ? savedSecret.data : "");
   if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shopDomain)) return NextResponse.json({ error: "Use your-store.myshopify.com" }, { status: 400 });
   if (!accessToken) return NextResponse.json({ error: "Shopify token is unavailable. Reconnect the store." }, { status: 409 });
