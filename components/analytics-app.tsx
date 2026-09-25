@@ -1363,6 +1363,8 @@ function Connections() {
   const [accountId, setAccountId] = useState("");
   const [metaLookbackMonths, setMetaLookbackMonths] = useState("12");
   const [metaConnected, setMetaConnected] = useState(false);
+  const [metaConnectionStatus, setMetaConnectionStatus] = useState<"connected" | "error" | "disconnected">("disconnected");
+  const [metaConnectionError, setMetaConnectionError] = useState("");
   const [googleAdsConnected, setGoogleAdsConnected] = useState(false);
   const [googleAdsAccountName, setGoogleAdsAccountName] = useState("");
   const [googleAdsAccounts, setGoogleAdsAccounts] = useState<Array<{ customer_id: string; name: string; is_manager: boolean; hierarchy_level: number; direct_access: boolean }>>([]);
@@ -1399,6 +1401,9 @@ function Connections() {
       .then((payload) => {
         if (!payload?.connection) return;
         setMetaConnected(payload.connection.status === "connected");
+        setMetaConnectionStatus(payload.connection.status === "connected" ? "connected" : payload.connection.status === "error" ? "error" : "disconnected");
+        setMetaConnectionError(payload.connection.last_error ?? "");
+        if (payload.connection.status === "error" && payload.connection.last_error) setConnectionError(payload.connection.last_error);
         setAccountId(payload.connection.external_account_id ?? "");
         setMetaAccountName(payload.connection.external_account_name ?? "");
         setMetaLastSync(payload.sync ?? null);
@@ -1467,6 +1472,8 @@ function Connections() {
       return;
     }
     setMetaConnected(true);
+    setMetaConnectionStatus("connected");
+    setMetaConnectionError("");
     setMetaAccountName(payload.connection?.external_account_name ?? "");
     setAccountId(payload.connection?.external_account_id ?? accountId);
     setMetaSyncResult(`${payload.sync?.importedDays ?? 0} daily Meta spend records imported (${payload.sync?.range?.since ?? "selected"} to ${payload.sync?.range?.until ?? "today"})`);
@@ -1482,7 +1489,7 @@ function Connections() {
       setConnectionError(payload.error ?? "Could not disconnect Meta Ads");
       return;
     }
-    setToken(""); setAccountId(""); setMetaAccountName(""); setMetaSyncResult(""); setMetaLastSync(null); setMetaConnected(false); setShowMetaSetup(false);
+    setToken(""); setAccountId(""); setMetaAccountName(""); setMetaSyncResult(""); setMetaLastSync(null); setMetaConnected(false); setMetaConnectionStatus("disconnected"); setMetaConnectionError(""); setShowMetaSetup(false);
   };
 
   const disconnectShopify = async () => {
@@ -1535,7 +1542,7 @@ function Connections() {
   };
   const connections = [
     ["Shopify", "Sales, orders, products & customers", shopifyConnected ? "Connected" : "Connect", "S"],
-    ["Meta Ads", "Campaign spend & performance", metaConnected ? "Connected" : "Connect", "M"],
+    ["Meta Ads", "Campaign spend & performance", metaConnectionStatus === "error" ? (/(expired|revoked)/i.test(metaConnectionError) ? "Expired" : "Needs attention") : metaConnected ? "Connected" : "Connect", "M"],
     ["Google Ads", googleAdsConnected ? (googleAdsAccountName || "Google Ads account") : "Campaign and keyword reporting", googleAdsConnected ? "Connected" : "Connect", "G"],
     ["Klaviyo", "Campaign and flow analytics", klaviyoConnected ? "Connected" : "Connect", "K"],
     ["GoHighLevel", ghlConnected ? (ghlAccountName || "GoHighLevel location") : "Lead, call and pipeline conversion reporting", ghlConnected ? "Connected" : "Connect", "H"],
@@ -1543,7 +1550,7 @@ function Connections() {
 
   return <>
     <div className="connection-notice"><Info/><div><strong>Secure connection storage</strong><span>Access tokens are encrypted in Supabase Vault and are never returned to the browser after saving.</span></div></div>{connectionError && <div className="connection-error" role="alert">{connectionError}</div>}
-    <section className="connection-grid">{connections.map(([name,desc,status,letter])=><article className="connection-card" key={name}><div className={`source-logo ${letter.toLowerCase()}`}>{letter}</div><div><h3>{name}</h3><p>{desc}</p></div><button disabled={status === "Coming next"} onClick={() => { if (name === "Meta Ads") setShowMetaSetup(true); else if (name === "Shopify") setShowShopifySetup(true); else if (name === "Google Ads") { if (googleAdsConnected) setShowGoogleAdsAccounts(true); else connectGoogleAds(); } else if (name === "Klaviyo") void connectKlaviyo(); else if (name === "GoHighLevel") void connectGhl(); }} className={status==="Connected"?"connected":""}>{status==="Connected"&&<span/>}{status}</button></article>)}</section>
+    <section className="connection-grid">{connections.map(([name,desc,status,letter])=><article className="connection-card" key={name}><div className={`source-logo ${letter.toLowerCase()}`}>{letter}</div><div><h3>{name}</h3><p>{desc}</p></div><button disabled={status === "Coming next"} onClick={() => { if (name === "Meta Ads") setShowMetaSetup(true); else if (name === "Shopify") setShowShopifySetup(true); else if (name === "Google Ads") { if (googleAdsConnected) setShowGoogleAdsAccounts(true); else connectGoogleAds(); } else if (name === "Klaviyo") void connectKlaviyo(); else if (name === "GoHighLevel") void connectGhl(); }} className={status==="Connected" ? "connected" : status === "Expired" || status === "Needs attention" ? "expired" : ""}>{(status==="Connected" || status === "Expired" || status === "Needs attention")&&<span/>}{status}</button></article>)}</section>
     {showGoogleAdsAccounts && <div className="modal-backdrop" onMouseDown={() => setShowGoogleAdsAccounts(false)}><section className="connection-modal" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowGoogleAdsAccounts(false)}><X/></button><div className="modal-brand"><div className="source-logo g">G</div><div><span className="eyebrow">GOOGLE ADS</span><h2>Choose an ad account</h2></div></div><p className="modal-intro">Select the Google Ads account for this brand. Manager accounts and their enabled client accounts are listed separately.</p>{connectionError && <div className="connection-error">{connectionError}</div>}{googleAdsAccounts.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Account</th><th>Customer ID</th><th>Type</th><th/></tr></thead><tbody>{googleAdsAccounts.map((account) => <tr key={account.customer_id}><td><strong>{account.name}</strong>{account.direct_access && <small>Direct Google access</small>}</td><td>{account.customer_id}</td><td>{account.is_manager ? "Manager (MCC)" : "Client account"}</td><td><button className="primary" disabled={selectingGoogleAdsAccount} onClick={() => void selectGoogleAdsAccount(account.customer_id)}>{googleAdsAccountName === account.name ? "Selected" : "Use this account"}</button></td></tr>)}</tbody></table></div> : <div className="cost-empty"><Database/><strong>No Google Ads accounts have been loaded yet</strong><span>Reconnect Google Ads to load the MCC hierarchy.</span></div>}<div className="modal-actions"><button onClick={() => setShowGoogleAdsAccounts(false)}>Close</button><button className="primary" onClick={connectGoogleAds}>Reconnect and refresh accounts</button></div></section></div>}
     {showShopifySetup && <div className="modal-backdrop" onMouseDown={()=>setShowShopifySetup(false)}><section className="connection-modal" onMouseDown={(event)=>event.stopPropagation()}>
       <button className="modal-close" onClick={()=>setShowShopifySetup(false)}><X/></button><div className="modal-brand"><div className="source-logo s">S</div><div><span className="eyebrow">PRIMARY SALES SOURCE</span><h2>Connect Shopify</h2></div></div>
@@ -1560,7 +1567,8 @@ function Connections() {
       <button className="modal-close" onClick={()=>setShowMetaSetup(false)}><X/></button>
       <div className="modal-brand"><div className="source-logo m">M</div><div><span className="eyebrow">DATA CONNECTION</span><h2>Connect Meta Ads</h2></div></div>
       <p className="modal-intro">Connect with Facebook to grant Spine read-only access to your Meta Ads account. There is no Graph API Explorer token to copy and your Facebook password never reaches Spine.</p>
-      <div className="connection-notice meta-oauth-notice"><Info/><div><strong>Connect your own Facebook account</strong><span>Choose the Meta ad account you manage, then Spine securely saves the approved connection and imports its daily spend.</span></div><button className="primary" disabled={savingConnection} onClick={connectMetaWithFacebook}><ExternalLink/>Connect Facebook</button></div>
+      <div className="connection-notice meta-oauth-notice"><Info/><div><strong>Connect your own Facebook account</strong><span>Choose the Meta ad account you manage, then Spine securely saves the approved connection and imports its daily spend.</span></div><button className="primary" disabled={savingConnection} onClick={connectMetaWithFacebook}><ExternalLink/>{metaConnectionStatus === "error" ? "Reconnect Facebook" : "Connect Facebook"}</button></div>
+      {metaConnectionStatus === "error" && metaConnectionError && <div className="connection-error" role="alert">{metaConnectionError}</div>}
       {metaConnected && metaAccountName && <div className="connected-account"><span/><div><small>CURRENT ACCOUNT</small><strong>{metaAccountName}</strong>{metaLastSync ? <small>{metaLastSync.importedDays.toLocaleString()} daily spend records · latest {metaLastSync.latestDate ? new Date(`${metaLastSync.latestDate}T00:00:00Z`).toLocaleDateString("en-GB") : "date unavailable"}</small> : <small>Spend data has not been imported yet.</small>}</div></div>}
       <div className="help-card"><Info/><div><strong>Alternative for agency-managed accounts</strong><p>Use a Meta system-user token only if your business manages the connection centrally. For normal use, choose <b>Connect Facebook</b> above.</p><a className="meta-developer-link" href="https://developers.facebook.com/apps/" target="_blank" rel="noreferrer"><ExternalLink/>Open Meta Developer Portal</a></div></div>
       <label className="form-field"><span>System-user token <small>Optional alternative</small><b className="tooltip-trigger">?<em>Use this only for a centrally managed Meta system user with ads_read and read_insights.</em></b></span><div className="secret-input"><KeyRound/><input value={token} onChange={(event)=>setToken(event.target.value)} type={showToken?"text":"password"} placeholder="EAAB..." autoComplete="off"/><button onClick={()=>setShowToken(!showToken)}>{showToken?<EyeOff/>:<Eye/>}</button></div></label>
