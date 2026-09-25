@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { fetchCachedJson } from "@/lib/analytics/client-response-cache";
 import type { ReactNode } from "react";
 import { ArrowDownRight, BarChart3, CalendarClock, CircleDollarSign, RefreshCw, Users } from "lucide-react";
 
@@ -28,14 +29,16 @@ export function LeadReportPage({ view, range }: { view: LeadView; range: Range }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
+  const lastRefresh = useRef(0);
   useEffect(() => {
     let live = true;
     setLoading(true); setError("");
     const params = new URLSearchParams({ from: range.from, to: range.to, details: "1" });
     if (view === "Follow-ups") params.set("includeFollowups", "1");
     if (view === "Lost reasons") params.set("includeLostReasons", "1");
-    fetch(`/api/analytics/leads/pipeline?${params}`)
-      .then(async (r) => { const payload = await r.json(); if (!r.ok) throw new Error(payload.error || "Could not load the GoHighLevel report"); return payload as ReportData; })
+    const force = revision !== lastRefresh.current;
+    lastRefresh.current = revision;
+    fetchCachedJson<ReportData>(`/api/analytics/leads/pipeline?${params}`, { force })
       .then((payload) => { if (live) setData(payload); })
       .catch((e: unknown) => { if (live) setError(e instanceof Error ? e.message : "Could not load this report"); })
       .finally(() => { if (live) setLoading(false); });
