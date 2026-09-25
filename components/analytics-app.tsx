@@ -585,7 +585,7 @@ type PnlCustomerPeriod = {
   guestOrders: number; guestSales: number; excludedCurrencyOrders: number;
 };
 
-function ProfitLoss({ savedPreset, reportRunId, initialRange }: { savedPreset?: "all_imported" | "latest_30_days" | "latest_90_days" | "latest_365_days"; reportRunId?: string; initialRange?: DrilldownContext }) {
+function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { savedPreset?: "all_imported" | "latest_30_days" | "latest_90_days" | "latest_365_days"; reportRunId?: string; initialRange?: DrilldownContext; storageKey: string }) {
   const finishReportRun = useReportRun(reportRunId);
   const [pnl, setPnl] = useState<PnlData | null>(null);
   const [comparison, setComparison] = useState<PnlData | null>(null);
@@ -607,13 +607,41 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange }: { savedPreset?: 
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const appliedSavedPreset = useRef<string | null>(null);
   const autoFeeRefreshRanges = useRef(new Set<string>());
+  const [datePrefsReady, setDatePrefsReady] = useState(false);
+  const restoredDatePrefs = useRef(false);
+  const lastFeeRefreshVersion = useRef(0);
   useEffect(() => {
+    if (initialRange) { setDatePrefsReady(true); return; }
+    setDatePrefsReady(false);
+    restoredDatePrefs.current = false;
+    try {
+      const saved = localStorage.getItem(`spine:pnl-period:${storageKey}`);
+      if (saved) {
+        const value = JSON.parse(saved) as { preset?: FinanceDatePreset; from?: string; to?: string };
+        if (value.preset && ["today", "yesterday", "last_7_days", "last_7_complete_days", "last_30_days", "last_30_complete_days", "last_90_days", "last_365_days", "this_month", "last_month", "all_imported", "custom"].includes(value.preset)) {
+          setDatePreset(value.preset);
+          setFromDate(value.from ?? "");
+          setToDate(value.to ?? "");
+          restoredDatePrefs.current = true;
+        }
+      }
+    } catch { /* Ignore malformed saved filters. */ }
+    setDatePrefsReady(true);
+  }, [storageKey, initialRange?.from, initialRange?.to]);
+  useEffect(() => {
+    if (!datePrefsReady || initialRange) return;
+    localStorage.setItem(`spine:pnl-period:${storageKey}`, JSON.stringify({ preset: datePreset, from: fromDate, to: toDate }));
+  }, [storageKey, datePrefsReady, initialRange, datePreset, fromDate, toDate]);
+  useEffect(() => {
+    if (!datePrefsReady) return;
     const params = new URLSearchParams();
     if (fromDate) params.set("from", fromDate);
     if (toDate) params.set("to", toDate);
-    fetch(`/api/analytics/pnl${params.size ? `?${params}` : ""}`)
-      .then(async (response) => response.ok ? response.json() : null)
-      .then(async (payload: PnlData | null) => {
+    const url = `/api/analytics/pnl${params.size ? `?${params}` : ""}`;
+    const force = feeRefreshVersion !== lastFeeRefreshVersion.current;
+    lastFeeRefreshVersion.current = feeRefreshVersion;
+    fetchCachedJson<PnlData>(url, { force })
+      .then(async (payload: PnlData) => {
         setPnl(payload); setComparison(null); setYearComparison(null);
         finishReportRun(payload ? "completed" : "failed", payload?.metrics.orders ?? null);
         if (!payload?.period) return;
@@ -625,19 +653,19 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange }: { savedPreset?: 
         const date = (value: Date) => value.toISOString().slice(0, 10);
         const previousYearStart = new Date(start); previousYearStart.setUTCFullYear(previousYearStart.getUTCFullYear() - 1);
         const previousYearEnd = new Date(end); previousYearEnd.setUTCFullYear(previousYearEnd.getUTCFullYear() - 1);
-        const [previousResponse, previousYearResponse] = await Promise.all([
-          fetch(`/api/analytics/pnl?from=${date(previousStart)}&to=${date(previousEnd)}&refresh=0`),
-          fetch(`/api/analytics/pnl?from=${date(previousYearStart)}&to=${date(previousYearEnd)}&refresh=0`),
+        const [previousPayload, previousYearPayload] = await Promise.all([
+          fetchCachedJson<PnlData>(`/api/analytics/pnl?from=${date(previousStart)}&to=${date(previousEnd)}&refresh=0`),
+          fetchCachedJson<PnlData>(`/api/analytics/pnl?from=${date(previousYearStart)}&to=${date(previousYearEnd)}&refresh=0`),
         ]);
-        if (previousResponse.ok) setComparison(await previousResponse.json() as PnlData);
-        if (previousYearResponse.ok) setYearComparison(await previousYearResponse.json() as PnlData);
+        setComparison(previousPayload);
+        setYearComparison(previousYearPayload);
       })
       .catch(() => { setPnl(null); setComparison(null); setYearComparison(null); finishReportRun("failed", null, "Profit and loss data could not be loaded"); })
       .finally(() => setLoading(false));
-  }, [fromDate, toDate, feeRefreshVersion, finishReportRun]);
+  }, [fromDate, toDate, feeRefreshVersion, finishReportRun, datePrefsReady]);
 
   useEffect(() => {
-    if (initialRange || !savedPreset || !pnl?.period?.end || appliedSavedPreset.current === savedPreset) return;
+    if (initialRange || restoredDatePrefs.current || !savedPreset || !pnl?.period?.end || appliedSavedPreset.current === savedPreset) return;
     appliedSavedPreset.current = savedPreset;
     const periodEnd = pnl.period.end;
     const timeout = window.setTimeout(() => {
@@ -649,7 +677,7 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange }: { savedPreset?: 
       setFromDate(start.toISOString().slice(0, 10)); setToDate(periodEnd);
     }, 0);
     return () => window.clearTimeout(timeout);
-  }, [savedPreset, pnl?.period?.end, initialRange]);
+  }, [savedPreset, pnl?.period?.end, initialRange, datePrefsReady]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -881,7 +909,7 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange }: { savedPreset?: 
     {pnl.hasData ? <><div className="report-export"><button className="export-button" onClick={exportPnl}><Download/> Export visible P&amp;L CSV</button></div><details className="metric-dictionary"><summary>Metric definitions</summary><dl><div><dt>Total sales</dt><dd>Net product sales plus customer shipping revenue. Tax and duties are shown separately.</dd></div><div><dt>Gross profit</dt><dd>Net product sales after refunds, less effective-dated product costs.</dd></div><div><dt>Net profit</dt><dd>Available after marketing, shipping, handling, product-cost, and operating-cost coverage is complete.</dd></div></dl></details></> : null}
     <section className="panel report-panel"><div className="report-summary">{summary.map(([label, value, hint]) => <div key={label}><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>)}</div>
       {viewMode === "chart" && displayPeriods.length ? <div className="pnl-chart"><div className="panel-head"><div><span className="eyebrow">PROFIT TREND</span><h2>Revenue, gross profit, and net profit</h2></div><div className="legend"><span className="blue-dot"/>Net sales <span className="green-dot"/>Gross profit <span className="orange-dot"/>Net profit</div></div><div className="chart-wrap"><div className="y-axis"><span>{formatter.format(chartMaximum)}</span><span>{formatter.format(chartMaximum / 2)}</span><span>{formatter.format(chartMaximum / 4)}</span><span>{formatter.format(0)}</span></div><div className="bar-chart">{displayPeriods.map(({ period, data }) => <div className="bar-group" key={period.start + "-" + period.end}><div className="bars"><i className="revenue" style={{height:(Math.abs(data.metrics.netProductSales - data.metrics.refunds) / chartMaximum * 100) + "%"}}/><i className="profit" style={{height:(Math.abs(data.metrics.grossProfit) / chartMaximum * 100) + "%"}}/><i className="spend" style={{height:(Math.abs(data.metrics.netProfit ?? 0) / chartMaximum * 100) + "%"}}/></div><span>{period.label}</span></div>)}</div></div></div> : null}
-      {viewMode === "table" ? <div className="table-scroll"><table className="data-table pnl-table period-table"><thead><tr><th>Income statement</th>{displayedColumns.map((column, index) => <th key={column.period.start + "-" + column.period.end + "-" + index}>{column.period.label}</th>)}</tr></thead><tbody>{sections.map((section) => [<tr className="pnl-section" key={section + "-heading"}><td colSpan={displayedColumns.length + 1}><button onClick={() => toggleSection(section)}><ChevronDown className={collapsedSections.has(section) ? "collapsed" : ""}/>{section}</button></td></tr>, ...(collapsedSections.has(section) ? [] : pnlRows.filter((row) => row.section === section).map((row) => <tr className={row.label.includes("profit") || row.label.includes("margin") || row.label === "Total sales" || row.label === "Total marketing spend" ? "total" : ""} key={section + "-" + row.label}><td><span className="indent">{row.label}</span></td>{displayedColumns.map((column, index) => <td key={row.label + "-" + index}>{row.value(column.data)}</td>)}</tr>))])}</tbody></table></div> : null}
+      {viewMode === "table" ? <div className="table-scroll"><table className="data-table pnl-table period-table"><thead><tr><th>Income statement</th>{displayedColumns.map((column, index) => <th key={column.period.start + "-" + column.period.end + "-" + index}>{column.period.label}</th>)}{pnl?.period ? <th className="pnl-period-total">Total for period</th> : null}</tr></thead><tbody>{sections.map((section) => [<tr className="pnl-section" key={section + "-heading"}><td colSpan={displayedColumns.length + (pnl?.period ? 2 : 1)}><button onClick={() => toggleSection(section)}><ChevronDown className={collapsedSections.has(section) ? "collapsed" : ""}/>{section}</button></td></tr>, ...(collapsedSections.has(section) ? [] : pnlRows.filter((row) => row.section === section).map((row) => <tr className={row.label.includes("profit") || row.label.includes("margin") || row.label === "Total sales" || row.label === "Total marketing spend" ? "total" : ""} key={section + "-" + row.label}><td><span className="indent">{row.label}</span></td>{displayedColumns.map((column, index) => <td key={row.label + "-" + index}>{row.value(column.data)}</td>)}{pnl?.period ? <td className="pnl-period-total">{row.value(pnl)}</td> : null}</tr>))])}</tbody></table></div> : null}
       <div className="table-footer"><span>{periodData.length >= 12 ? "Showing the latest 12 " + granularity + " periods" : displayPeriods.length + " " + granularity + " period" + (displayPeriods.length === 1 ? "" : "s")}</span><span>{showComparison ? "Previous-period overlay on" : "Comparison overlay off"}</span></div>
     </section>
     {pnl.hasData ? <section className="panel report-panel pnl-kpi-panel">
@@ -2329,7 +2357,7 @@ export function AnalyticsApp() {
     <aside className={mobileOpen?"sidebar open":"sidebar"}><div className="brand"><span className="brand-mark"><Image src="/spine-logo.png" alt="" width={34} height={34} priority /></span><span><b>Spine</b><small>The backbone of your business</small></span><button className="mobile-close" onClick={()=>setMobileOpen(false)}><X/></button></div><label className="store-switcher"><span className="store-icon"><ShoppingBag/></span><span><small>STORE</small><b>{switchingStore ? "Switching…" : activeStoreName}</b></span><select aria-label="Active store" value={workspace?.activeStoreId ?? ""} disabled={!workspace || switchingStore || workspace.stores.length < 2} onChange={(event)=>void switchStore(event.target.value)}>{workspace?.stores.map((store)=>{const organization=workspace?.organizations.find((candidate)=>candidate.id===store.organizationId);return <option key={store.id} value={store.id}>{organization && (workspace?.organizations.length ?? 0) > 1 ? `${organization.name} · ` : ""}{store.name}</option>})}</select><ChevronDown/></label><nav>{availableNav.map((item)=>{if(item.subItem&&!customersExpanded)return null;const isCustomers=item.label==="Customers";return <div key={item.label}>{item.section&&<span className="nav-section">{item.section}</span>}<button className={`${view===item.label ? "nav-item active" : "nav-item"}${item.subItem ? " nav-sub-item" : ""}`} onClick={()=>{if(isCustomers)setCustomersExpanded((expanded)=>!expanded);setActiveReportRun(null);setDrilldown(null);setView(item.label);setMobileOpen(false)}}><item.icon/><span>{item.display ?? item.label}</span>{isCustomers&&<ChevronDown style={{marginLeft:"auto",transform:customersExpanded?"rotate(0deg)":"rotate(-90deg)",transition:"transform .2s"}}/>}</button></div>})}</nav><div className="sidebar-bottom"><button className="nav-item" onClick={logout}><LogOut/><span>Sign out</span></button><div className="user-card"><div>{account.name.slice(0, 2).toUpperCase()}</div><span><b>{account.name}</b><small>{account.email}</small></span></div></div></aside>
     <main className="main"><header className="topbar"><button className="menu-button" onClick={()=>setMobileOpen(true)}><Menu/></button><div className="breadcrumb"><span>{activeStoreName}</span><b>/</b><strong>{view}</strong></div><div className="top-actions"><div className="global-date-picker"><button className="date-button" title="Choose reporting period" onClick={() => setLeadDatePickerOpen((open) => !open)}><CalendarDays/><span>{leadRangeLabel}</span><ChevronDown/></button>{leadDatePickerOpen && <div className="global-date-menu"><label>Period<select value={leadDatePreset} onChange={(event) => updateLeadPreset(event.target.value as FinanceDatePreset)}><option value="all_imported">All imported data</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="last_7_days">Last 7 days</option><option value="last_30_days">Last 30 days</option><option value="last_90_days">Last 90 days</option><option value="last_365_days">Last 365 days</option><option value="this_month">This month</option><option value="last_month">Last month</option><option value="custom">Custom dates</option></select></label>{leadDatePreset === "custom" && <div className="global-date-custom"><label>From<input type="date" value={leadFrom} onChange={(event) => setLeadFrom(event.target.value)}/></label><label>To<input type="date" value={leadTo} onChange={(event) => setLeadTo(event.target.value)}/></label></div>}<button className="primary" onClick={() => setLeadDatePickerOpen(false)}>Apply period</button></div>}</div><button className="icon-button" onClick={openSync} title="Open Shopify sync"><RefreshCw/></button><button className="export-button" onClick={()=>setView("Reports")}><Table2/> Reports</button></div></header>
       <div className="content"><div className="page-heading"><div><span className="eyebrow">{businessModel === "lead_generation" ? "LEAD GENERATION INTELLIGENCE" : "ECOMMERCE INTELLIGENCE"}</span><h1>{view}</h1><p>{view==="Leads"?"A standalone view of ad cost against your selected GoHighLevel conversion.":view==="Overview"?(businessModel === "lead_generation" ? "Monitor GoHighLevel stage volumes, paid-media efficiency and pipeline value." : "A clear view of what your store earned—not just what it sold."):view==="UTM Analysis"?"Understand which traffic sources create profitable customers.":view==="Profit & Loss"?"Your ecommerce income statement, based on all imported Shopify data.":`Manage and analyse your ${view.toLowerCase()}.`}</p></div><div className="freshness"><span className={freshness?.latestStatus === "failed" ? "sync-dot syncing" : "sync-dot"}/><div><small>{freshnessHeading}</small><b>{freshnessDetail}</b></div></div></div>
-        {view==="Overview"?(businessModel === "lead_generation" ? <LeadOverview range={{ from: leadFrom, to: leadTo, label: leadRangeLabel }} onOpenConnections={() => setView("Connections")} onOpenLeads={() => setView("Leads")}/> : <Overview reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} onDrilldown={openDrilldown} storageKey={activeStore?.id ?? "default"}/>):view==="Leads"?<Leads onOpenConnections={() => setView("Connections")} range={{ from: leadFrom, to: leadTo, label: leadRangeLabel, preset: leadDatePreset }} onRangeChange={(next) => { if (next.preset) updateLeadPreset(next.preset); if (next.from !== undefined) { setLeadDatePreset("custom"); setLeadFrom(next.from); } if (next.to !== undefined) { setLeadDatePreset("custom"); setLeadTo(next.to); } }}/>:(["Pipeline outcomes","Stage ageing","Lead sources","Sales team","Forecast","Lost reasons","Follow-ups"] as View[]).includes(view)?<LeadReportPage view={view as "Pipeline outcomes" | "Stage ageing" | "Lead sources" | "Sales team" | "Forecast" | "Lost reasons" | "Follow-ups"} range={{from:leadFrom,to:leadTo,label:leadRangeLabel}}/>:view==="Profit & Loss"?<ProfitLoss savedPreset={pnlPreset} initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Sales"?<Sales reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="UTM Analysis"?<UTMAnalysis initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Products"?<Products initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} openCosts={(sku) => { setCostSku(sku); setDrilldown(null); setView("Costs"); }}/>:(view==="New versus repeat sales" || view==="Top Shopify customers" || view==="Sales by country")?<ShopifyCustomerReport focus={view==="New versus repeat sales"?"sales":view==="Sales by country"?"geography":"customers"}/>: (["Customers", "Customer cohorts", "Repurchase rates", "Time between orders", "Product journeys"] as View[]).includes(view)?<Customers initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} focus={view === "Customer cohorts" ? "cohorts" : view === "Repurchase rates" ? "repurchase" : view === "Time between orders" ? "timing" : view === "Product journeys" ? "journeys" : "summary"}/>:view==="Costs"?<Costs focusSku={costSku}/>:view==="Expenses"?<Expenses/>:view==="Reports"?<Reports openReport={(target, preset, runId, filters) => { setPnlPreset(preset); setDrilldown(filters ?? null); setActiveReportRun({ id: runId, view: target }); setView(target); }}/> :view==="Connections"?<Connections/>:view==="Settings"?<SettingsView/>:<Generic view={view}/>}</div>
+        {view==="Overview"?(businessModel === "lead_generation" ? <LeadOverview range={{ from: leadFrom, to: leadTo, label: leadRangeLabel }} onOpenConnections={() => setView("Connections")} onOpenLeads={() => setView("Leads")}/> : <Overview reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} onDrilldown={openDrilldown} storageKey={activeStore?.id ?? "default"}/>):view==="Leads"?<Leads onOpenConnections={() => setView("Connections")} range={{ from: leadFrom, to: leadTo, label: leadRangeLabel, preset: leadDatePreset }} onRangeChange={(next) => { if (next.preset) updateLeadPreset(next.preset); if (next.from !== undefined) { setLeadDatePreset("custom"); setLeadFrom(next.from); } if (next.to !== undefined) { setLeadDatePreset("custom"); setLeadTo(next.to); } }}/>:(["Pipeline outcomes","Stage ageing","Lead sources","Sales team","Forecast","Lost reasons","Follow-ups"] as View[]).includes(view)?<LeadReportPage view={view as "Pipeline outcomes" | "Stage ageing" | "Lead sources" | "Sales team" | "Forecast" | "Lost reasons" | "Follow-ups"} range={{from:leadFrom,to:leadTo,label:leadRangeLabel}}/>:view==="Profit & Loss"?<ProfitLoss savedPreset={pnlPreset} initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} storageKey={activeStore?.id ?? "default"}/>:view==="Sales"?<Sales reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="UTM Analysis"?<UTMAnalysis initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Products"?<Products initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} openCosts={(sku) => { setCostSku(sku); setDrilldown(null); setView("Costs"); }}/>:(view==="New versus repeat sales" || view==="Top Shopify customers" || view==="Sales by country")?<ShopifyCustomerReport focus={view==="New versus repeat sales"?"sales":view==="Sales by country"?"geography":"customers"}/>: (["Customers", "Customer cohorts", "Repurchase rates", "Time between orders", "Product journeys"] as View[]).includes(view)?<Customers initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} focus={view === "Customer cohorts" ? "cohorts" : view === "Repurchase rates" ? "repurchase" : view === "Time between orders" ? "timing" : view === "Product journeys" ? "journeys" : "summary"}/>:view==="Costs"?<Costs focusSku={costSku}/>:view==="Expenses"?<Expenses/>:view==="Reports"?<Reports openReport={(target, preset, runId, filters) => { setPnlPreset(preset); setDrilldown(filters ?? null); setActiveReportRun({ id: runId, view: target }); setView(target); }}/> :view==="Connections"?<Connections/>:view==="Settings"?<SettingsView/>:<Generic view={view}/>}</div>
     </main>
   </div>;
 }
