@@ -42,7 +42,8 @@ export async function GET(request: Request) {
   const focus = params.get("focus");
   const from = params.get("from") ?? "";
   const to = params.get("to") ?? "";
-  if ((focus !== "sales" && focus !== "customers") || !date(from) || !date(to) || from > to) {
+  const groupBy = params.get("groupBy") ?? "month";
+  if ((focus !== "sales" && focus !== "customers") || !date(from) || !date(to) || from > to || !["day", "week", "month", "quarter", "year"].includes(groupBy)) {
     return NextResponse.json({ error: "Select a valid reporting period" }, { status: 400 });
   }
 
@@ -63,12 +64,12 @@ export async function GET(request: Request) {
   const range = `SINCE ${from} UNTIL ${to}`;
   try {
     if (focus === "sales") {
-      const rows = await run(store.shopify_domain, token, `FROM sales SHOW total_sales, orders GROUP BY new_or_returning_customer TIMESERIES month ${range} ORDER BY month ASC LIMIT 1000`);
-      const months = new Map<string, { month: string; newOrders: number; newSales: number; repeatOrders: number; repeatSales: number }>();
+      const rows = await run(store.shopify_domain, token, `FROM sales SHOW total_sales, orders GROUP BY new_or_returning_customer TIMESERIES ${groupBy} ${range} ORDER BY ${groupBy} ASC LIMIT 1000`);
+      const periods = new Map<string, { period: string; newOrders: number; newSales: number; repeatOrders: number; repeatSales: number }>();
       for (const row of rows) {
-        const month = String(row.month ?? "").slice(0, 7);
-        if (!/^\d{4}-\d{2}$/.test(month)) continue;
-        const entry = months.get(month) ?? { month, newOrders: 0, newSales: 0, repeatOrders: 0, repeatSales: 0 };
+        const period = String(row[groupBy] ?? "").slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(period)) continue;
+        const entry = periods.get(period) ?? { period, newOrders: 0, newSales: 0, repeatOrders: 0, repeatSales: 0 };
         const group = String(row.new_or_returning_customer ?? "").toLowerCase();
         if (group === "new") {
           entry.newOrders += number(row.orders);
@@ -77,9 +78,9 @@ export async function GET(request: Request) {
           entry.repeatOrders += number(row.orders);
           entry.repeatSales += number(row.total_sales);
         }
-        months.set(month, entry);
+        periods.set(period, entry);
       }
-      return NextResponse.json({ currency: store.reporting_currency || store.currency, from, to, months: [...months.values()].sort((a, b) => b.month.localeCompare(a.month)) });
+      return NextResponse.json({ currency: store.reporting_currency || store.currency, from, to, groupBy, periods: [...periods.values()].sort((a, b) => b.period.localeCompare(a.period)) });
     }
 
     const [customerRows, locationRows] = await Promise.all([
