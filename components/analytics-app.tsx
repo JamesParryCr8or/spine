@@ -179,7 +179,7 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
             return rect;
           })}
           <rect x={center-step/2} y={top} width={step} height={bottom-top+20} fill="transparent"/>
-          <text x={center} y={318} textAnchor="middle" className="finance-label">{point.label}</text>
+          {(index === 0 || index === points.length - 1 || index % Math.ceil(points.length / 8) === 0) && <text x={center} y={318} textAnchor="middle" className="finance-label">{point.label}</text>}
         </g>;
       })}
       <polyline points={line} className="finance-profit-line"/>
@@ -229,7 +229,7 @@ type OverviewData = {
   google?: { importedDays: number; start: string | null; end: string | null };
 };
 
-function Overview({ reportRunId, onDrilldown }: { reportRunId?: string; onDrilldown: (target: View, context?: DrilldownContext) => void }) {
+function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId?: string; onDrilldown: (target: View, context?: DrilldownContext) => void; storageKey: string }) {
   const finishReportRun = useReportRun(reportRunId);
   const [liveData, setLiveData] = useState<OverviewData | null>(null);
   const [comparisonData, setComparisonData] = useState<OverviewData | null>(null);
@@ -248,6 +248,7 @@ function Overview({ reportRunId, onDrilldown }: { reportRunId?: string; onDrilld
   const [customizingWidgets, setCustomizingWidgets] = useState(false);
   const [widgetPreferences, setWidgetPreferences] = useState<{ order: OverviewWidgetId[]; hidden: OverviewWidgetId[] }>({ order: [...overviewWidgetIds], hidden: [] });
   const widgetPreferencesReady = useRef(false);
+  const filterPreferencesReady = useRef(false);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -270,6 +271,35 @@ function Overview({ reportRunId, onDrilldown }: { reportRunId?: string; onDrilld
     if (!widgetPreferencesReady.current) return;
     window.localStorage.setItem("spine:overview-widgets", JSON.stringify(widgetPreferences));
   }, [widgetPreferences]);
+
+  useEffect(() => {
+    filterPreferencesReady.current = false;
+    const timeout = window.setTimeout(() => {
+      const key = `spine:overview-filters:${storageKey}`;
+      try {
+        const stored = window.localStorage.getItem(key);
+        if (stored) {
+          const parsed = JSON.parse(stored) as { fromDate?: unknown; toDate?: unknown; datePreset?: unknown; granularity?: unknown };
+          const isDate = (value: unknown) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+          const validPreset = typeof parsed.datePreset === "string" && ["today", "yesterday", "last_7_days", "last_7_complete_days", "last_30_days", "last_30_complete_days", "last_90_days", "last_365_days", "this_month", "last_month", "all_imported", "custom"].includes(parsed.datePreset);
+          const validGranularity = typeof parsed.granularity === "string" && ["daily", "weekly", "monthly", "quarterly", "annual"].includes(parsed.granularity);
+          if ((isDate(parsed.fromDate) || parsed.fromDate === "") && (isDate(parsed.toDate) || parsed.toDate === "") && validPreset && validGranularity) {
+            setFromDate(parsed.fromDate as string);
+            setToDate(parsed.toDate as string);
+            setDatePreset(parsed.datePreset as FinanceDatePreset);
+            setGranularity(parsed.granularity as ReportingGranularity);
+          }
+        }
+      } catch { window.localStorage.removeItem(key); }
+      filterPreferencesReady.current = true;
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (!filterPreferencesReady.current) return;
+    window.localStorage.setItem(`spine:overview-filters:${storageKey}`, JSON.stringify({ fromDate, toDate, datePreset, granularity }));
+  }, [storageKey, fromDate, toDate, datePreset, granularity]);
 
   useEffect(() => {
     if ((fromDate && !toDate) || (!fromDate && toDate)) return;
@@ -2017,7 +2047,7 @@ export function AnalyticsApp() {
     <aside className={mobileOpen?"sidebar open":"sidebar"}><div className="brand"><span className="brand-mark"><Image src="/spine-logo.png" alt="" width={34} height={34} priority /></span><span><b>Spine</b><small>The backbone of your business</small></span><button className="mobile-close" onClick={()=>setMobileOpen(false)}><X/></button></div><label className="store-switcher"><span className="store-icon"><ShoppingBag/></span><span><small>STORE</small><b>{switchingStore ? "Switching…" : activeStoreName}</b></span><select aria-label="Active store" value={workspace?.activeStoreId ?? ""} disabled={!workspace || switchingStore || workspace.stores.length < 2} onChange={(event)=>void switchStore(event.target.value)}>{workspace?.stores.map((store)=>{const organization=workspace?.organizations.find((candidate)=>candidate.id===store.organizationId);return <option key={store.id} value={store.id}>{organization && (workspace?.organizations.length ?? 0) > 1 ? `${organization.name} · ` : ""}{store.name}</option>})}</select><ChevronDown/></label><nav>{availableNav.map((item)=>{if(item.subItem&&!customersExpanded)return null;const isCustomers=item.label==="Customers";return <div key={item.label}>{item.section&&<span className="nav-section">{item.section}</span>}<button className={`${view===item.label ? "nav-item active" : "nav-item"}${item.subItem ? " nav-sub-item" : ""}`} onClick={()=>{if(isCustomers)setCustomersExpanded((expanded)=>!expanded);setActiveReportRun(null);setDrilldown(null);setView(item.label);setMobileOpen(false)}}><item.icon/><span>{item.display ?? item.label}</span>{isCustomers&&<ChevronDown style={{marginLeft:"auto",transform:customersExpanded?"rotate(0deg)":"rotate(-90deg)",transition:"transform .2s"}}/>}</button></div>})}</nav><div className="sidebar-bottom"><button className="nav-item" onClick={logout}><LogOut/><span>Sign out</span></button><div className="user-card"><div>{account.name.slice(0, 2).toUpperCase()}</div><span><b>{account.name}</b><small>{account.email}</small></span></div></div></aside>
     <main className="main"><header className="topbar"><button className="menu-button" onClick={()=>setMobileOpen(true)}><Menu/></button><div className="breadcrumb"><span>{activeStoreName}</span><b>/</b><strong>{view}</strong></div><div className="top-actions"><div className="global-date-picker"><button className="date-button" title="Choose reporting period" onClick={() => setLeadDatePickerOpen((open) => !open)}><CalendarDays/><span>{leadRangeLabel}</span><ChevronDown/></button>{leadDatePickerOpen && <div className="global-date-menu"><label>Period<select value={leadDatePreset} onChange={(event) => updateLeadPreset(event.target.value as FinanceDatePreset)}><option value="all_imported">All imported data</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="last_7_days">Last 7 days</option><option value="last_30_days">Last 30 days</option><option value="last_90_days">Last 90 days</option><option value="last_365_days">Last 365 days</option><option value="this_month">This month</option><option value="last_month">Last month</option><option value="custom">Custom dates</option></select></label>{leadDatePreset === "custom" && <div className="global-date-custom"><label>From<input type="date" value={leadFrom} onChange={(event) => setLeadFrom(event.target.value)}/></label><label>To<input type="date" value={leadTo} onChange={(event) => setLeadTo(event.target.value)}/></label></div>}<button className="primary" onClick={() => setLeadDatePickerOpen(false)}>Apply period</button></div>}</div><button className="icon-button" onClick={openSync} title="Open Shopify sync"><RefreshCw/></button><button className="export-button" onClick={()=>setView("Reports")}><Table2/> Reports</button></div></header>
       <div className="content"><div className="page-heading"><div><span className="eyebrow">{view==="Leads" ? "LEAD GENERATION INTELLIGENCE" : "ECOMMERCE INTELLIGENCE"}</span><h1>{view}</h1><p>{view==="Leads"?"A standalone view of ad cost against your selected GoHighLevel conversion.":view==="Overview"?"A clear view of what your store earned—not just what it sold.":view==="UTM Analysis"?"Understand which traffic sources create profitable customers.":view==="Profit & Loss"?"Your ecommerce income statement, based on all imported Shopify data.":`Manage and analyse your ${view.toLowerCase()}.`}</p></div><div className="freshness"><span className={freshness?.latestStatus === "failed" ? "sync-dot syncing" : "sync-dot"}/><div><small>{freshnessHeading}</small><b>{freshnessDetail}</b></div></div></div>
-        {view==="Overview"?<Overview reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} onDrilldown={openDrilldown}/>:view==="Leads"?<Leads onOpenConnections={() => setView("Connections")} range={{ from: leadFrom, to: leadTo, label: leadRangeLabel, preset: leadDatePreset }} onRangeChange={(next) => { if (next.preset) updateLeadPreset(next.preset); if (next.from !== undefined) { setLeadDatePreset("custom"); setLeadFrom(next.from); } if (next.to !== undefined) { setLeadDatePreset("custom"); setLeadTo(next.to); } }}/>:view==="Profit & Loss"?<ProfitLoss savedPreset={pnlPreset} initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Sales"?<Sales reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="UTM Analysis"?<UTMAnalysis initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Products"?<Products initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} openCosts={(sku) => { setCostSku(sku); setDrilldown(null); setView("Costs"); }}/>:(["Customers", "Customer cohorts", "Repurchase rates", "Time between orders", "Product journeys"] as View[]).includes(view)?<Customers initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} focus={view === "Customer cohorts" ? "cohorts" : view === "Repurchase rates" ? "repurchase" : view === "Time between orders" ? "timing" : view === "Product journeys" ? "journeys" : "summary"}/>:view==="Costs"?<Costs focusSku={costSku}/>:view==="Expenses"?<Expenses/>:view==="Reports"?<Reports openReport={(target, preset, runId, filters) => { setPnlPreset(preset); setDrilldown(filters ?? null); setActiveReportRun({ id: runId, view: target }); setView(target); }}/> :view==="Connections"?<Connections/>:view==="Settings"?<SettingsView/>:<Generic view={view}/>}</div>
+        {view==="Overview"?<Overview reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} onDrilldown={openDrilldown} storageKey={activeStore?.id ?? "default"}/>:view==="Leads"?<Leads onOpenConnections={() => setView("Connections")} range={{ from: leadFrom, to: leadTo, label: leadRangeLabel, preset: leadDatePreset }} onRangeChange={(next) => { if (next.preset) updateLeadPreset(next.preset); if (next.from !== undefined) { setLeadDatePreset("custom"); setLeadFrom(next.from); } if (next.to !== undefined) { setLeadDatePreset("custom"); setLeadTo(next.to); } }}/>:view==="Profit & Loss"?<ProfitLoss savedPreset={pnlPreset} initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Sales"?<Sales reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="UTM Analysis"?<UTMAnalysis initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined}/>:view==="Products"?<Products initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} openCosts={(sku) => { setCostSku(sku); setDrilldown(null); setView("Costs"); }}/>:(["Customers", "Customer cohorts", "Repurchase rates", "Time between orders", "Product journeys"] as View[]).includes(view)?<Customers initialRange={drilldown ?? undefined} reportRunId={activeReportRun?.view === view ? activeReportRun.id : undefined} focus={view === "Customer cohorts" ? "cohorts" : view === "Repurchase rates" ? "repurchase" : view === "Time between orders" ? "timing" : view === "Product journeys" ? "journeys" : "summary"}/>:view==="Costs"?<Costs focusSku={costSku}/>:view==="Expenses"?<Expenses/>:view==="Reports"?<Reports openReport={(target, preset, runId, filters) => { setPnlPreset(preset); setDrilldown(filters ?? null); setActiveReportRun({ id: runId, view: target }); setView(target); }}/> :view==="Connections"?<Connections/>:view==="Settings"?<SettingsView/>:<Generic view={view}/>}</div>
     </main>
   </div>;
 }
