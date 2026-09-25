@@ -26,8 +26,35 @@ export async function GET() {
     .maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  let connection = data;
+  if (connection?.status === "connected") {
+    const { data: accessToken, error: secretError } = await supabase.rpc("read_connection_secret", {
+      requested_store_id: store.id,
+      connection_provider: "meta",
+    });
+    if (!secretError && accessToken) {
+      try {
+        await discoverMetaAccounts(accessToken);
+      } catch (cause) {
+        const providerMessage = cause instanceof Error ? cause.message : "Meta rejected this connection";
+        const needsReconnect = /(access token|oauth).*(expired|invalid|revoked)|(expired|invalid|revoked).*(access token|oauth)|code\s*190/i.test(providerMessage);
+        const message = needsReconnect
+          ? "Meta access token has expired or was revoked. Reconnect Facebook to continue importing spend."
+          : `Meta connection needs attention: ${providerMessage}`;
+        const { data: updated } = await supabase.rpc("mark_connection_error", {
+          connection_provider: "meta",
+          requested_store_id: store.id,
+          connection_error: message,
+        });
+        connection = updated
+          ? { ...connection, ...(Array.isArray(updated) ? updated[0] : updated) }
+          : { ...connection, status: "error", last_error: message };
+      }
+    }
+  }
+
   let sync = null;
-  if (data) {
+  if (connection) {
     const [{ data: latest, count }, { count: campaignDays }] = await Promise.all([
       supabase.from("meta_ad_insights_daily").select("date_start,synced_at", { count: "exact" }).eq("store_id", store.id).order("date_start", { ascending: false }).limit(1),
       supabase.from("meta_campaign_insights_daily").select("id", { count: "exact", head: true }).eq("store_id", store.id),
@@ -39,7 +66,7 @@ export async function GET() {
       syncedAt: latest?.[0]?.synced_at ?? null,
     };
   }
-  return NextResponse.json({ connection: data, sync });
+  return NextResponse.json({ connection, sync });
 }
 
 export async function POST(request: Request) {
