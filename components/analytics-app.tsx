@@ -687,8 +687,8 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
       setPeriodLoading(true);
       Promise.all(periods.map(async (period) => {
         if (period.start === pnl.period?.start && period.end === pnl.period?.end) return { period, data: pnl };
-        const response = await fetch("/api/analytics/pnl?from=" + period.start + "&to=" + period.end + "&refresh=0", { signal: controller.signal });
-        return response.ok ? { period, data: await response.json() as PnlData } : null;
+        const data = await fetchCachedJson<PnlData>("/api/analytics/pnl?from=" + period.start + "&to=" + period.end + "&refresh=0");
+        return { period, data };
       })).then((results) => setPeriodData(results.filter((result): result is PnlPeriodData => result !== null))).catch((error) => { if (error instanceof Error && error.name !== "AbortError") setPeriodData([]); }).finally(() => { if (!controller.signal.aborted) setPeriodLoading(false); });
     }, 0);
     return () => { window.clearTimeout(timeout); controller.abort(); };
