@@ -3,8 +3,6 @@ import { NextResponse } from "next/server";
 import { shopifyGraph } from "@/lib/shopify/graphql";
 import { requireWorkspace } from "@/lib/workspace/server";
 
-export const dynamic = "force-dynamic";
-
 type ShopifyRow = Record<string, string | number | null>;
 type ShopifyQlPayload = {
   shopifyqlQuery: {
