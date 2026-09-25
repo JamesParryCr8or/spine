@@ -24,7 +24,7 @@ type ShopifyOrder = {
   customer: { id: string; legacyResourceId: string; displayName: string; defaultEmailAddress: { emailAddress: string } | null; numberOfOrders: string; amountSpent: Money; createdAt: string; updatedAt: string } | null;
   lineItems: { nodes: Array<{ id: string; title: string; variantTitle: string | null; sku: string | null; vendor: string | null; quantity: number; currentQuantity: number; product: { id: string } | null; variant: { id: string } | null; originalUnitPriceSet: MoneyBag; originalTotalSet: MoneyBag; totalDiscountSet: MoneyBag; discountedTotalSet: MoneyBag }>; pageInfo: { hasNextPage: boolean } };
   refunds: Array<{ id: string; legacyResourceId: string; note: string | null; createdAt: string | null; processedAt: string; updatedAt: string; totalRefundedSet: MoneyBag; refundLineItems: { nodes: Array<{ id: string; quantity: number; restockType: string; subtotalSet: MoneyBag; lineItem: { id: string } }>; pageInfo: { hasNextPage: boolean } } }>;
-  transactions: { nodes: Array<{ id: string; kind: string; status: string; gateway: string | null; formattedGateway: string | null; amountSet: MoneyBag; fees: Array<{ amount: Money; taxAmount: Money }>; createdAt: string; processedAt: string | null }>; pageInfo: { hasNextPage: boolean } };
+  transactions: Array<{ id: string; kind: string; status: string; gateway: string | null; formattedGateway: string | null; amountSet: MoneyBag; fees: Array<{ amount: Money; taxAmount: Money }>; createdAt: string; processedAt: string | null }>;
   customerJourneySummary: { ready: boolean; daysToConversion: number | null; customerOrderIndex: number | null; firstVisit: Visit | null; lastVisit: Visit | null } | null;
 };
 
@@ -253,7 +253,7 @@ ORDER BY day ASC` },
         customer{id legacyResourceId displayName defaultEmailAddress{emailAddress} numberOfOrders amountSpent{amount currencyCode} createdAt updatedAt}
         lineItems(first:100){nodes{id title variantTitle sku vendor quantity currentQuantity product{id} variant{id} originalUnitPriceSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} originalTotalSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} totalDiscountSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} discountedTotalSet(withCodeDiscounts:true){shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}}} pageInfo{hasNextPage}}
         refunds(first:50){id legacyResourceId note createdAt processedAt updatedAt totalRefundedSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} refundLineItems(first:100){nodes{id quantity restockType subtotalSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} lineItem{id}} pageInfo{hasNextPage}}}
-        transactions(first:100){nodes{id kind status gateway formattedGateway amountSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} fees{amount{amount currencyCode} taxAmount{amount currencyCode}} createdAt processedAt} pageInfo{hasNextPage}}
+        transactions(first:100){id kind status gateway formattedGateway amountSet{shopMoney{amount currencyCode} presentmentMoney{amount currencyCode}} fees{amount{amount currencyCode} taxAmount{amount currencyCode}} createdAt processedAt}
         customerJourneySummary{ready daysToConversion customerOrderIndex firstVisit{id occurredAt landingPage referrerUrl source sourceDescription sourceType utmParameters{source medium campaign content term}} lastVisit{id occurredAt landingPage referrerUrl source sourceDescription sourceType utmParameters{source medium campaign content term}}}
       } pageInfo{hasNextPage endCursor} } }`, { cursor: orderCursor, query: shopifyUpdatedAtQuery(windowStart, windowEnd) });
 
@@ -276,8 +276,8 @@ ORDER BY day ASC` },
       const transactionRows = result.orders.nodes.flatMap((order) => {
         const orderId = orderMap.get(order.id);
         if (!orderId) return [];
-        if (order.transactions.pageInfo.hasNextPage) warnings.push(`${order.name} has more than 100 transactions; import is partial`);
-        return order.transactions.nodes.map((transaction) => ({
+        if (order.transactions.length === 100) warnings.push(`${order.name} may have more than 100 transactions; import is partial`);
+        return order.transactions.map((transaction) => ({
           organization_id: membership.organizationId, store_id: store.id, order_id: orderId, shopify_gid: transaction.id,
           kind: transaction.kind, status: transaction.status, gateway: transaction.gateway, formatted_gateway: transaction.formattedGateway,
           amount: money(transaction.amountSet), currency: transaction.amountSet.shopMoney.currencyCode,
