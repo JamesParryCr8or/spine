@@ -141,7 +141,7 @@ export async function GET(request: Request) {
       pipelineValue: stageValues.get(stage.id) ?? 0,
     }));
     return NextResponse.json({
-      connection: { name: connection.external_account_name, status: connection.status },
+      connection: { name: connection.external_account_name, status: connection.status },\n      currency: store.currency,
       pipelines,
       pipelineId,
       pipelineName: pipeline.name,
