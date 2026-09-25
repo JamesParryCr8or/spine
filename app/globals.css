@@ -212,3 +212,5 @@ button { cursor:pointer; }
 @media(max-width:760px){.meta-oauth-notice{align-items:flex-start;flex-direction:column}.meta-oauth-notice .primary{width:100%;justify-content:center}}
 
 .meta-developer-link{display:inline-flex;align-items:center;gap:6px;margin-top:8px;color:#5b47d6;font-size:10px;font-weight:750;text-decoration:none}.meta-developer-link:hover{text-decoration:underline}.meta-developer-link svg{width:12px;height:12px}
+
+.connection-card button.expired{border-color:#f5b4b4;background:#fff2f1;color:#bd3c3c}.connection-card button.expired span{background:#e15b4d}
