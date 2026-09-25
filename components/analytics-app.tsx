@@ -581,9 +581,9 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange }: { savedPreset?: 
   const [comparison, setComparison] = useState<PnlData | null>(null);
   const [yearComparison, setYearComparison] = useState<PnlData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [fromDate, setFromDate] = useState(initialRange?.from || "");
-  const [toDate, setToDate] = useState(initialRange?.to || "");
-  const [datePreset, setDatePreset] = useState<FinanceDatePreset>(initialRange ? "custom" : "last_365_days");
+  const [fromDate, setFromDate] = useState(initialRange?.from ?? (savedPreset ? "" : default365DayRange.from));
+  const [toDate, setToDate] = useState(initialRange?.to ?? (savedPreset ? "" : default365DayRange.to));
+  const [datePreset, setDatePreset] = useState<FinanceDatePreset>(initialRange ? "custom" : savedPreset === "all_imported" ? "all_imported" : savedPreset ? "custom" : "last_365_days");
   const [granularity, setGranularity] = useState<ReportingGranularity>("monthly");
   const [periodData, setPeriodData] = useState<PnlPeriodData[]>([]);
   const [periodLoading, setPeriodLoading] = useState(false);
