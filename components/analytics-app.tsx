@@ -616,8 +616,8 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange }: { savedPreset?: 
         const previousYearStart = new Date(start); previousYearStart.setUTCFullYear(previousYearStart.getUTCFullYear() - 1);
         const previousYearEnd = new Date(end); previousYearEnd.setUTCFullYear(previousYearEnd.getUTCFullYear() - 1);
         const [previousResponse, previousYearResponse] = await Promise.all([
-          fetch(`/api/analytics/pnl?from=${date(previousStart)}&to=${date(previousEnd)}`),
-          fetch(`/api/analytics/pnl?from=${date(previousYearStart)}&to=${date(previousYearEnd)}`),
+          fetch(`/api/analytics/pnl?from=${date(previousStart)}&to=${date(previousEnd)}&refresh=0`),
+          fetch(`/api/analytics/pnl?from=${date(previousYearStart)}&to=${date(previousYearEnd)}&refresh=0`),
         ]);
         if (previousResponse.ok) setComparison(await previousResponse.json() as PnlData);
         if (previousYearResponse.ok) setYearComparison(await previousYearResponse.json() as PnlData);
@@ -649,7 +649,7 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange }: { savedPreset?: 
       setPeriodLoading(true);
       Promise.all(periods.map(async (period) => {
         if (period.start === pnl.period?.start && period.end === pnl.period?.end) return { period, data: pnl };
-        const response = await fetch("/api/analytics/pnl?from=" + period.start + "&to=" + period.end, { signal: controller.signal });
+        const response = await fetch("/api/analytics/pnl?from=" + period.start + "&to=" + period.end + "&refresh=0", { signal: controller.signal });
         return response.ok ? { period, data: await response.json() as PnlData } : null;
       })).then((results) => setPeriodData(results.filter((result): result is PnlPeriodData => result !== null))).catch((error) => { if (error instanceof Error && error.name !== "AbortError") setPeriodData([]); }).finally(() => { if (!controller.signal.aborted) setPeriodLoading(false); });
     }, 0);
