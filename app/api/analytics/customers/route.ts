@@ -14,6 +14,7 @@ type Order = {
   shipping_revenue: string;
   currency: string;
   exchange_rate: number;
+  country_code: string | null;
 };
 type OrderLine = { order_id: string; product_gid: string | null; sku: string | null; title: string; current_quantity: number };
 
@@ -39,7 +40,7 @@ export async function GET(request: Request) {
   for (let from = 0; ; from += pageSize) {
     let query = supabase
       .from("shopify_orders")
-      .select("id,customer_id,processed_at,net_product_sales,shipping_revenue,currency")
+      .select("id,customer_id,processed_at,net_product_sales,shipping_revenue,currency,country_code")
       .eq("store_id", store.id)
       .eq("test", false)
       .is("cancelled_at", null)
@@ -56,6 +57,8 @@ export async function GET(request: Request) {
     if (page.length < pageSize) break;
   }
   const ordersByCustomer = new Map<string, Order[]>();
+  const locationTotals = new Map<string, { orders: number; sales: number; customers: Set<string> }>();
+  const latestCountryByCustomer = new Map<string, string>();
   const classificationOrders: Array<{ id: string; customerId: string | null; processedAt: string | null }> = [];
   for (let from = 0; ; from += pageSize) {
     let historyQuery = supabase.from("shopify_orders").select("id,customer_id,processed_at").eq("store_id", store.id).eq("test", false).is("cancelled_at", null).not("processed_at", "is", null);
@@ -71,6 +74,14 @@ export async function GET(request: Request) {
   let guestSales = 0;
   for (const order of orders) {
     const sales = convertDatedAmount(money(order.net_product_sales) + money(order.shipping_revenue), order.exchange_rate, store.currency);
+    const countryCode = order.country_code?.trim().toUpperCase();
+    if (countryCode && /^[A-Z]{2}$/.test(countryCode)) {
+      const location = locationTotals.get(countryCode) ?? { orders: 0, sales: 0, customers: new Set<string>() };
+      location.orders += 1;
+      location.sales += sales;
+      if (order.customer_id) { location.customers.add(order.customer_id); latestCountryByCustomer.set(order.customer_id, countryCode); }
+      locationTotals.set(countryCode, location);
+    }
     if (!order.customer_id) {
       guestOrders += 1;
       guestSales += sales;
@@ -243,9 +254,11 @@ export async function GET(request: Request) {
     customerDetailsMasked: !["owner", "admin", "analyst"].includes(membership.role),
     customers: (recentCustomers.data ?? []).map((customer, index) => ({
       ...customer,
+      country_code: latestCountryByCustomer.get(customer.id) ?? null,
       display_name: ["owner", "admin", "analyst"].includes(membership.role) ? customer.display_name : `Customer ${index + 1}`,
       email: null,
     })),
+    locations: [...locationTotals.entries()].map(([countryCode, location]) => ({ countryCode, orders: location.orders, customers: location.customers.size, sales: Math.round(location.sales * 100) / 100 })).sort((left, right) => right.orders - left.orders),
     months: [...months.values()].sort((left, right) => left.key.localeCompare(right.key)),
     cohorts,
     behavior: {
