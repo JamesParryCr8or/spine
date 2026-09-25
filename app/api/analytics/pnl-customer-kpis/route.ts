@@ -62,45 +62,54 @@ export async function GET(request: Request) {
     shopifyqlQuery(query: $shopifyQl) { tableData { rows } parseErrors }
   }`;
   try {
-    const rows: PeriodRow[] = [];
-    // Query each displayed period exactly. A calendar-month query would miscount
-    // custom weeks and partial months, and daily customer counts are not additive.
-    for (let offset = 0; offset < periods.length; offset += 4) {
-      const batch = periods.slice(offset, offset + 4);
-      const results = await Promise.all(batch.map(async (period): Promise<PeriodRow> => {
-        const shopifyQl = `FROM sales SHOW new_customers, returning_customers, orders, total_sales GROUP BY new_or_returning_customer SINCE ${period.start} UNTIL ${period.end} LIMIT 10`;
-        const result = await shopifyGraph<ShopifyQlPayload>(store.shopify_domain!, token, graphQuery, { shopifyQl });
-        if (result.shopifyqlQuery.parseErrors?.length) {
-          throw new Error(result.shopifyqlQuery.parseErrors.join("; "));
-        }
-        const row: PeriodRow = {
-          ...period, newCustomers: 0, newOrders: 0, newSales: 0,
-          repeatCustomers: 0, repeatOrders: 0, repeatSales: 0,
-          guestOrders: 0, guestSales: 0, excludedCurrencyOrders: 0,
-        };
-        for (const item of result.shopifyqlQuery.tableData?.rows ?? []) {
-          const kind = String(item.new_or_returning_customer ?? "").trim().toLowerCase();
-          if (kind === "new") {
-            row.newCustomers += number(item.new_customers);
-            row.newOrders += number(item.orders);
-            row.newSales += number(item.total_sales);
-          } else if (kind === "returning" || kind === "repeat") {
-            row.repeatCustomers += number(item.returning_customers);
-            row.repeatOrders += number(item.orders);
-            row.repeatSales += number(item.total_sales);
-          } else {
-            row.guestOrders += number(item.orders);
-            row.guestSales += number(item.total_sales);
-          }
-        }
-        return row;
-      }));
-      rows.push(...results);
+    const rows: PeriodRow[] = periods.map((period) => ({
+      ...period, newCustomers: 0, newOrders: 0, newSales: 0,
+      repeatCustomers: 0, repeatOrders: 0, repeatSales: 0,
+      guestOrders: 0, guestSales: 0, excludedCurrencyOrders: 0,
+    }));
+    if (!rows.length) return NextResponse.json({ currency: store.reporting_currency || store.currency, periods: rows });
+    const unit = granularity === "weekly" ? "day" :
+      granularity === "daily" ? "day" :
+      granularity === "monthly" ? "month" :
+      granularity === "quarterly" ? "quarter" : "year";
+    const shopifyQl = `FROM sales SHOW new_customers, returning_customers, orders, total_sales GROUP BY new_or_returning_customer TIMESERIES ${unit} SINCE ${periods[0].start} UNTIL ${periods[periods.length - 1].end} ORDER BY ${unit} ASC LIMIT 1000`;
+    const result = await shopifyGraph<ShopifyQlPayload>(store.shopify_domain, token, graphQuery, { shopifyQl });
+    if (result.shopifyqlQuery.parseErrors?.length) {
+      throw new Error(result.shopifyqlQuery.parseErrors.join("; "));
+    }
+    const periodKey = (date: string) => {
+      if (granularity === "monthly") return date.slice(0, 7);
+      if (granularity === "quarterly") return `${date.slice(0, 4)}-Q${Math.floor((Number(date.slice(5, 7)) - 1) / 3) + 1}`;
+      if (granularity === "annual") return date.slice(0, 4);
+      return date;
+    };
+    const periodByKey = new Map(granularity === "daily" || granularity === "weekly" ? [] :
+      rows.map((row) => [periodKey(row.start), row] as const));
+    for (const item of result.shopifyqlQuery.tableData?.rows ?? []) {
+      const date = String(item[unit] ?? "").slice(0, 10);
+      if (!validDate(date)) continue;
+      const row = granularity === "daily" || granularity === "weekly"
+        ? rows.find((period) => date >= period.start && date <= period.end)
+        : periodByKey.get(periodKey(date));
+      if (!row) continue;
+      const kind = String(item.new_or_returning_customer ?? "").trim().toLowerCase();
+      if (kind === "new") {
+        row.newCustomers += number(item.new_customers);
+        row.newOrders += number(item.orders);
+        row.newSales += number(item.total_sales);
+      } else if (kind === "returning" || kind === "repeat") {
+        row.repeatCustomers += number(item.returning_customers);
+        row.repeatOrders += number(item.orders);
+        row.repeatSales += number(item.total_sales);
+      } else {
+        row.guestOrders += number(item.orders);
+        row.guestSales += number(item.total_sales);
+      }
     }
     return NextResponse.json({
       currency: store.reporting_currency || store.currency,
       periods: rows,
-      definition: "ShopifyQL classifies customers as new or returning in each exact reporting period. Guest sales are shown separately.",
+      definition: granularity === "weekly" ? "ShopifyQL daily customer groups are summed into custom seven-day periods; a returning customer active on multiple days can appear more than once." : "ShopifyQL classifies customers as new or returning in each reporting period. Guest sales are shown separately.",
     });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Shopify customer KPIs could not be loaded." }, { status: 502 });
