@@ -38,7 +38,7 @@ export function CustomerGeography({ locations, currency }: Props) {
   const [sort, setSort] = useState<"sales" | "customers" | "orders">("sales");
   const ranked = [...locations].filter((row) => row.sales > 0).sort((a, b) => b[sort] - a[sort]);
   const total = ranked.reduce((sum, row) => sum + row.sales, 0);
-  const max = ranked[0]?.sales || 1;
+  const max = Math.max(1, ...ranked.map((row) => row.sales));
   const active = ranked.find((row) => row.country === selected) ?? ranked[0];
   const top = [...ranked].sort((a, b) => b.sales - a.sales).slice(0, 6);
   const other = Math.max(0, total - top.reduce((sum, row) => sum + row.sales, 0));
