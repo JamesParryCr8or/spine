@@ -7,7 +7,7 @@ export const maxDuration = 60;
 
 type PipelineStage = { id?: string; name?: string; position?: number };
 type Pipeline = { id?: string; name?: string; stages?: PipelineStage[] };
-type Opportunity = { pipelineStageId?: string; status?: string; monetaryValue?: number | string | null };
+type Opportunity = { id?: string; name?: string; pipelineStageId?: string; status?: string; monetaryValue?: number | string | null; source?: string; assignedTo?: string; createdAt?: string; lastStageChangeAt?: string; lastStatusChangeAt?: string; forecastExpectedCloseDate?: string; forecastProbability?: number | string; effectiveProbability?: number | string; lostReasonId?: string; lostReason?: string; tasks?: unknown[]; calendarEvents?: unknown[] };
 type OpportunityPage = { opportunities?: Opportunity[]; meta?: { total?: number; nextPage?: number | null }; message?: string; error?: string };
 
 const amount = (value: unknown) => Number(value ?? 0) || 0;
@@ -53,6 +53,9 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const from = params.get("from") ?? "";
   const to = params.get("to") ?? "";
+  const details = params.get("details") === "1";
+  const includeFollowups = details && params.get("includeFollowups") === "1";
+  const includeLostReasons = details && params.get("includeLostReasons") === "1";
   if ((from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) || (to && !/^\d{4}-\d{2}-\d{2}$/.test(to)) || (from && to && from > to)) {
     return NextResponse.json({ error: "Use a valid start and end date" }, { status: 400 });
   }
@@ -95,9 +98,9 @@ export async function GET(request: Request) {
         status: "all",
         limit: "100",
         page: String(page),
-        getTasks: "false",
+        getTasks: String(includeFollowups),
         getNotes: "false",
-        getCalendarEvents: "false",
+        getCalendarEvents: String(includeFollowups),
       });
       const response = await fetch(`${base}/opportunities/search?${search}`, { headers, cache: "no-store" });
       const payload = await response.json().catch(() => ({})) as OpportunityPage;
@@ -135,6 +138,15 @@ export async function GET(request: Request) {
     const metaSpend = (metaResult.data ?? []).filter((row) => row.currency === store.currency).reduce((sum, row) => sum + amount(row.spend), 0);
     const googleSpend = (googleResult.data ?? []).filter((row) => row.currency === store.currency).reduce((sum, row) => sum + amount(row.spend), 0);
 
+    let lostReasons: Array<{ id: string; name: string }> = [];
+    if (includeLostReasons) {
+      try {
+        const response = await fetch(`${base}/opportunities/lost-reason?locationId=${encodeURIComponent(connection.external_account_id)}`, { headers, cache: "no-store" });
+        const payload = await response.json().catch(() => ({})) as { lostReasons?: Array<{ id?: string; name?: string }> };
+        if (response.ok) lostReasons = (payload.lostReasons ?? []).filter((reason) => reason.id && reason.name).map((reason) => ({ id: reason.id!, name: reason.name! }));
+      } catch { /* The report still works with GHL lost-reason IDs. */ }
+    }
+
     const stages = pipeline.stages.map((stage) => ({
       ...stage,
       count: stageCounts.get(stage.id) ?? 0,
@@ -147,6 +159,15 @@ export async function GET(request: Request) {
       pipelineId,
       pipelineName: pipeline.name,
       stages,
+      ...(details ? { opportunities: opportunities.map((opportunity) => ({
+        id: opportunity.id, name: opportunity.name, pipelineStageId: opportunity.pipelineStageId,
+        status: opportunity.status, monetaryValue: opportunity.monetaryValue, source: opportunity.source,
+        assignedTo: opportunity.assignedTo, createdAt: opportunity.createdAt, lastStageChangeAt: opportunity.lastStageChangeAt,
+        lastStatusChangeAt: opportunity.lastStatusChangeAt, forecastExpectedCloseDate: opportunity.forecastExpectedCloseDate,
+        forecastProbability: opportunity.forecastProbability, effectiveProbability: opportunity.effectiveProbability,
+        lostReasonId: opportunity.lostReasonId, lostReason: opportunity.lostReason,
+        ...(includeFollowups ? { tasks: Array.isArray(opportunity.tasks) ? opportunity.tasks : [], calendarEvents: Array.isArray(opportunity.calendarEvents) ? opportunity.calendarEvents : [] } : {}),
+      })), lostReasons, ...(includeFollowups ? { followupsAvailable: opportunities.some((o) => (o.tasks?.length ?? 0) + (o.calendarEvents?.length ?? 0) > 0), followupsNote: opportunities.some((o) => (o.tasks?.length ?? 0) + (o.calendarEvents?.length ?? 0) > 0) ? undefined : "GoHighLevel did not return tasks or calendar events for these opportunities. Confirm task/calendar permissions and that records are linked to pipeline contacts." } : {}) } : {}),
       totals: {
         openCount, wonCount, lostCount, totalCount: opportunities.length,
         openValue, wonValue, averageWonValue: wonCount ? wonValue / wonCount : null,
