@@ -294,3 +294,12 @@ button { cursor:pointer; }
 .geography-table tbody tr{cursor:pointer}
 .geography-table tbody tr:hover,.geography-table tbody tr.selected{background:#f5f3ff}
 @media(max-width:850px){.geography-layout{grid-template-columns:1fr}.geography-report{padding:12px}.geography-card-head{flex-wrap:wrap}}
+
+
+.geography-map-wrap{position:relative;min-height:0;margin:20px 0 14px;overflow:hidden;border:1px solid #dfe8ef;border-radius:14px;background:#eaf3fb}
+.geography-map{display:block;width:100%;height:auto;aspect-ratio:760/440}
+.geography-country{transition:fill .14s ease}
+.geography-country.has-sales{cursor:pointer}
+.geography-country.has-sales:hover,.geography-country.has-sales:focus{fill:#12a98c;outline:none}
+.geography-map-loading{position:absolute;inset:0;display:grid;place-items:center;color:#74849b;background:#eaf3fb}
+.geography-globe-card>.report-note a{color:#6657e8;text-decoration:underline}
