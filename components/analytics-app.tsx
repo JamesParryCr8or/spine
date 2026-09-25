@@ -1549,6 +1549,8 @@ function Connections() {
   const [showToken, setShowToken] = useState(false);
   const [token, setToken] = useState("");
   const [accountId, setAccountId] = useState("");
+  const [metaAccounts, setMetaAccounts] = useState<Array<{ id: string; name: string; currency: string | null; accountStatus: number | null }>>([]);
+  const [loadingMetaAccounts, setLoadingMetaAccounts] = useState(false);
   const [metaLookbackMonths, setMetaLookbackMonths] = useState("12");
   const [metaConnected, setMetaConnected] = useState(false);
   const [metaConnectionStatus, setMetaConnectionStatus] = useState<"connected" | "error" | "disconnected">("disconnected");
@@ -1644,8 +1646,36 @@ function Connections() {
     window.location.assign(`/api/connections/meta/authorize?${params}`);
   };
 
-  const saveMeta = async () => {
+  const loadMetaAccounts = async () => {
     if (!token.trim()) return;
+    setLoadingMetaAccounts(true);
+    setConnectionError("");
+    setMetaAccounts([]);
+    setAccountId("");
+    try {
+      const response = await fetch("/api/connections/meta/accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken: token.trim() }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setConnectionError(payload.error ?? "Could not load Meta ad accounts");
+        return;
+      }
+      const accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+      setMetaAccounts(accounts);
+      if (accounts.length === 1) setAccountId(accounts[0].id);
+      if (accounts.length === 0) setConnectionError("No ad accounts were found for this token.");
+    } catch {
+      setConnectionError("Could not reach Meta to load ad accounts. Try again.");
+    } finally {
+      setLoadingMetaAccounts(false);
+    }
+  };
+
+  const saveMeta = async () => {
+    if (!token.trim() || !accountId) return;
     setSavingConnection(true);
     setConnectionError("");
     const response = await fetch("/api/connections/meta", {
@@ -1759,12 +1789,13 @@ function Connections() {
       {metaConnectionStatus === "error" && metaConnectionError && <div className="connection-error" role="alert">{metaConnectionError}</div>}
       {metaConnected && metaAccountName && <div className="connected-account"><span/><div><small>CURRENT ACCOUNT</small><strong>{metaAccountName}</strong>{metaLastSync ? <small>{metaLastSync.importedDays.toLocaleString()} daily spend records · latest {metaLastSync.latestDate ? new Date(`${metaLastSync.latestDate}T00:00:00Z`).toLocaleDateString("en-GB") : "date unavailable"}</small> : <small>Spend data has not been imported yet.</small>}</div></div>}
       <div className="help-card"><Info/><div><strong>Alternative for agency-managed accounts</strong><p>Use a Meta system-user token only if your business manages the connection centrally. For normal use, choose <b>Connect Facebook</b> above.</p><a className="meta-developer-link" href="https://developers.facebook.com/tools/explorer" target="_blank" rel="noreferrer"><ExternalLink/>Open Graph API Explorer</a></div></div>
-      <label className="form-field"><span>System-user token <small>Optional alternative</small><b className="tooltip-trigger">?<em>Use this only for a centrally managed Meta system user with ads_read and read_insights.</em></b></span><div className="secret-input"><KeyRound/><input value={token} onChange={(event)=>setToken(event.target.value)} type={showToken?"text":"password"} placeholder="EAAB..." autoComplete="off"/><button onClick={()=>setShowToken(!showToken)}>{showToken?<EyeOff/>:<Eye/>}</button></div></label>
-      <label className="form-field"><span>Ad account ID <small>Optional</small></span><input value={accountId} onChange={(event)=>setAccountId(event.target.value)} placeholder="act_123456789"/></label>
+      <label className="form-field"><span>System-user token <small>Optional alternative</small><b className="tooltip-trigger">?<em>Use this only for a centrally managed Meta system user with ads_read and read_insights.</em></b></span><div className="secret-input"><KeyRound/><input value={token} onChange={(event)=>{setToken(event.target.value);setMetaAccounts([]);setAccountId("");setConnectionError("");}} type={showToken?"text":"password"} placeholder="EAAB..." autoComplete="off"/><button onClick={()=>setShowToken(!showToken)}>{showToken?<EyeOff/>:<Eye/>}</button></div></label>
+      <div className="meta-account-discovery"><button type="button" disabled={!token.trim() || loadingMetaAccounts} onClick={() => void loadMetaAccounts()}>{loadingMetaAccounts ? "Loading accounts…" : metaAccounts.length ? "Reload ad accounts" : "Find ad accounts"}</button><small>{metaAccounts.length ? `${metaAccounts.length} account${metaAccounts.length === 1 ? "" : "s"} available to this token.` : "Enter your token, then load the ad accounts it can access."}</small></div>
+      <label className="form-field"><span>Meta ad account</span><select value={accountId} onChange={(event)=>setAccountId(event.target.value)} disabled={!metaAccounts.length}><option value="">{metaAccounts.length ? "Choose an ad account" : "Load accounts to choose"}</option>{metaAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}{account.currency ? ` · ${account.currency}` : ""} ({account.id.startsWith("act_") ? account.id : `act_${account.id}`})</option>)}</select></label>
       <label className="form-field"><span>Spend history to import</span><select value={metaLookbackMonths} onChange={(event)=>setMetaLookbackMonths(event.target.value)}><option value="3">Last 3 months</option><option value="6">Last 6 months</option><option value="12">Last 12 months</option><option value="24">Last 24 months</option><option value="36">Last 36 months</option></select><small>New connections default to the last 365 days. Meta supports up to 37 months when you need more history.</small></label>
       <div className="permission-note"><KeyRound/><span><strong>Required permissions:</strong> ads_read, read_insights</span></div>
       {metaSyncResult && <div className="connected-account"><span/><div><small>SPEND IMPORT COMPLETE</small><strong>{metaSyncResult}</strong></div></div>}{connectionError && <div className="connection-error">{connectionError}</div>}
-      <div className="modal-actions">{metaConnected&&<button className="danger-button" disabled={savingConnection} onClick={disconnectMeta}>Disconnect</button>}<button onClick={()=>setShowMetaSetup(false)}>Cancel</button><button className="primary" disabled={!token.trim() || savingConnection} onClick={saveMeta}>{savingConnection?"Importing…":metaConnected?"Save manual token":"Save manual token"}</button></div>
+      <div className="modal-actions">{metaConnected&&<button className="danger-button" disabled={savingConnection} onClick={disconnectMeta}>Disconnect</button>}<button onClick={()=>setShowMetaSetup(false)}>Cancel</button><button className="primary" disabled={!token.trim() || !accountId || savingConnection} onClick={saveMeta}>{savingConnection?"Importing…":metaConnected?"Save manual token":"Save manual token"}</button></div>
     </section></div>}
   </>;
 }
