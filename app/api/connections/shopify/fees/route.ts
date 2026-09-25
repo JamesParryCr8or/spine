@@ -67,7 +67,7 @@ export async function POST(request: Request) {
       for (let page = 0; page < 100; page++) {
         const result: BalanceReport = await shopifyGraph<BalanceReport>(store.shopify_domain, token,
           `query FeeTransactions($cursor: String, $search: String!) { shopifyPaymentsAccount { balanceTransactions(first: 100, after: $cursor, query: $search, sortKey: PROCESSED_AT, reverse: true, hideTransfers: true) { nodes { id fee { amount currencyCode } transactionDate test associatedOrder { id } type } pageInfo { hasNextPage endCursor } } } }`,
-          { cursor, search: `processed_at:>=${from} processed_at:<=${to}` });
+          { cursor, search: `processed_at:>=${from} processed_at:<${new Date(Date.parse(to) + 86400000).toISOString().slice(0, 10)}` });
         const connection = result.shopifyPaymentsAccount?.balanceTransactions;
         if (!connection) break;
         for (const transaction of connection.nodes) {
