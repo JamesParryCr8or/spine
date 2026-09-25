@@ -237,8 +237,13 @@ export async function GET(request: Request) {
     }
   }
   const shopifyReportedFees = shopifyDaily.reduce((total, day) => total + monetary(day.total_payment_fees), 0);
-  const transactionFees = shopifyDaily.length ? shopifyReportedFees + estimatedFees : actualFees + estimatedFees;
-  const transactionFeesAvailable = shopifyDaily.length > 0 || actualFees > 0 || estimatedFees > 0;
+  const salesDays = shopifyDaily.filter((day) => day.orders > 0);
+  const reportedFeeDays = salesDays.filter((day) => monetary(day.total_payment_fees) > 0);
+  const transactionFees = (shopifyReportedFees > 0 ? shopifyReportedFees : actualFees) + estimatedFees;
+  const transactionFeesAvailable = transactionFees > 0;
+  const transactionFeesComplete = salesDays.length > 0
+    ? reportedFeeDays.length === salesDays.length || (reportedFeeDays.length === 0 && actualFees > 0 && transactions.length > 0)
+    : transactionFeesAvailable;
   const orderDates = includedOrders.flatMap((order) => order.processed_at ? [order.processed_at.slice(0, 10)] : []);
   const reportDates = shopifyDaily.length ? shopifyDaily.map((day) => day.sales_date) : orderDates;
   const rangeStart = reportDates.length ? reportDates.reduce((first, date) => date < first ? date : first) : null;
@@ -318,7 +323,7 @@ export async function GET(request: Request) {
   }));
   const shippingFallbackCosts = merchantShippingCosts - variantShippingCosts;
   shippingCostsAvailable = lines.length > 0 ? shippingCoverage.missingLines === 0 : Boolean(usableStoreCostDefault || defaultShippingCosts.length > 0);
-  const netProfitAvailable = marketingSpendAvailable && shippingCostsAvailable && handlingCostsAvailable && missingCostLines === 0 && unallocatedOperatingCosts === 0;
+  const netProfitAvailable = transactionFeesComplete && marketingSpendAvailable && shippingCostsAvailable && handlingCostsAvailable && missingCostLines === 0 && unallocatedOperatingCosts === 0;
   const calculated = calculateProfitAndLoss({ ...totals, refunds, cogs, marketingSpend, transactionFees, merchantShippingCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, complete: netProfitAvailable });
 
   return NextResponse.json({
@@ -327,10 +332,11 @@ export async function GET(request: Request) {
     timezone: store.timezone || "UTC",
     currencyCoverage: currencyCoverage.summary(),
     marketingCurrencyCoverage: marketingCoverage,
+    transactionFeeCoverage: { salesDays: salesDays.length, reportedFeeDays: reportedFeeDays.length, latestReportedFeeDate: reportedFeeDays.at(-1)?.sales_date ?? null },
     calculatedAt: new Date().toISOString(),
     metrics: { ...totals, refunds, cogs, ...calculated, marketingSpend, metaMarketingSpend, googleMarketingSpend, transactionFees, merchantShippingCosts, variantShippingCosts, shippingFallbackCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, orders: shopifyDaily.length ? shopifyDaily.reduce((total, day) => total + day.orders, 0) : includedOrders.length, unitsSold: dailyUnitCount || totalOrderUnits, missingCostLines, missingShippingLines: shippingCoverage.missingLines, shippingOverrideLines: shippingCoverage.overrideLines, shippingFallbackLines: shippingCoverage.fallbackLines, shippingFallbackRate: shippingCoverage.fallbackRate, unallocatedOperatingCosts },
     period: rangeStart && rangeEnd ? { start: rangeStart, end: rangeEnd } : null,
-    availability: { marketingSpend: marketingSpendAvailable, metaMarketingSpend: metaInsights.length > 0, googleMarketingSpend: googleInsights.length > 0, transactionFees: transactionFeesAvailable, shippingCosts: shippingCostsAvailable, handlingCosts: handlingCostsAvailable, operatingExpenses: true, netProfit: netProfitAvailable },
+    availability: { marketingSpend: marketingSpendAvailable, metaMarketingSpend: metaInsights.length > 0, googleMarketingSpend: googleInsights.length > 0, transactionFees: transactionFeesAvailable, transactionFeesComplete, shippingCosts: shippingCostsAvailable, handlingCosts: handlingCostsAvailable, operatingExpenses: true, netProfit: netProfitAvailable },
   });
 }
 
