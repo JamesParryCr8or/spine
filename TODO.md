@@ -1,5 +1,16 @@
 # Ecommerce Analytics Web App Roadmap
 
+## Active delivery — lead-generation revenue connectors
+
+- [ ] Deploy the completed P&L Excel/CSV export and sanitized Shopify error changes.
+- [ ] Add a tenant-scoped Stripe connector with encrypted credentials, connection validation, paginated payment/refund imports, sync status, and disconnect controls.
+- [ ] Add a shared lead-generation revenue/cost ledger with stable external IDs, currency validation, import provenance, and duplicate-safe imports. Keep collected revenue separate from GHL opportunity value.
+- [ ] Add a CSV connector with a downloadable sales/cost template, preview and validation, standard/custom cost labels, batch history, and rollback.
+- [ ] Add a Google Sheets OAuth connector with saved spreadsheet/tab selection, open-sheet and create/copy-template actions, and repeatable sync through the same validated import workflow.
+- [ ] Provide a formatted Google Sheets template with year/month selectors, sales and cost entry tabs, preset/custom labels, and instructions for recording cash/external sales without duplicating Stripe receipts.
+- [ ] Add a lead-generation Revenue & Costs navigation page with year/month filters, source breakdown, receipts, refunds, external costs, and contribution after ad spend; surface collected revenue on the GHL overview.
+- [ ] Test tenant isolation, currencies, refund handling, stable IDs, repeat imports, malformed CSV/sheet rows, and unavailable connector credentials. Apply the schema and verify the deployed flows; document any required external OAuth setup.
+
 ## Current implementation status
 
 - [x] Replaced the generic starter UI with a responsive Shopify-first analytics shell.
@@ -517,7 +528,9 @@ Normalize every ad source into shared daily dimensions while retaining source-sp
 ### File exports
 
 - [x] Export any report table to CSV.
-- [ ] Export the income statement and selected detailed reports to XLSX with formatted headers and currency/date cells.
+- [x] Export the visible income statement and operating KPIs to XLSX with formatted section headers, numeric currency/percentage/ratio cells, dated period columns, and report metadata. Include the selected-period financial total and comparison column without summing them together; preserve unavailable metrics.
+- [x] Include the period-total column and operating KPIs in the visible P&L CSV export.
+- [ ] Extend formatted XLSX exports to detailed Sales, Products, and Customer reports (UTM and missing-COGS exports are already available).
 - [x] Include report name, filters, date range, timezone, currency, and generated timestamp in export metadata.
 - [ ] Stream or background large exports and provide a time-limited download.
 
@@ -682,6 +695,8 @@ Build one thin end-to-end path before implementing every connector:
 
 
 ## Latest reporting polish
+
+- [x] Restore sanitized Shopify import errors and prevent upstream error messages or extension values from entering logs; verify with regression coverage.
 
 - [x] Keep UTM channel labels to a readable width in the report table.
 - [x] Use white, dark-text search fields across analytics screens.

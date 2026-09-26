@@ -60,9 +60,10 @@ export async function shopifyGraph<T>(
       if (response?.status === 401 || response?.status === 403) {
         throw new Error("Shopify denied access. Check the saved token and required app scopes, then reconnect.");
       }
-      const reason = errors[0]?.message?.replace(/\s+/g, " ").slice(0, 220);
-      console.error("Shopify GraphQL query failed", { status: response?.status, code: errors[0]?.extensions?.code, reason });
-      throw new Error(reason ? `Shopify import query: ${reason}` : "Shopify could not complete the import query. Check the app scopes and API configuration.");
+      // Upstream messages and extension values can contain request data or
+      // credentials. Keep diagnostics structural, including for HTTP 200 errors.
+      console.error("Shopify GraphQL query failed", { status: response?.status, errorCount: errors.length });
+      throw new Error("Shopify could not complete the import query. Check the app scopes and API configuration.");
     }
 
     const failure = throttled

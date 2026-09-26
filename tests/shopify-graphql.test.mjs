@@ -82,10 +82,12 @@ for (const status of [401, 403]) {
     assert.equal(h.calls.length, 1);
   });
 }
-test('permanent GraphQL errors reject partial data without retrying', async () => {
-  const h = harness([() => Response.json({ data: { orders: [] }, errors: [{ message: 'secret-token', extensions: { code: 'ACCESS_DENIED' } }] })]);
+test('permanent GraphQL errors reject partial data without retrying', async (context) => {
+  const log = context.mock.method(console, 'error', () => {});
+  const h = harness([() => Response.json({ data: { orders: [] }, errors: [{ message: 'secret-token', extensions: { code: 'secret-token' } }] })]);
   await assert.rejects(run(h), /Check the app scopes/);
   assert.equal(h.calls.length, 1);
+  assert.deepEqual(log.mock.calls[0].arguments, ['Shopify GraphQL query failed', { status: 200, errorCount: 1 }]);
 });
 test('long Retry-After stops without retrying too early', async () => {
   const h = harness([() => new Response('', { status: 429, headers: { 'Retry-After': '120' } })]);
