@@ -90,17 +90,17 @@ export async function GET(request: Request) {
         return validDate(day) ? day : null;
       }
       if (granularity === "monthly") {
-        const month = raw.match(/^(\\d{4})-(\\d{1,2})(?:-|$)/);
+        const month = raw.match(/^(\d{4})-(\d{1,2})(?:-|$)/);
         if (month) return `${month[1]}-${month[2].padStart(2, "0")}`;
       }
       if (granularity === "quarterly") {
-        const quarter = raw.match(/^(\\d{4})-?Q([1-4])$/i) ?? raw.match(/^Q([1-4])\\s+(\\d{4})$/i);
+        const quarter = raw.match(/^(\d{4})-?Q([1-4])$/i) ?? raw.match(/^Q([1-4])\s+(\d{4})$/i);
         if (quarter) return raw.toUpperCase().startsWith("Q")
           ? `${quarter[2]}-Q${quarter[1]}`
           : `${quarter[1]}-Q${quarter[2]}`;
       }
       if (granularity === "annual") {
-        const year = raw.match(/^(\\d{4})$/);
+        const year = raw.match(/^(\d{4})$/);
         if (year) return year[1];
       }
       const parsed = new Date(raw);
