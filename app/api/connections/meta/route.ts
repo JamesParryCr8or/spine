@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 
 import { discoverMetaAccounts, importMetaInsights } from "@/lib/connections/meta";
 import { requireWorkspace } from "@/lib/workspace/server";
+import { canManageConnections } from "@/lib/workspace/permissions";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 async function context() {
   const workspace = await requireWorkspace();
@@ -72,6 +74,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const result = await context();
   if (result.response) return result.response;
+  if (!canManageConnections(result.membership.role)) return NextResponse.json({ error: "Connection management access is required" }, { status: 403 });
   const { supabase, membership, store } = result;
 
   const body = await request.json().catch(() => null) as { accessToken?: string; accountId?: string; lookbackMonths?: number } | null;
@@ -103,7 +106,7 @@ export async function POST(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   try {
-    const sync = await importMetaInsights({ supabase, organizationId: membership.organizationId, store, account, accessToken, lookbackMonths });
+    const sync = await importMetaInsights({ supabase: membership.role === "connector" ? createAdminClient() : supabase, organizationId: membership.organizationId, store, account, accessToken, lookbackMonths });
     const saved = Array.isArray(data) ? data[0] : data;
     return NextResponse.json({
       connection: {
@@ -124,6 +127,7 @@ export async function POST(request: Request) {
 export async function DELETE() {
   const result = await context();
   if (result.response) return result.response;
+  if (!canManageConnections(result.membership.role)) return NextResponse.json({ error: "Connection management access is required" }, { status: 403 });
   const { supabase, store } = result;
   const { error } = await supabase.rpc("delete_data_connection", { connection_provider: "meta", requested_store_id: store.id });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

@@ -22,13 +22,13 @@ export async function GET() {
     .order("hierarchy_level")
     .order("name");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ accounts: data ?? [], canManage: ["owner", "admin"].includes(result.membership.role) });
+  return NextResponse.json({ accounts: data ?? [], canManage: ["owner", "admin", "connector"].includes(result.membership.role) });
 }
 
 export async function POST(request: Request) {
   const result = await context();
   if (result.response) return result.response;
-  if (!["owner", "admin"].includes(result.membership.role)) return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
+  if (!["owner", "admin", "connector"].includes(result.membership.role)) return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
   const body = await request.json().catch(() => null) as { customerId?: string } | null;
   const customerId = body?.customerId?.replace(/\D/g, "") ?? "";
   if (!customerId) return NextResponse.json({ error: "Choose a Google Ads account" }, { status: 400 });

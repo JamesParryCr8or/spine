@@ -14,7 +14,7 @@ export async function POST() {
   const workspace = await requireWorkspace();
   if (!workspace.ok) return workspace.response;
   if (!workspace.store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
-  if (!["owner", "admin"].includes(workspace.membership.role)) return NextResponse.json({ error: "Owner or admin access is required to sync GoHighLevel" }, { status: 403 });
+  if (!["owner", "admin", "connector"].includes(workspace.membership.role)) return NextResponse.json({ error: "Owner or admin access is required to sync GoHighLevel" }, { status: 403 });
 
   const { store, supabase } = workspace;
   const [{ data: connection, error: connectionError }, { data: config, error: configError }] = await Promise.all([

@@ -23,7 +23,11 @@ export function LoginForm({
   const [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
 
-  const callbackUrl = () => `${window.location.origin}/auth/confirm?next=${encodeURIComponent("/protected")}`;
+  const nextDestination = () => {
+    const candidate = new URLSearchParams(window.location.search).get("next");
+    return candidate && /^\/(?!\/)[^\r\n]*$/.test(candidate) ? candidate : "/protected";
+  };
+  const callbackUrl = () => `${window.location.origin}/auth/confirm?next=${encodeURIComponent(nextDestination())}`;
 
   const handleGoogleLogin = async () => {
     setIsLoading(true);
@@ -84,7 +88,7 @@ export function LoginForm({
       });
       if (error) throw error;
       // Update this route to redirect to an authenticated route. The user already has an active session.
-      router.push("/protected");
+      router.push(nextDestination());
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "We could not sign you in. Please try again.");
     } finally {

@@ -25,7 +25,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const result = await context();
   if (result.response) return result.response;
-  if (!["owner", "admin"].includes(result.membership.role)) return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
+  if (!["owner", "admin", "connector"].includes(result.membership.role)) return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
 
   const body = await request.json().catch(() => ({})) as {
     apiKey?: string; locationId?: string; sourceType?: SourceType; selectionId?: string; selectionName?: string; metricLabel?: string;
@@ -67,7 +67,7 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   const result = await context();
   if (result.response) return result.response;
-  if (!["owner", "admin"].includes(result.membership.role)) return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
+  if (!["owner", "admin", "connector"].includes(result.membership.role)) return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
   const body = await request.json().catch(() => ({})) as { selections?: Array<{ pipelineId?: string; pipelineName?: string; stageId?: string; stageName?: string; position?: number }>; includeLaterStages?: boolean };
   const selections = (body.selections ?? []).filter((selection) => selection.stageId?.trim() && selection.pipelineId?.trim() && selection.pipelineName?.trim() && selection.stageName?.trim());
   if (!selections.length) return NextResponse.json({ error: "Choose at least one pipeline stage" }, { status: 400 });
@@ -96,7 +96,7 @@ export async function PATCH(request: Request) {
 export async function DELETE() {
   const result = await context();
   if (result.response) return result.response;
-  if (!["owner", "admin"].includes(result.membership.role)) return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
+  if (!["owner", "admin", "connector"].includes(result.membership.role)) return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
   const [config, connection] = await Promise.all([
     result.supabase.from("gohighlevel_reporting_configs").delete().eq("store_id", result.store.id),
     result.supabase.rpc("delete_data_connection", { connection_provider: "gohighlevel", requested_store_id: result.store.id }),

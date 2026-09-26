@@ -28,7 +28,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const result = await context();
   if (result.response) return result.response;
-  if (!["owner", "admin"].includes(result.membership.role)) {
+  if (!["owner", "admin", "connector"].includes(result.membership.role)) {
     return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
   }
 
@@ -81,7 +81,7 @@ export async function POST(request: Request) {
 export async function DELETE() {
   const result = await context();
   if (result.response) return result.response;
-  if (!["owner", "admin"].includes(result.membership.role)) {
+  if (!["owner", "admin", "connector"].includes(result.membership.role)) {
     return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
   }
   const { error } = await result.supabase.rpc("delete_data_connection", {

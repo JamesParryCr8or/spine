@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { requireWorkspace } from "@/lib/workspace/server";
 import { readCredential } from "@/lib/revenue/server";
 import { stripeEntries, type StripeRecord } from "@/lib/revenue/stripe";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(request: Request) {
   const w = await requireWorkspace(); if (!w.ok) return w.response;
-  if (!w.store || !["owner", "admin"].includes(w.membership.role)) return NextResponse.json({ error: "Owner or admin access required" }, { status: 403 });
+  if (!w.store || !["owner", "admin", "connector"].includes(w.membership.role)) return NextResponse.json({ error: "Owner or admin access required" }, { status: 403 });
   try {
     const body = await request.json();
     if (body.storeId !== w.store.id) throw new Error("The active store changed. Reload this page before importing.");
@@ -21,7 +22,8 @@ export async function POST(request: Request) {
     const page = await response.json() as { data: StripeRecord[]; has_more: boolean };
     const entries = stripeEntries(page.data, secret.stripe_user_id, phase === "charges" ? "sale" : "refund", w.store.timezone || "UTC");
     if (entries.length) {
-      const result = await w.supabase.rpc("import_revenue_entries", { requested_store_id: w.store.id, source_name: "stripe", batch_name: `Stripe ${phase}`, entries });
+      const importer = w.membership.role === "connector" ? createAdminClient() : w.supabase;
+      const result = await importer.rpc("import_revenue_entries", { requested_store_id: w.store.id, source_name: "stripe", batch_name: `Stripe ${phase}`, entries });
       if (result.error) throw new Error("Could not save Stripe records. Retry the sync.");
     }
     const done = phase === "refunds" && !page.has_more;

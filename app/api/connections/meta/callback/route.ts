@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { discoverMetaAccounts, importMetaInsights } from "@/lib/connections/meta";
 import { requireWorkspace } from "@/lib/workspace/server";
+import { canManageConnections } from "@/lib/workspace/permissions";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const stateCookie = "spine_meta_oauth_state";
 
@@ -20,6 +22,7 @@ const redirectToApp = (request: NextRequest, status: "connected" | "error", mess
 export async function GET(request: NextRequest) {
   const workspace = await requireWorkspace();
   if (!workspace.ok) return workspace.response;
+  if (!canManageConnections(workspace.membership.role)) return redirectToApp(request, "error", "Connection management access is required.");
   if (!workspace.store) return redirectToApp(request, "error", "No brand is selected.");
 
   const returnedError = request.nextUrl.searchParams.get("error_reason") ?? request.nextUrl.searchParams.get("error_message") ?? request.nextUrl.searchParams.get("error");
@@ -77,7 +80,7 @@ export async function GET(request: NextRequest) {
 
     const lookbackMonths = Number(savedLookback);
     await importMetaInsights({
-      supabase: workspace.supabase,
+      supabase: workspace.membership.role === "connector" ? createAdminClient() : workspace.supabase,
       organizationId: workspace.membership.organizationId,
       store: workspace.store,
       account,

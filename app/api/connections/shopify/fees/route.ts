@@ -27,7 +27,7 @@ export async function POST(request: Request) {
   if (!workspace.ok) return workspace.response;
   const { supabase, membership, store } = workspace;
   if (!store?.shopify_domain) return NextResponse.json({ error: "Connect Shopify first." }, { status: 409 });
-  if (!["owner", "admin"].includes(membership.role)) return NextResponse.json({ error: "Owner or admin access is required." }, { status: 403 });
+  if (!["owner", "admin", "connector"].includes(membership.role)) return NextResponse.json({ error: "Owner or admin access is required." }, { status: 403 });
   const body = await request.json().catch(() => null) as { from?: string; to?: string } | null;
   const from = body?.from ?? "";
   const to = body?.to ?? "";
@@ -89,7 +89,8 @@ export async function POST(request: Request) {
     }
     }
 
-    const { data: existing, error: dailyError } = await supabase.from("shopify_sales_daily").select("*")
+    const reportingDb = membership.role === "connector" ? createReportingClient() : supabase;
+    const { data: existing, error: dailyError } = await reportingDb.from("shopify_sales_daily").select("*")
       .eq("store_id", store.id).gte("sales_date", from).lte("sales_date", to);
     if (dailyError) throw new Error(dailyError.message);
     const updates = (existing ?? []).flatMap((row) => {
@@ -105,7 +106,7 @@ export async function POST(request: Request) {
         total_payment_fees: processing + international, synced_at: new Date().toISOString() }];
     });
     if (updates.length) {
-      const { error } = await supabase.from("shopify_sales_daily").upsert(updates, { onConflict: "store_id,sales_date" });
+      const { error } = await reportingDb.from("shopify_sales_daily").upsert(updates, { onConflict: "store_id,sales_date" });
       if (error) throw new Error(error.message);
     }
     return NextResponse.json({ importedDays: updates.length, shopifyQlDays: reported.size, payoutDays: balance.size,

@@ -14,7 +14,7 @@ export async function GET(request: Request, context: { params: Promise<{ provide
   if (!state || !config.configured) return NextResponse.json({ error: "Connection request expired. Please start again." }, { status: 400 });
   const workspace = await requireWorkspace({ storeId: state.storeId, organizationId: state.organizationId, strict: true });
   if (!workspace.ok) return workspace.response;
-  if (!workspace.store || workspace.userId !== state.userId || !["owner", "admin"].includes(workspace.membership.role)) return NextResponse.json({ error: "Connection workspace no longer available" }, { status: 403 });
+  if (!workspace.store || workspace.userId !== state.userId || !["owner", "admin", "connector"].includes(workspace.membership.role)) return NextResponse.json({ error: "Connection workspace no longer available" }, { status: 403 });
   const code = url.searchParams.get("code");
   if (!code || url.searchParams.has("error")) return NextResponse.redirect(new URL("/protected?revenue_connection=cancelled", request.url));
   try {

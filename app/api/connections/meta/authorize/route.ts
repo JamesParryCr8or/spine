@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { requireWorkspace } from "@/lib/workspace/server";
+import { canManageConnections } from "@/lib/workspace/permissions";
 
 const stateCookie = "spine_meta_oauth_state";
 
@@ -17,6 +18,7 @@ const callbackUrl = (request: NextRequest) => process.env.META_OAUTH_REDIRECT_UR
 export async function GET(request: NextRequest) {
   const workspace = await requireWorkspace();
   if (!workspace.ok) return workspace.response;
+  if (!canManageConnections(workspace.membership.role)) return NextResponse.json({ error: "Connection management access is required" }, { status: 403 });
 
   const appId = process.env.META_APP_ID;
   if (!appId || !process.env.META_APP_SECRET) {

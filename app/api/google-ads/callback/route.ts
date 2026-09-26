@@ -50,7 +50,7 @@ export async function GET(request: Request) {
   if (!workspace.ok) return workspace.response;
   if (!workspace.store) return fail(request, "No active brand was found");
   const { supabase, store, membership } = workspace;
-  if (!["owner", "admin"].includes(membership.role)) return fail(request, "Owner or admin access is required");
+  if (!["owner", "admin", "connector"].includes(membership.role)) return fail(request, "Owner or admin access is required");
 
   const clientId = process.env.GOOGLE_ADS_CLIENT_ID?.trim();
   const clientSecret = process.env.GOOGLE_ADS_CLIENT_SECRET?.trim();

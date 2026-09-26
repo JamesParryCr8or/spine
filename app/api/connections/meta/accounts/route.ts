@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 
 import { discoverMetaAccounts } from "@/lib/connections/meta";
 import { requireWorkspace } from "@/lib/workspace/server";
+import { canManageConnections } from "@/lib/workspace/permissions";
 
 export async function POST(request: Request) {
   const workspace = await requireWorkspace();
   if (!workspace.ok) return workspace.response;
+  if (!canManageConnections(workspace.membership.role)) return NextResponse.json({ error: "Connection management access is required" }, { status: 403 });
 
   const body = await request.json().catch(() => null) as { accessToken?: string } | null;
   const accessToken = body?.accessToken?.trim();

@@ -17,7 +17,7 @@ export async function saveCredential(workspace: RevenueWorkspace, provider: Reve
   if (error) throw new Error("Could not securely save the connection");
 }
 export async function readCredential(workspace: RevenueWorkspace, provider: RevenueProvider) {
-  if (!workspace.store || !["owner", "admin"].includes(workspace.membership.role)) throw new Error("Owner or admin access required");
+  if (!workspace.store || !["owner", "admin", "connector"].includes(workspace.membership.role)) throw new Error("Connection management access required");
   const client = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false, autoRefreshToken: false } });
   const { data, error } = await client.rpc("read_connection_secret_for_server", { requested_store_id: workspace.store.id, connection_provider: provider });
   if (error || !data) throw new Error("Reconnect this account before importing");

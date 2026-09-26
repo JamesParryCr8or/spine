@@ -1,4 +1,4 @@
-export type WorkspaceRole = "owner" | "admin" | "analyst" | "viewer";
+export type WorkspaceRole = "owner" | "admin" | "analyst" | "connector" | "viewer";
 
 export type WorkspaceMembership = {
   organizationId: string;

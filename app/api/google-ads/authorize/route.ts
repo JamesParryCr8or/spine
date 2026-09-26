@@ -8,7 +8,7 @@ export async function GET() {
   const workspace = await requireWorkspace();
   if (!workspace.ok) return workspace.response;
   if (!workspace.store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
-  if (!["owner", "admin"].includes(workspace.membership.role)) {
+  if (!["owner", "admin", "connector"].includes(workspace.membership.role)) {
     return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
   }
 

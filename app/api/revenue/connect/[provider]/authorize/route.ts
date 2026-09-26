@@ -8,7 +8,7 @@ export async function GET(_request: Request, context: { params: Promise<{ provid
   if (!isRevenueProvider(provider)) return NextResponse.json({ error: "Unknown connector" }, { status: 404 });
   const workspace = await requireWorkspace();
   if (!workspace.ok) return workspace.response;
-  if (!workspace.store || !["owner", "admin"].includes(workspace.membership.role)) return NextResponse.json({ error: "Owner or admin access required" }, { status: 403 });
+  if (!workspace.store || !["owner", "admin", "connector"].includes(workspace.membership.role)) return NextResponse.json({ error: "Owner or admin access required" }, { status: 403 });
   const config = oauthConfig(provider);
   if (!config.configured) return NextResponse.json({ error: "This connector needs its OAuth application credentials configured on the server." }, { status: 503 });
   const nonce = crypto.randomUUID();
