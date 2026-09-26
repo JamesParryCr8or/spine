@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, RefreshCw, Target, Users } from "lucide-react";
+import { LeadRevenueSummary } from "./lead-revenue-summary";
 import { fetchCachedJson } from "@/lib/analytics/client-response-cache";
 
 type PipelinePayload = {
@@ -80,6 +81,7 @@ export function LeadOverview({ range, onOpenConnections, onOpenLeads }: LeadOver
   const currency = (value: number | null | undefined) => value == null ? "—" : format.format(value);
 
   return <section className="lead-overview">
+    <LeadRevenueSummary from={range.from} to={range.to}/>
     <div className="lead-overview-heading">
       <div>
         <span className="eyebrow">GOHIGHLEVEL SALES JOURNEY</span>

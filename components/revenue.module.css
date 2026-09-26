@@ -1,0 +1,23 @@
+.root { display:grid; gap:22px; margin:24px 0; color:#17243c; }
+.heading h2 { font-size:24px; margin:8px 0; }
+.root p { color:#64748b; font-size:14px; line-height:1.6; margin:10px 0 16px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:18px; }
+.card { background:#fff; border:1px solid #e1e6f0; border-radius:16px; padding:24px; min-width:0; box-shadow:0 4px 18px #18244004; }
+.card h3 { font-size:19px; margin:12px 0; }
+.badge { color:#6754e8; background:#f1eeff; padding:6px 9px; border-radius:6px; font-size:10px; font-weight:700; letter-spacing:.1em; }
+.root label { display:grid; gap:8px; font-size:12px; font-weight:600; margin:16px 0; }
+.root input,.root select { background:#fff; color:#17243c; padding:11px 12px; border:1px solid #d9deec; border-radius:8px; min-width:0; width:100%; color-scheme:light; }
+.root button,.actions a { display:inline-block; background:#f7f5ff; color:#5140bc; border:1px solid #ded8ff; padding:10px 14px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer; text-decoration:none; }
+.root button:disabled { opacity:.5; cursor:not-allowed; }
+.root button:focus-visible,.root a:focus-visible,.root input:focus-visible,.root select:focus-visible { outline:3px solid #9b8cff; outline-offset:2px; }
+.actions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:16px 0; }
+.notice { padding:16px; background:#f2efff; border:1px solid #ded8ff; border-radius:10px; }
+.scroll { overflow:auto; }
+.root table { width:100%; border-collapse:collapse; font-size:13px; }
+.root th { font-size:11px; text-transform:uppercase; letter-spacing:.05em; background:#f8f9fc; color:#69758c; }
+.root td,.root th { padding:15px; text-align:left; border-bottom:1px solid #edf0f6; white-space:nowrap; }
+.root td:last-child,.root th:last-child { text-align:right; font-variant-numeric:tabular-nums; }
+.value { font-size:28px; font-weight:700; margin:12px 0; }
+.bar { position:relative; background:#eeeaff; border-radius:5px; height:30px; min-width:160px; overflow:hidden; }
+.bar span { position:absolute; inset:0 auto 0 0; background:#c7bdff; }
+.bar b { position:relative; display:block; padding:7px 10px; text-align:right; font-size:12px; }

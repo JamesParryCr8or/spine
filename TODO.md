@@ -2,14 +2,17 @@
 
 ## Active delivery — lead-generation revenue connectors
 
-- [ ] Deploy the completed P&L Excel/CSV export and sanitized Shopify error changes.
-- [ ] Add a tenant-scoped Stripe connector with encrypted credentials, connection validation, paginated payment/refund imports, sync status, and disconnect controls.
-- [ ] Add a shared lead-generation revenue/cost ledger with stable external IDs, currency validation, import provenance, and duplicate-safe imports. Keep collected revenue separate from GHL opportunity value.
-- [ ] Add a CSV connector with a downloadable sales/cost template, preview and validation, standard/custom cost labels, batch history, and rollback.
-- [ ] Add a Google Sheets OAuth connector with saved spreadsheet/tab selection, open-sheet and create/copy-template actions, and repeatable sync through the same validated import workflow.
-- [ ] Provide a formatted Google Sheets template with year/month selectors, sales and cost entry tabs, preset/custom labels, and instructions for recording cash/external sales without duplicating Stripe receipts.
-- [ ] Add a lead-generation Revenue & Costs navigation page with year/month filters, source breakdown, receipts, refunds, external costs, and contribution after ad spend; surface collected revenue on the GHL overview.
-- [ ] Test tenant isolation, currencies, refund handling, stable IDs, repeat imports, malformed CSV/sheet rows, and unavailable connector credentials. Apply the schema and verify the deployed flows; document any required external OAuth setup.
+- [x] Deploy the completed P&L Excel/CSV export and sanitized Shopify error changes.
+- [x] Add a tenant-scoped Stripe connector with encrypted credentials, connection validation, paginated payment/refund imports, sync status, and disconnect controls.
+- [x] Add a shared lead-generation revenue/cost ledger with stable external IDs, currency validation, import provenance, and duplicate-safe imports. Keep collected revenue separate from GHL opportunity value.
+- [x] Add a CSV connector with a downloadable sales/cost template, preview and validation, standard/custom cost labels, batch history, and rollback.
+- [x] Add a Google Sheets OAuth connector with saved spreadsheet/tab selection, open-sheet and create/copy-template actions, and repeatable sync through the same validated import workflow.
+- [x] Provide a formatted Google Sheets template with year/month selectors, a shared sales/cost entry tab, preset/custom labels, and instructions for recording cash/external sales without duplicating Stripe receipts.
+- [x] Add a lead-generation Revenue & Costs navigation page with year/month filters, source breakdown, receipts, refunds, external costs, and contribution after ad spend; surface collected revenue on the GHL overview.
+- [x] Test tenant isolation, currencies, refund handling, stable IDs, repeat imports, malformed CSV rows and signed OAuth state; apply and test the schema. Document OAuth setup in `docs/revenue-connectors.md`.
+- [ ] Configure live Stripe Connect and Google Sheets OAuth application credentials, authorise real accounts, and verify live payment imports and Google template creation. These require external app setup; no credentials are embedded in the code.
+
+Verification: 79 automated tests passed; TypeScript and production build passed. New component/API lint checks passed. Database rollback/isolation checks passed. Local fixture UI verified in browser; live OAuth flows await configuration.
 
 ## Current implementation status
 
