@@ -15,7 +15,11 @@ export async function GET(request: Request) {
     if (result.data.length < 1000) break;
     if (offset >= 99000) return NextResponse.json({ error: "Choose a smaller period to view revenue" }, { status: 400 });
   }
-  const batches = await w.supabase.from("revenue_import_batches").select("id,source,name,row_count,created_at,rolled_back_at").eq("store_id", w.store.id).order("sequence", { ascending: false }).limit(30);
+  const [batches, costDefaults] = await Promise.all([
+    w.supabase.from("revenue_import_batches").select("id,source,name,row_count,created_at,rolled_back_at").eq("store_id", w.store.id).order("sequence", { ascending: false }).limit(30),
+    w.supabase.from("store_cost_defaults").select("business_contribution_margin_percent").eq("store_id", w.store.id).maybeSingle(),
+  ]);
+  if (costDefaults.error) return NextResponse.json({ error: "Business contribution margin is unavailable" }, { status: 503 });
   const currency = w.store.reporting_currency || w.store.currency;
   const spendResults = await Promise.all(["meta_ad_insights_daily", "google_ads_insights_daily"].map(async table => {
     let total = 0, rows = 0, foreign = 0;
@@ -32,6 +36,8 @@ export async function GET(request: Request) {
     const summary = revenueSummary(entries, currency);
     const spendAvailable = spendResults.every(Boolean) && spendResults.some(s => s!.rows > 0);
     const adSpend = spendAvailable ? spendResults.reduce((sum,s) => sum + s!.total,0) : null;
-    return NextResponse.json({ currency, summary: { ...summary, adSpend, afterAdSpend: adSpend === null ? null : summary.netAfterCosts-adSpend, foreignSpendRows: spendResults.reduce((sum,s) => sum+(s?.foreign||0),0) }, entries: entries.sort((a,b) => b.entry_date.localeCompare(a.entry_date)).slice(0,100), count: entries.length, batches: batches.data || [], canEdit: ["owner", "admin"].includes(w.membership.role) });
+    const businessContributionMarginPercent = Number(costDefaults.data?.business_contribution_margin_percent ?? 0);
+    const estimatedContributionAfterCosts = summary.netRevenue * businessContributionMarginPercent / 100 - summary.costs;
+    return NextResponse.json({ currency, summary: { ...summary, businessContributionMarginPercent, estimatedContributionAfterCosts, adSpend, afterAdSpend: adSpend === null ? null : estimatedContributionAfterCosts-adSpend, foreignSpendRows: spendResults.reduce((sum,s) => sum+(s?.foreign||0),0) }, entries: entries.sort((a,b) => b.entry_date.localeCompare(a.entry_date)).slice(0,100), count: entries.length, batches: batches.data || [], canEdit: ["owner", "admin"].includes(w.membership.role) });
   } catch { return NextResponse.json({ error: "Revenue totals exceed the supported range. Choose a smaller period." }, { status: 400 }); }
 }

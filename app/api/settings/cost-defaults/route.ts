@@ -23,13 +23,14 @@ async function context() {
   return { supabase, userId, membership, store };
 }
 
-function responseDefaults(row: { fulfilment_amount: string; fulfilment_basis: Basis; postage_amount: string; postage_basis: Basis; default_cogs_percent: string; currency: string } | null, currency: string) {
+function responseDefaults(row: { fulfilment_amount: string; fulfilment_basis: Basis; postage_amount: string; postage_basis: Basis; default_cogs_percent: string; business_contribution_margin_percent: string; currency: string } | null, currency: string) {
   return {
     fulfilmentAmount: row?.fulfilment_amount ?? "0",
     fulfilmentBasis: row?.fulfilment_basis ?? "orders",
     postageAmount: row?.postage_amount ?? "0",
     postageBasis: row?.postage_basis ?? "orders",
     defaultCogsPercent: row?.default_cogs_percent ?? "0",
+    businessContributionMarginPercent: row?.business_contribution_margin_percent ?? "0",
     currency: row?.currency ?? currency,
   };
 }
@@ -37,7 +38,7 @@ function responseDefaults(row: { fulfilment_amount: string; fulfilment_basis: Ba
 export async function GET() {
   const result = await context();
   if ("error" in result) return result.error;
-  const { data, error } = await result.supabase.from("store_cost_defaults").select("fulfilment_amount,fulfilment_basis,postage_amount,postage_basis,default_cogs_percent,currency").eq("store_id", result.store.id).maybeSingle();
+  const { data, error } = await result.supabase.from("store_cost_defaults").select("fulfilment_amount,fulfilment_basis,postage_amount,postage_basis,default_cogs_percent,business_contribution_margin_percent,currency").eq("store_id", result.store.id).maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({
     defaults: responseDefaults(data, result.store.currency),
@@ -54,9 +55,10 @@ export async function PUT(request: Request) {
   const fulfilmentAmount = parseAmount(body.fulfilmentAmount, "Fulfilment cost");
   const postageAmount = parseAmount(body.postageAmount, "Postage cost");
   const defaultCogsPercent = parseAmount(body.defaultCogsPercent, "Default product COGS rate");
+  const businessContributionMarginPercent = parseAmount(body.businessContributionMarginPercent, "Business contribution margin");
   const fulfilmentBasis = parseBasis(body.fulfilmentBasis, "Fulfilment basis");
   const postageBasis = parseBasis(body.postageBasis, "Postage basis");
-  const validationError = fulfilmentAmount.error || postageAmount.error || defaultCogsPercent.error || fulfilmentBasis.error || postageBasis.error;
+  const validationError = fulfilmentAmount.error || postageAmount.error || defaultCogsPercent.error || businessContributionMarginPercent.error || fulfilmentBasis.error || postageBasis.error;
   if (validationError) return NextResponse.json({ error: validationError }, { status: 400 });
 
   const { data, error } = await result.supabase.from("store_cost_defaults").upsert({
@@ -68,10 +70,11 @@ export async function PUT(request: Request) {
     postage_amount: postageAmount.value!,
     postage_basis: postageBasis.value!,
     default_cogs_percent: defaultCogsPercent.value!,
+    business_contribution_margin_percent: businessContributionMarginPercent.value!,
     created_by: result.userId,
     updated_by: result.userId,
     updated_at: new Date().toISOString(),
-  }, { onConflict: "store_id" }).select("fulfilment_amount,fulfilment_basis,postage_amount,postage_basis,default_cogs_percent,currency").single();
+  }, { onConflict: "store_id" }).select("fulfilment_amount,fulfilment_basis,postage_amount,postage_basis,default_cogs_percent,business_contribution_margin_percent,currency").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ defaults: responseDefaults(data, result.store.currency), canManage: true });
 }
