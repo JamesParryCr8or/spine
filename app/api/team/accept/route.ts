@@ -1,7 +1,21 @@
 import { createHash } from "node:crypto";
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { activeOrganizationCookie, activeStoreCookie } from "@/lib/workspace/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+
+export async function GET(request: NextRequest) {
+  const token = request.nextUrl.searchParams.get("token") ?? "";
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return NextResponse.json({ error: "This invitation is invalid or expired" }, { status: 404 });
+  const admin = createAdminClient();
+  const { data, error } = await admin.from("organization_invitations")
+    .select("email")
+    .eq("token_hash", createHash("sha256").update(token).digest("hex"))
+    .is("accepted_at", null).is("revoked_at", null)
+    .gt("expires_at", new Date().toISOString()).maybeSingle();
+  if (error || !data) return NextResponse.json({ error: "This invitation is invalid or expired" }, { status: 404 });
+  return NextResponse.json({ email: data.email }, { headers: { "Cache-Control": "no-store" } });
+}
 
 export async function POST(request: Request) {
   const input = await request.json().catch(() => null) as { token?: unknown } | null;
