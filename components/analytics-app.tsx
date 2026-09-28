@@ -1633,11 +1633,11 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
   const integrationLogoSources: Record<string, string> = {
     Shopify: "https://cdn.simpleicons.org/shopify/95BF47",
     "Meta Ads": "https://cdn.simpleicons.org/meta/0668E1",
-    "Google Ads": "https://cdn.simpleicons.org/googleads/4285F4",
-    Klaviyo: "https://cdn.simpleicons.org/klaviyo/000000",
+    "Google Ads": "https://upload.wikimedia.org/wikipedia/commons/c/cc/Google_Ads_icon.svg",
+    Klaviyo: "https://cdn.sanity.io/images/6ct6b26e/marketing-prod/360ba69bc84136c38ded3a7370109874ff5937f3-550x226.png",
     GoHighLevel: goHighLevelLogo,
   };
-  const integrationLogo = (name: string, className = "") => <span className={`source-logo brand-image ${name === "GoHighLevel" ? "ghl" : ""} ${className}`} role="img" aria-label={`${name} logo`} style={{ backgroundImage: `url("${integrationLogoSources[name]}")` }} />;
+  const integrationLogo = (name: string, className = "") => <span className={`source-logo brand-image ${name === "GoHighLevel" ? "ghl" : name === "Klaviyo" ? "klaviyo" : name === "Google Ads" ? "google-ads" : ""} ${className}`} role="img" aria-label={`${name} logo`} style={{ backgroundImage: `url("${integrationLogoSources[name]}")` }} />;
   const [showMetaSetup, setShowMetaSetup] = useState(false);
   const [showShopifySetup, setShowShopifySetup] = useState(false);
   const [showToken, setShowToken] = useState(false);
