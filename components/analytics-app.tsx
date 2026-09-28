@@ -1634,6 +1634,7 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
   const [token, setToken] = useState("");
   const [accountId, setAccountId] = useState("");
   const [metaAccounts, setMetaAccounts] = useState<Array<{ id: string; name: string; currency: string | null; accountStatus: number | null }>>([]);
+  const [metaAccountSearch, setMetaAccountSearch] = useState("");
   const [loadingMetaAccounts, setLoadingMetaAccounts] = useState(false);
   const [metaLookbackMonths, setMetaLookbackMonths] = useState("12");
   const [metaConnected, setMetaConnected] = useState(false);
@@ -1849,6 +1850,11 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
     ["Klaviyo", "Campaign and flow analytics", klaviyoConnected ? "Connected" : "Connect", "K"],
     ["GoHighLevel", ghlConnected ? (ghlAccountName || "GoHighLevel location") : "Lead, call and pipeline conversion reporting", ghlConnected ? "Connected" : "Connect", "H"],
   ];
+  const filteredMetaAccounts = metaAccounts.filter((account) =>
+    `${account.name} ${account.currency ?? ""} ${account.id} ${account.id.startsWith("act_") ? account.id.slice(4) : `act_${account.id}`}`
+      .toLocaleLowerCase()
+      .includes(metaAccountSearch.trim().toLocaleLowerCase()),
+  );
 
   return <>
     <div className="connection-notice"><Info/><div><strong>{canManage ? "Secure connection storage" : "Connection access is view only"}</strong><span>{canManage ? "Access tokens are encrypted in Supabase Vault and are never returned to the browser after saving." : "Ask an owner, admin or connections manager to add or remove integrations."}</span></div></div>{connectionError && <div className="connection-error" role="alert">{connectionError}</div>}
@@ -1874,9 +1880,18 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
       {metaConnectionStatus === "error" && metaConnectionError && <div className="connection-error" role="alert">{metaConnectionError}</div>}
       {metaConnected && metaAccountName && <div className="connected-account"><span/><div><small>CURRENT ACCOUNT</small><strong>{metaAccountName}</strong>{metaLastSync ? <small>{metaLastSync.importedDays.toLocaleString()} daily spend records · latest {metaLastSync.latestDate ? new Date(`${metaLastSync.latestDate}T00:00:00Z`).toLocaleDateString("en-GB") : "date unavailable"}</small> : <small>Spend data has not been imported yet.</small>}</div></div>}
       <div className="help-card"><Info/><div><strong>Alternative for agency-managed accounts</strong><p>Use a Meta system-user token only if your business manages the connection centrally. For normal use, choose <b>Connect Facebook</b> above.</p><a className="meta-developer-link" href="https://developers.facebook.com/tools/explorer" target="_blank" rel="noreferrer"><ExternalLink/>Open Graph API Explorer</a></div></div>
-      <label className="form-field"><span>System-user token <small>Optional alternative</small><b className="tooltip-trigger">?<em>Use this only for a centrally managed Meta system user with ads_read and read_insights.</em></b></span><div className="secret-input"><KeyRound/><input value={token} onChange={(event)=>{setToken(event.target.value);setMetaAccounts([]);setAccountId("");setConnectionError("");}} type={showToken?"text":"password"} placeholder="EAAB..." autoComplete="off"/><button onClick={()=>setShowToken(!showToken)}>{showToken?<EyeOff/>:<Eye/>}</button></div></label>
+      <label className="form-field"><span>System-user token <small>Optional alternative</small><b className="tooltip-trigger">?<em>Use this only for a centrally managed Meta system user with ads_read and read_insights.</em></b></span><div className="secret-input"><KeyRound/><input value={token} onChange={(event)=>{setToken(event.target.value);setMetaAccounts([]);setAccountId("");setMetaAccountSearch("");setConnectionError("");}} type={showToken?"text":"password"} placeholder="EAAB..." autoComplete="off"/><button onClick={()=>setShowToken(!showToken)}>{showToken?<EyeOff/>:<Eye/>}</button></div></label>
       <div className="meta-account-discovery"><button type="button" disabled={!token.trim() || loadingMetaAccounts} onClick={() => void loadMetaAccounts()}>{loadingMetaAccounts ? "Loading accounts…" : metaAccounts.length ? "Reload ad accounts" : "Find ad accounts"}</button><small>{metaAccounts.length ? `${metaAccounts.length} account${metaAccounts.length === 1 ? "" : "s"} available to this token.` : "Enter your token, then load the ad accounts it can access."}</small></div>
-      <label className="form-field"><span>Meta ad account</span><select value={accountId} onChange={(event)=>setAccountId(event.target.value)} disabled={!metaAccounts.length}><option value="">{metaAccounts.length ? "Choose an ad account" : "Load accounts to choose"}</option>{metaAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}{account.currency ? ` · ${account.currency}` : ""} ({account.id.startsWith("act_") ? account.id : `act_${account.id}`})</option>)}</select></label>
+      <label className="form-field"><span>Search Meta ad accounts</span><div className="meta-account-search"><Search aria-hidden="true"/><input type="search" value={metaAccountSearch} onChange={(event) => setMetaAccountSearch(event.target.value)} placeholder={metaAccounts.length ? "Filter by account name, currency or ID" : "Load accounts to search"} disabled={!metaAccounts.length} /></div></label>
+      <div className="meta-account-results" role="listbox" aria-label="Meta ad accounts" aria-disabled={!metaAccounts.length}>
+        {!metaAccounts.length ? <span className="meta-account-empty">Load accounts to choose an ad account.</span> : filteredMetaAccounts.length ? filteredMetaAccounts.map((account) => {
+          const id = account.id.startsWith("act_") ? account.id : `act_${account.id}`;
+          return <button type="button" role="option" aria-selected={accountId === account.id} className={accountId === account.id ? "selected" : ""} key={account.id} onClick={() => setAccountId(account.id)}>
+            <span>{account.name}</span><small>{account.currency ? `${account.currency} · ` : ""}{id}</small>
+          </button>;
+        }) : <span className="meta-account-empty">No accounts match “{metaAccountSearch}”.</span>}
+      </div>
+      {accountId && <div className="meta-account-selection"><strong>Selected account</strong><span>{metaAccounts.find((account) => account.id === accountId)?.name ?? accountId}</span></div>}
       <label className="form-field"><span>Spend history to import</span><select value={metaLookbackMonths} onChange={(event)=>setMetaLookbackMonths(event.target.value)}><option value="3">Last 3 months</option><option value="6">Last 6 months</option><option value="12">Last 12 months</option><option value="24">Last 24 months</option><option value="36">Last 36 months</option></select><small>New connections default to the last 365 days. Meta supports up to 37 months when you need more history.</small></label>
       <div className="permission-note"><KeyRound/><span><strong>Required permissions:</strong> ads_read, read_insights</span></div>
       {metaSyncResult && <div className="connected-account"><span/><div><small>SPEND IMPORT COMPLETE</small><strong>{metaSyncResult}</strong></div></div>}{connectionError && <div className="connection-error">{connectionError}</div>}

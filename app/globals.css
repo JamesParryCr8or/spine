@@ -336,6 +336,23 @@ button { cursor:pointer; }
 .meta-account-discovery button:hover:not(:disabled){border-color:#6b55e8;color:#5b46d6}
 .meta-account-discovery button:disabled{opacity:.55;cursor:not-allowed}
 .meta-account-discovery small{color:#71809a;font-size:12px;line-height:1.45}
+.meta-account-search{display:flex;align-items:center;gap:9px;height:42px;padding:0 12px;border:1px solid #dfe3eb;border-radius:8px;background:#fff;color:#858fa2}
+.meta-account-search:focus-within{border-color:#7765ec;box-shadow:0 0 0 3px #6c5ce716}
+.meta-account-search svg{width:15px;height:15px;flex:none}
+.meta-account-search input{width:100%;height:100%;padding:0;border:0;outline:0;background:transparent;color:#172033;font:inherit;font-size:11px}
+.meta-account-search input::placeholder{color:#9aa1ae}
+.meta-account-search input:disabled{cursor:not-allowed}
+.meta-account-results{display:flex;flex-direction:column;max-height:176px;overflow:auto;border:1px solid #dfe3eb;border-radius:9px;background:#fff;overscroll-behavior:contain}
+.meta-account-results button{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:38px;padding:8px 11px;border:0;border-bottom:1px solid #eef0f5;background:#fff;color:#28354b;text-align:left;font:inherit;cursor:pointer}
+.meta-account-results button:last-child{border-bottom:0}
+.meta-account-results button:hover,.meta-account-results button:focus-visible{outline:0;background:#f6f4ff}
+.meta-account-results button.selected{background:#efedff;color:#5542cc}
+.meta-account-results button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:700}
+.meta-account-results button small{flex:none;color:#788398;font-size:9px}
+.meta-account-empty{padding:12px;color:#788398;font-size:10px}
+.meta-account-selection{display:flex;justify-content:space-between;gap:12px;padding:9px 11px;border:1px solid #dcd7ff;border-radius:8px;background:#f7f5ff;color:#5142bf;font-size:10px}
+.meta-account-selection span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
+@media(max-width:600px){.meta-account-discovery{align-items:flex-start;flex-direction:column;gap:7px}.meta-account-results button{align-items:flex-start;flex-direction:column;gap:3px}}
 
 
 .lead-overview{display:flex;flex-direction:column;gap:16px}
