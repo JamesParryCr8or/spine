@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Image from "next/image";
 import { ShopifyCustomerReport } from "@/components/shopify-customer-report";
 import { ProductJourneyChart } from "@/components/product-journey-chart";
@@ -1649,6 +1649,12 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
   const [klaviyoConnected, setKlaviyoConnected] = useState(false);
   const [ghlConnected, setGhlConnected] = useState(false);
   const [ghlAccountName, setGhlAccountName] = useState("");
+  const [showGhlSetup, setShowGhlSetup] = useState(false);
+  const [ghlApiKey, setGhlApiKey] = useState("");
+  const [ghlLocationId, setGhlLocationId] = useState("");
+  const [ghlSourceType, setGhlSourceType] = useState<"opportunities" | "contacts">("opportunities");
+  const [ghlMetricLabel, setGhlMetricLabel] = useState("Booked calls");
+  const [showGhlToken, setShowGhlToken] = useState(false);
   const [metaAccountName, setMetaAccountName] = useState("");
   const [metaSyncResult, setMetaSyncResult] = useState("");
   const [metaLastSync, setMetaLastSync] = useState<{ importedDays: number; latestDate: string | null; syncedAt: string | null } | null>(null);
@@ -1817,18 +1823,18 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
   };
 
   const connectKlaviyo = async () => { const apiKey = window.prompt("Paste your Klaviyo private API key"); if (!apiKey) return; setSavingConnection(true); const response = await fetch("/api/connections/klaviyo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey }) }); setSavingConnection(false); if (!response.ok) { const payload = await response.json(); setConnectionError(payload.error || "Could not connect Klaviyo"); return; } setKlaviyoConnected(true); };
-  const connectGhl = async () => {
-    const apiKey = window.prompt("Paste the GoHighLevel private integration token"); if (!apiKey) return;
-    const locationId = window.prompt("Paste the GoHighLevel sub-account location ID"); if (!locationId) return;
-    const sourceType = window.confirm("Use pipeline opportunities? Choose Cancel for contacts or a smart list.") ? "opportunities" : "contacts";
-    const metricLabel = window.prompt("What should this cost be measured per?", sourceType === "opportunities" ? "Booked calls" : "Qualified leads"); if (!metricLabel) return;
+  const connectGhl = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!ghlApiKey.trim() || !ghlLocationId.trim() || !ghlMetricLabel.trim()) return;
     setSavingConnection(true); setConnectionError("");
     try {
-      const response = await fetch("/api/connections/gohighlevel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey, locationId, sourceType, metricLabel }) });
+      const response = await fetch("/api/connections/gohighlevel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey: ghlApiKey.trim(), locationId: ghlLocationId.trim(), sourceType: ghlSourceType, metricLabel: ghlMetricLabel.trim() }) });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) { setConnectionError(payload.error || "GoHighLevel could not validate those details. Use a Private Integration token and the ID of the sub-account it belongs to."); return; }
       setGhlConnected(true);
-      setGhlAccountName(payload.connection?.external_account_name ?? locationId);
+      setGhlAccountName(payload.connection?.external_account_name ?? ghlLocationId.trim());
+      setGhlApiKey("");
+      setShowGhlSetup(false);
     } catch {
       setConnectionError("GoHighLevel could not be reached. Please try again in a moment.");
     } finally { setSavingConnection(false); }
@@ -1859,7 +1865,7 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
 
   return <>
     <div className="connection-notice"><Info/><div><strong>{canManage ? "Secure connection storage" : "Connection access is view only"}</strong><span>{canManage ? "Access tokens are encrypted in Supabase Vault and are never returned to the browser after saving." : "Ask an owner, admin or connections manager to add or remove integrations."}</span></div></div>{connectionError && <div className="connection-error" role="alert">{connectionError}</div>}
-    <section className="connection-grid">{connections.map(([name,desc,status,letter])=><article className="connection-card" key={name}><div className={`source-logo ${letter.toLowerCase()}`}>{letter}</div><div><h3>{name}</h3><p>{desc}</p></div><button disabled={!canManage || status === "Coming next"} onClick={() => { if (name === "Meta Ads") setShowMetaSetup(true); else if (name === "Shopify") setShowShopifySetup(true); else if (name === "Google Ads") { if (googleAdsConnected) setShowGoogleAdsAccounts(true); else connectGoogleAds(); } else if (name === "Klaviyo") void connectKlaviyo(); else if (name === "GoHighLevel") void connectGhl(); }} className={status==="Connected" ? "connected" : status === "Expired" || status === "Needs attention" ? "expired" : ""}>{(status==="Connected" || status === "Expired" || status === "Needs attention")&&<span/>}{status}</button></article>)}</section>
+    <section className="connection-grid">{connections.map(([name,desc,status,letter])=><article className="connection-card" key={name}>{name === "GoHighLevel" ? <div className="source-logo ghl"><img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSar809unLJMErZysKctuNXry5HbjlPeAfKsZargmkPag&s=10" alt="GoHighLevel" /></div> : <div className={`source-logo ${letter.toLowerCase()}`}>{letter}</div>}<div><h3>{name}</h3><p>{desc}</p></div><button disabled={!canManage || status === "Coming next"} onClick={() => { if (name === "Meta Ads") setShowMetaSetup(true); else if (name === "Shopify") setShowShopifySetup(true); else if (name === "Google Ads") { if (googleAdsConnected) setShowGoogleAdsAccounts(true); else connectGoogleAds(); } else if (name === "Klaviyo") void connectKlaviyo(); else if (name === "GoHighLevel") { setConnectionError(""); setShowGhlSetup(true); } }} className={status==="Connected" ? "connected" : status === "Expired" || status === "Needs attention" ? "expired" : ""}>{(status==="Connected" || status === "Expired" || status === "Needs attention")&&<span/>}{status}</button></article>)}</section>
     {leadGeneration && <RevenueConnectors/>}
     {showGoogleAdsAccounts && <div className="modal-backdrop" onMouseDown={() => setShowGoogleAdsAccounts(false)}><section className="connection-modal" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowGoogleAdsAccounts(false)}><X/></button><div className="modal-brand"><div className="source-logo g">G</div><div><span className="eyebrow">GOOGLE ADS</span><h2>Choose an ad account</h2></div></div><p className="modal-intro">Select the Google Ads account for this brand. Manager accounts and their enabled client accounts are listed separately.</p>{connectionError && <div className="connection-error">{connectionError}</div>}{googleAdsAccounts.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Account</th><th>Customer ID</th><th>Type</th><th/></tr></thead><tbody>{googleAdsAccounts.map((account) => <tr key={account.customer_id}><td><strong>{account.name}</strong>{account.direct_access && <small>Direct Google access</small>}</td><td>{account.customer_id}</td><td>{account.is_manager ? "Manager (MCC)" : "Client account"}</td><td><button className="primary" disabled={selectingGoogleAdsAccount} onClick={() => void selectGoogleAdsAccount(account.customer_id)}>{googleAdsAccountName === account.name ? "Selected" : "Use this account"}</button></td></tr>)}</tbody></table></div> : <div className="cost-empty"><Database/><strong>No Google Ads accounts have been loaded yet</strong><span>Reconnect Google Ads to load the MCC hierarchy.</span></div>}<div className="modal-actions"><button onClick={() => setShowGoogleAdsAccounts(false)}>Close</button><button className="primary" onClick={connectGoogleAds}>Reconnect and refresh accounts</button></div></section></div>}
     {showShopifySetup && <div className="modal-backdrop" onMouseDown={()=>setShowShopifySetup(false)}><section className="connection-modal" onMouseDown={(event)=>event.stopPropagation()}>
@@ -1897,6 +1903,23 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
       <div className="permission-note"><KeyRound/><span><strong>Required permissions:</strong> ads_read, read_insights</span></div>
       {metaSyncResult && <div className="connected-account"><span/><div><small>SPEND IMPORT COMPLETE</small><strong>{metaSyncResult}</strong></div></div>}{connectionError && <div className="connection-error">{connectionError}</div>}
       <div className="modal-actions">{metaConnected&&<button className="danger-button" disabled={savingConnection} onClick={disconnectMeta}>Disconnect</button>}<button onClick={()=>setShowMetaSetup(false)}>Cancel</button><button className="primary" disabled={!token.trim() || !accountId || savingConnection} onClick={saveMeta}>{savingConnection?"Importing…":metaConnected?"Save manual token":"Save manual token"}</button></div>
+    </section></div>}
+    {showGhlSetup && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !savingConnection) setShowGhlSetup(false); }}><section className="connection-modal ghl-connection-modal" role="dialog" aria-modal="true" aria-labelledby="ghl-connection-title" onMouseDown={(event) => event.stopPropagation()}>
+      <button type="button" className="modal-close" aria-label="Close GoHighLevel connection" onClick={() => !savingConnection && setShowGhlSetup(false)}><X/></button>
+      <div className="modal-brand"><div className="source-logo ghl"><img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSar809unLJMErZysKctuNXry5HbjlPeAfKsZargmkPag&s=10" alt="" /></div><div><span className="eyebrow">LEAD GENERATION INTEGRATION</span><h2 id="ghl-connection-title">{ghlConnected ? "Update GoHighLevel" : "Connect GoHighLevel"}</h2></div></div>
+      <p className="modal-intro">Add the private integration token and the sub-account location it belongs to. The form stays open if you switch browser tabs; the token is only sent when you save.</p>
+      {ghlConnected && ghlAccountName && <div className="connected-account"><span/><div><small>CONNECTED LOCATION</small><strong>{ghlAccountName}</strong></div></div>}
+      <form onSubmit={(event) => void connectGhl(event)}>
+        <label className="form-field" htmlFor="ghl-location-id"><span>GoHighLevel location ID</span><input id="ghl-location-id" value={ghlLocationId} onChange={(event) => setGhlLocationId(event.target.value)} placeholder="Sub-account location ID" autoComplete="off" required /></label>
+        <label className="form-field" htmlFor="ghl-private-token"><span>Private integration token</span><div className="secret-input"><KeyRound/><input id="ghl-private-token" value={ghlApiKey} onChange={(event) => setGhlApiKey(event.target.value)} type={showGhlToken ? "text" : "password"} placeholder="Paste your private integration token" autoComplete="off" required /><button type="button" aria-label={showGhlToken ? "Hide token" : "Show token"} onClick={() => setShowGhlToken(!showGhlToken)}>{showGhlToken ? <EyeOff/> : <Eye/>}</button></div><small>Use a private integration token with read access to locations, contacts and opportunities.</small></label>
+        <div className="cost-form-grid ghl-form-grid">
+          <label className="form-field" htmlFor="ghl-source-type"><span>Data to report</span><select id="ghl-source-type" value={ghlSourceType} onChange={(event) => { const source = event.target.value as "opportunities" | "contacts"; setGhlSourceType(source); setGhlMetricLabel(source === "opportunities" ? "Booked calls" : "Qualified leads"); }}><option value="opportunities">Pipeline opportunities</option><option value="contacts">Contacts / leads</option></select></label>
+          <label className="form-field" htmlFor="ghl-metric-label"><span>Cost per event label</span><input id="ghl-metric-label" value={ghlMetricLabel} onChange={(event) => setGhlMetricLabel(event.target.value)} placeholder="Booked calls" maxLength={80} required /></label>
+        </div>
+        <div className="permission-note"><KeyRound/><span>Your token is encrypted in secure storage and is never shown again after saving.</span></div>
+        {connectionError && <div className="connection-error" role="alert">{connectionError}</div>}
+        <div className="modal-actions">{ghlConnected && <button type="button" className="danger-button" disabled={savingConnection} onClick={async () => { setSavingConnection(true); setConnectionError(""); try { const response = await fetch("/api/connections/gohighlevel", { method: "DELETE" }); const payload = await response.json().catch(() => ({})); if (!response.ok) throw new Error(payload.error || "Could not disconnect GoHighLevel"); setGhlConnected(false); setGhlAccountName(""); setGhlApiKey(""); setGhlLocationId(""); setShowGhlSetup(false); } catch (reason) { setConnectionError(reason instanceof Error ? reason.message : "Could not disconnect GoHighLevel"); } finally { setSavingConnection(false); } }}>Disconnect</button>}<button type="button" disabled={savingConnection} onClick={() => setShowGhlSetup(false)}>Cancel</button><button className="primary" type="submit" disabled={savingConnection || !ghlApiKey.trim() || !ghlLocationId.trim() || !ghlMetricLabel.trim()}>{savingConnection ? "Validating and saving…" : ghlConnected ? "Save connection" : "Connect GoHighLevel"}</button></div>
+      </form>
     </section></div>}
   </>;
 }
