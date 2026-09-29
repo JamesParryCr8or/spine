@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDownRight, ArrowUpRight, BarChart3, CircleDollarSign, RefreshCw, Target, Users } from "lucide-react";
+import { ArrowDownRight, BarChart3, CircleDollarSign, RefreshCw, Target, Users } from "lucide-react";
 import { LeadRevenueSummary } from "./lead-revenue-summary";
 import { fetchCachedJson } from "@/lib/analytics/client-response-cache";
 
@@ -11,6 +11,9 @@ type PipelinePayload = {
   pipelines?: Array<{ id: string; name: string; stages: Array<{ id: string; name: string; position: number }> }>;
   pipelineId?: string;
   pipelineName?: string;
+  funnelStages?: { leadStageId: string; bookedCallStageId: string; purchaseStageId: string };
+  journeyCounts?: { leads: number; bookedCalls: number; purchases: number };
+  averageOrderValue?: number | null;
   stages?: Array<{ id: string; name: string; position: number; count: number; pipelineValue: number }>;
   totals?: { openCount: number; wonCount: number; lostCount: number; totalCount: number; openValue: number; wonValue: number; averageWonValue: number | null; winRate: number | null; metaSpend: number; googleSpend: number; totalSpend: number };
   error?: string;
@@ -28,6 +31,8 @@ export function LeadOverview({ range, onOpenConnections, onOpenLeads }: LeadOver
   const [pipelineId, setPipelineId] = useState("");
   const [loading, setLoading] = useState(true);
   const [savingPipeline, setSavingPipeline] = useState(false);
+  const [savingFunnel, setSavingFunnel] = useState(false);
+  const [funnelStages, setFunnelStages] = useState({ leadStageId: "", bookedCallStageId: "", purchaseStageId: "" });
   const [error, setError] = useState("");
   const load = useCallback(async (force = false) => {
     setLoading(true);
@@ -41,13 +46,17 @@ export function LeadOverview({ range, onOpenConnections, onOpenLeads }: LeadOver
       const payload = await fetchCachedJson<PipelinePayload>(url, { force });
       setData(payload);
       if (payload.pipelineId && payload.pipelineId !== pipelineId) setPipelineId(payload.pipelineId);
+      if (payload.funnelStages) setFunnelStages(payload.funnelStages);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not load the sales pipeline");
     } finally {
       setLoading(false);
     }
   }, [range.from, range.to, pipelineId]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timeout);
+  }, [load]);
 
   const changePipeline = async (nextPipelineId: string) => {
     if (!nextPipelineId || nextPipelineId === pipelineId) return;
@@ -69,16 +78,52 @@ export function LeadOverview({ range, onOpenConnections, onOpenLeads }: LeadOver
     }
   };
 
+  const saveFunnelStages = async () => {
+    const stages = data?.stages ?? [];
+    const orderedPositions = [funnelStages.leadStageId, funnelStages.bookedCallStageId, funnelStages.purchaseStageId]
+      .map((id) => stages.find((stage) => stage.id === id)?.position ?? -1);
+    if (orderedPositions.some((position, index) => position < 0 || (index > 0 && position <= orderedPositions[index - 1]))) {
+      setError("Choose three different stages in pipeline order: lead, booked call, then purchase.");
+      return;
+    }
+    setSavingFunnel(true);
+    setError("");
+    try {
+      const response = await fetch("/api/analytics/leads/pipeline", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ funnelStages }),
+      });
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "Could not save the funnel stages");
+      await load(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not save the funnel stages");
+    } finally {
+      setSavingFunnel(false);
+    }
+  };
+
   const format = useMemo(() => new Intl.NumberFormat("en-GB", {
     style: "currency",
     currency: data?.currency || "GBP",
     maximumFractionDigits: 0,
   }), [data?.currency]);
   const totals = data?.totals;
-  const maxStageCount = Math.max(1, ...(data?.stages ?? []).map((stage) => stage.count));
-  const stageValues = data?.stages ?? [];
-  const firstStageCount = stageValues[0]?.count ?? 0;
   const currency = (value: number | null | undefined) => value == null ? "—" : format.format(value);
+  const journeyCounts = data?.journeyCounts ?? { leads: 0, bookedCalls: 0, purchases: 0 };
+  const funnelRows = [
+    { key: "leads", label: "Leads", stageId: funnelStages.leadStageId, count: journeyCounts.leads },
+    { key: "bookedCalls", label: "Booked calls", stageId: funnelStages.bookedCallStageId, count: journeyCounts.bookedCalls },
+    { key: "purchases", label: "Purchases / closes", stageId: funnelStages.purchaseStageId, count: journeyCounts.purchases },
+  ];
+  const maxJourneyCount = Math.max(1, journeyCounts.leads);
+  const aov = data?.averageOrderValue ?? 0;
+  const estimatedRevenue = journeyCounts.purchases * aov;
+  const earningsPerLead = journeyCounts.leads > 0 && aov > 0 ? estimatedRevenue / journeyCounts.leads : null;
+  const leadToBookedRate = journeyCounts.leads > 0 ? journeyCounts.bookedCalls / journeyCounts.leads : null;
+  const bookedToPurchaseRate = journeyCounts.bookedCalls > 0 ? journeyCounts.purchases / journeyCounts.bookedCalls : null;
+  const leadToPurchaseRate = journeyCounts.leads > 0 ? journeyCounts.purchases / journeyCounts.leads : null;
 
   return <section className="lead-overview">
     <LeadRevenueSummary from={range.from} to={range.to}/>
@@ -102,45 +147,50 @@ export function LeadOverview({ range, onOpenConnections, onOpenLeads }: LeadOver
     {!loading && !data?.connection && <div className="connection-notice"><CircleDollarSign/><div><strong>Connect GoHighLevel to see your sales journey</strong><span>Pipeline stages and opportunity performance will appear here after the location is connected.</span></div><button className="primary" onClick={onOpenConnections}>Open Connections</button></div>}
     {!loading && data?.connection && !data.pipelineId && <div className="connection-notice"><Target/><div><strong>No sales pipeline found</strong><span>This GoHighLevel location does not currently have a pipeline available.</span></div><button className="primary" onClick={onOpenLeads}>Lead reporting settings</button></div>}
 
+    {!loading && data?.pipelineId && <section className="panel lead-funnel-config"><div><span className="eyebrow">FUNNEL STAGE MAPPING</span><p>Choose the GHL stage that represents each milestone. Later-stage opportunities count as having reached earlier milestones.</p></div><div className="lead-funnel-selects">{(["leadStageId", "bookedCallStageId", "purchaseStageId"] as const).map((key, index) => <label key={key}>{["Lead stage", "Booked call stage", "Purchase stage"][index]}<select value={funnelStages[key]} disabled={savingFunnel || savingPipeline} onChange={(event) => setFunnelStages((current) => ({ ...current, [key]: event.target.value }))}><option value="">Choose a stage</option>{(data.stages ?? []).map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select></label>)}</div><button className="primary" disabled={savingFunnel || !funnelStages.leadStageId || !funnelStages.bookedCallStageId || !funnelStages.purchaseStageId} onClick={() => void saveFunnelStages()}>{savingFunnel ? "Saving…" : "Save funnel"}</button></section>}
+
     {loading && <div className="panel lead-overview-loading"><RefreshCw className="spin"/><strong>Loading your GoHighLevel sales pipeline…</strong></div>}
     {!loading && data?.pipelineId && totals && <>
       <div className="lead-overview-kpis">
         <article className="metric-card lead-kpi-spend"><div className="metric-label"><i className="lead-kpi-dot meta"/>Meta ad spend</div><strong>{currency(totals.metaSpend)}</strong><div className="metric-foot">{range.label}</div></article>
         <article className="metric-card lead-kpi-spend"><div className="metric-label"><i className="lead-kpi-dot google"/>Google ad spend</div><strong>{currency(totals.googleSpend)}</strong><div className="metric-foot">{range.label}</div></article>
-        <article className="metric-card"><div className="metric-label">Open opportunities</div><strong>{totals.openCount.toLocaleString("en-GB")}</strong><div className="metric-foot">{currency(totals.openValue)} open pipeline value</div></article>
-        <article className="metric-card"><div className="metric-label">Won deals</div><strong>{totals.wonCount.toLocaleString("en-GB")}</strong><div className="metric-foot">{currency(totals.wonValue)} won value</div></article>
-        <article className="metric-card"><div className="metric-label">Win rate</div><strong>{totals.winRate == null ? "—" : `${(totals.winRate * 100).toFixed(1)}%`}</strong><div className="metric-foot">Won ÷ won and lost opportunities</div></article>
-        <article className="metric-card"><div className="metric-label">Cost per first-stage opportunity</div><strong>{stageValues[0]?.count ? currency(totals.totalSpend / stageValues[0].count) : "—"}</strong><div className="metric-foot">{stageValues[0]?.count ?? 0} in “{stageValues[0]?.name ?? "first stage"}”</div></article>
+        <article className="metric-card"><div className="metric-label">Leads</div><strong>{journeyCounts.leads.toLocaleString("en-GB")}</strong><div className="metric-foot">{funnelRows[0].label} milestone reached</div></article>
+        <article className="metric-card"><div className="metric-label">Booked calls</div><strong>{journeyCounts.bookedCalls.toLocaleString("en-GB")}</strong><div className="metric-foot">{leadToBookedRate == null ? "—" : `${(leadToBookedRate * 100).toFixed(1)}%`} of leads</div></article>
+        <article className="metric-card"><div className="metric-label">Purchases / closes</div><strong>{journeyCounts.purchases.toLocaleString("en-GB")}</strong><div className="metric-foot">{leadToPurchaseRate == null ? "—" : `${(leadToPurchaseRate * 100).toFixed(1)}%`} lead close rate</div></article>
+        <article className="metric-card"><div className="metric-label">Cost per lead</div><strong>{journeyCounts.leads ? currency(totals.totalSpend / journeyCounts.leads) : "—"}</strong><div className="metric-foot">Selected-period ad spend ÷ leads</div></article>
+        <article className="metric-card"><div className="metric-label">Earnings per lead</div><strong>{currency(earningsPerLead)}</strong><div className="metric-foot">Estimated using {currency(aov)} average purchase value</div></article>
+        <article className="metric-card"><div className="metric-label">Estimated revenue</div><strong>{aov > 0 ? currency(estimatedRevenue) : "—"}</strong><div className="metric-foot">{aov > 0 ? `${journeyCounts.purchases} purchases × ${currency(aov)} AOV` : "Set an average purchase value in Settings"}</div></article>
       </div>
 
       <section className="panel lead-funnel-panel">
-        <div className="panel-head lead-funnel-heading"><div><span className="eyebrow">LIVE PIPELINE SNAPSHOT</span><h3>{data.pipelineName} stage journey</h3><p>Each bar shows opportunities currently in that stage. Cost per stage divides selected-period Meta and Google spend by the stage volume.</p></div><span className="lead-pipeline-total"><Users/>{totals.totalCount.toLocaleString("en-GB")} opportunities</span></div>
+        <div className="panel-head lead-funnel-heading"><div><span className="eyebrow">GOHIGHLEVEL SALES JOURNEY</span><h3>{data.pipelineName} funnel</h3><p>Milestone totals include opportunities in that stage and any later stage, so volumes and conversion rates follow the sales journey.</p></div><span className="lead-pipeline-total"><Users/>{totals.totalCount.toLocaleString("en-GB")} opportunities reviewed</span></div>
         <div className="lead-funnel-list">
-          {stageValues.map((stage, index) => {
-            const prior = index ? stageValues[index - 1].count : null;
-            const delta = prior === null ? null : prior - stage.count;
-            const stageCost = stage.count ? totals.totalSpend / stage.count : null;
-            const progress = firstStageCount ? Math.min(100, stage.count / firstStageCount * 100) : 0;
-            return <article className="lead-funnel-row" key={stage.id}>
-              <div className="lead-funnel-step"><span>{String(index + 1).padStart(2, "0")}</span><b>{stage.name}</b></div>
-              <div className="lead-funnel-bar-track"><span style={{ width: `${Math.max(stage.count ? 2 : 0, stage.count / maxStageCount * 100)}%` }}/></div>
-              <div className="lead-funnel-count"><strong>{stage.count.toLocaleString("en-GB")}</strong><small>{firstStageCount ? `${progress.toFixed(0)}% of first stage` : "no opportunities"}</small></div>
-              <div className={delta === null ? "lead-funnel-drop first" : delta > 0 ? "lead-funnel-drop" : "lead-funnel-drop gain"}>
-                {delta === null ? <span>Entry stage</span> : delta > 0 ? <><ArrowDownRight/><span>{delta.toLocaleString("en-GB")} fewer<br/><small>{prior ? `${(delta / prior * 100).toFixed(1)}% drop-off` : "—"}</small></span></> : <><ArrowUpRight/><span>{Math.abs(delta).toLocaleString("en-GB")} more<br/><small>vs previous stage</small></span></>}
+          {funnelRows.map((row, index) => {
+            const prior = index ? funnelRows[index - 1].count : null;
+            const lost = prior === null ? null : Math.max(0, prior - row.count);
+            const conversion = prior ? row.count / prior : index === 0 && row.count ? 1 : null;
+            const stage = data.stages?.find((item) => item.id === row.stageId);
+            const stageCost = row.count ? totals.totalSpend / row.count : null;
+            return <article className="lead-funnel-row" key={row.key}>
+              <div className="lead-funnel-step"><span>{String(index + 1).padStart(2, "0")}</span><b>{row.label}</b><small>{stage?.name ?? "Choose a GHL stage"}</small></div>
+              <div className="lead-funnel-bar-track"><span style={{ width: `${Math.max(row.count ? 2 : 0, row.count / maxJourneyCount * 100)}%` }}/></div>
+              <div className="lead-funnel-count"><strong>{row.count.toLocaleString("en-GB")}</strong><small>{journeyCounts.leads ? `${(row.count / journeyCounts.leads * 100).toFixed(1)}% of leads` : "no opportunities"}</small></div>
+              <div className={index === 0 ? "lead-funnel-drop first" : "lead-funnel-drop"}>
+                {index === 0 ? <span>Funnel entry</span> : <><ArrowDownRight/><span>{lost!.toLocaleString("en-GB")} drop-off<br/><small>{conversion == null ? "—" : `${(conversion * 100).toFixed(1)}% conversion`}</small></span></>}
               </div>
-              <div className="lead-funnel-cost"><small>Cost / stage</small><strong>{currency(stageCost)}</strong></div>
-              <div className="lead-funnel-value"><small>Pipeline value</small><strong>{currency(stage.pipelineValue)}</strong></div>
+              <div className="lead-funnel-cost"><small>Cost / event</small><strong>{currency(stageCost)}</strong></div>
+              <div className="lead-funnel-value"><small>{index === 2 ? "Est. sales value" : "Pipeline value"}</small><strong>{index === 2 && aov > 0 ? currency(row.count * aov) : currency(stage?.pipelineValue)}</strong></div>
             </article>;
           })}
         </div>
-        {!stageValues.length && <div className="lead-funnel-empty"><BarChart3/><strong>This pipeline has no stages to report</strong></div>}
-        <p className="lead-funnel-footnote">Stage counts are a live snapshot of current opportunities, not a historical stage-transition cohort. Cost per stage is blended paid-media spend divided by the current volume in that stage.</p>
+        {!data.stages?.length && <div className="lead-funnel-empty"><BarChart3/><strong>This pipeline has no stages to report</strong></div>}
+        <p className="lead-funnel-footnote">Counts show opportunities that have reached each selected milestone, inferred from their current GHL stage. Spend is for the selected reporting period. Estimated sales and earnings use the average purchase value saved in Settings.</p>
       </section>
 
       <div className="lead-overview-bottom">
         <article className="panel lead-overview-stat"><span className="eyebrow">PIPELINE VALUE</span><strong>{currency(totals.openValue)}</strong><p>Potential value across open opportunities in this pipeline.</p></article>
-        <article className="panel lead-overview-stat"><span className="eyebrow">AVERAGE WON DEAL</span><strong>{currency(totals.averageWonValue)}</strong><p>Average monetary value of won opportunities.</p></article>
-        <article className="panel lead-overview-stat"><span className="eyebrow">LOST OPPORTUNITIES</span><strong>{totals.lostCount.toLocaleString("en-GB")}</strong><p>Marked lost or abandoned in GoHighLevel.</p></article>
+        <article className="panel lead-overview-stat"><span className="eyebrow">LEAD-TO-BOOKED</span><strong>{leadToBookedRate == null ? "—" : `${(leadToBookedRate * 100).toFixed(1)}%`}</strong><p>Booked call rate from lead milestone.</p></article>
+        <article className="panel lead-overview-stat"><span className="eyebrow">BOOKED-TO-PURCHASE</span><strong>{bookedToPurchaseRate == null ? "—" : `${(bookedToPurchaseRate * 100).toFixed(1)}%`}</strong><p>Close rate from booked calls. {totals.lostCount.toLocaleString("en-GB")} opportunities marked lost.</p></article>
       </div>
     </>}
   </section>;

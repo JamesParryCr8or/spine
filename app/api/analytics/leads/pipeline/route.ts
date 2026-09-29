@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 import { requireWorkspace } from "@/lib/workspace/server";
+import { calculateJourneyCounts } from "@/lib/analytics/lead-funnel";
 
 export const maxDuration = 60;
 
@@ -25,9 +26,12 @@ async function ghlContext(storeId: string) {
   return { token: token as string, base: "https://services.leadconnectorhq.com" };
 }
 
-function parseSelection(value: string | null) {
-  if (!value) return {} as { defaultPipelineId?: string; selections?: Array<{ pipelineId?: string }>; includeLaterStages?: boolean };
-  try { return JSON.parse(value) as { defaultPipelineId?: string; selections?: Array<{ pipelineId?: string }>; includeLaterStages?: boolean }; }
+type FunnelStageMap = { leadStageId?: string; bookedCallStageId?: string; purchaseStageId?: string };
+type ReportingSelection = { defaultPipelineId?: string; selections?: Array<{ pipelineId?: string }>; includeLaterStages?: boolean; funnelStages?: FunnelStageMap; averageOrderValue?: number };
+
+function parseSelection(value: string | null): ReportingSelection {
+  if (!value) return {};
+  try { return JSON.parse(value) as ReportingSelection; }
   catch { return {}; }
 }
 
@@ -87,6 +91,16 @@ export async function GET(request: Request) {
       : fallbackPipelineId;
     const pipeline = pipelines.find((item) => item.id === pipelineId);
     if (!pipeline) return NextResponse.json({ error: "No sales pipeline is configured for this GoHighLevel location", pipelines, connection }, { status: 200 });
+    const stageIds = new Set(pipeline.stages.map((stage) => stage.id));
+    const savedFunnel = selection.funnelStages;
+    const inferredLead = pipeline.stages[0]?.id ?? "";
+    const inferredBooked = pipeline.stages.find((stage) => /book|call|appointment|demo|consult/i.test(stage.name))?.id ?? pipeline.stages[Math.min(1, pipeline.stages.length - 1)]?.id ?? "";
+    const inferredPurchase = pipeline.stages.find((stage) => /purchase|won|closed|sale/i.test(stage.name))?.id ?? pipeline.stages[pipeline.stages.length - 1]?.id ?? "";
+    const funnelStages = {
+      leadStageId: savedFunnel?.leadStageId && stageIds.has(savedFunnel.leadStageId) ? savedFunnel.leadStageId : inferredLead,
+      bookedCallStageId: savedFunnel?.bookedCallStageId && stageIds.has(savedFunnel.bookedCallStageId) ? savedFunnel.bookedCallStageId : inferredBooked,
+      purchaseStageId: savedFunnel?.purchaseStageId && stageIds.has(savedFunnel.purchaseStageId) ? savedFunnel.purchaseStageId : inferredPurchase,
+    };
 
     const headers = { Authorization: `Bearer ${token}`, Version: "v3", Accept: "application/json" };
     const opportunities: Opportunity[] = [];
@@ -161,6 +175,8 @@ export async function GET(request: Request) {
       count: stageCounts.get(stage.id) ?? 0,
       pipelineValue: stageValues.get(stage.id) ?? 0,
     }));
+    const stagePositions = new Map(pipeline.stages.map((stage, index) => [stage.id, index]));
+    const journeyCounts = calculateJourneyCounts(opportunities, stagePositions, funnelStages);
     return NextResponse.json({
       connection: { name: connection.external_account_name, status: connection.status },
       currency: store.currency,
@@ -168,6 +184,9 @@ export async function GET(request: Request) {
       pipelineId,
       pipelineName: pipeline.name,
       stages,
+      funnelStages,
+      journeyCounts,
+      averageOrderValue: Number(selection.averageOrderValue) > 0 ? Number(selection.averageOrderValue) : null,
       ...(details ? { opportunities: opportunities.map((opportunity) => ({
         id: opportunity.id, name: opportunity.name, pipelineStageId: opportunity.pipelineStageId,
         status: opportunity.status, monetaryValue: opportunity.monetaryValue, source: opportunity.source,
@@ -196,15 +215,24 @@ export async function PATCH(request: Request) {
   if (!workspace.ok) return workspace.response;
   if (!workspace.store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
   if (!["owner", "admin"].includes(workspace.membership.role)) return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
-  const body = await request.json().catch(() => ({})) as { pipelineId?: string };
+  const body = await request.json().catch(() => ({})) as { pipelineId?: string; funnelStages?: FunnelStageMap };
   const pipelineId = body.pipelineId?.trim();
-  if (!pipelineId) return NextResponse.json({ error: "Choose a GoHighLevel sales pipeline" }, { status: 400 });
+  if (!pipelineId && !body.funnelStages) return NextResponse.json({ error: "Choose a pipeline or funnel stages to save" }, { status: 400 });
 
   const { data: existing, error: readError } = await workspace.supabase.from("gohighlevel_reporting_configs")
     .select("selection_id").eq("store_id", workspace.store.id).maybeSingle();
   if (readError) return NextResponse.json({ error: readError.message }, { status: 500 });
   const selection = parseSelection(existing?.selection_id ?? null);
-  const nextSelection = JSON.stringify({ ...selection, defaultPipelineId: pipelineId });
+  if (body.funnelStages) {
+    const values = [body.funnelStages.leadStageId, body.funnelStages.bookedCallStageId, body.funnelStages.purchaseStageId];
+    if (values.some((value) => typeof value !== "string" || !value.trim())) return NextResponse.json({ error: "Choose a GoHighLevel stage for leads, booked calls and purchases" }, { status: 400 });
+    selection.funnelStages = {
+      leadStageId: body.funnelStages.leadStageId!.trim(),
+      bookedCallStageId: body.funnelStages.bookedCallStageId!.trim(),
+      purchaseStageId: body.funnelStages.purchaseStageId!.trim(),
+    };
+  }
+  const nextSelection = JSON.stringify({ ...selection, ...(pipelineId ? { defaultPipelineId: pipelineId } : {}) });
   const { error } = await workspace.supabase.from("gohighlevel_reporting_configs").update({
     selection_id: nextSelection,
     updated_by: workspace.userId,
