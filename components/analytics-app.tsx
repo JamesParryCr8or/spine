@@ -1496,7 +1496,8 @@ type LeadDashboardData = {
   connection: { status: string; external_account_name: string | null } | null;
   config: { source_type: "contacts" | "opportunities"; metric_label: string; selection_name: string | null } | null;
   totals: { metaSpend: number; googleSpend: number; totalSpend: number; conversions: number; costPerConversion: number | null };
-  points: Array<{ date: string; metaSpend: number; googleSpend: number; conversions: number }>;
+  stageSeries: Array<{ id: string; label: string }>;
+  points: Array<{ date: string; metaSpend: number; googleSpend: number; conversions: number; stageConversions?: Record<string, number> }>;
 };
 
 function groupLeadPoints(points: LeadDashboardData["points"], granularity: ReportingGranularity) {
@@ -1509,19 +1510,29 @@ function groupLeadPoints(points: LeadDashboardData["points"], granularity: Repor
     if (granularity === "monthly") key = `${point.date.slice(0, 7)}-01`;
     if (granularity === "quarterly") key = `${point.date.slice(0, 4)}-Q${Math.floor(date.getUTCMonth() / 3) + 1}`;
     if (granularity === "annual") key = point.date.slice(0, 4);
-    const current = grouped.get(key) ?? { date: key, metaSpend: 0, googleSpend: 0, conversions: 0 };
+    const current = grouped.get(key) ?? { date: key, metaSpend: 0, googleSpend: 0, conversions: 0, stageConversions: {} };
     current.metaSpend += point.metaSpend; current.googleSpend += point.googleSpend; current.conversions += point.conversions; grouped.set(key, current);
+    for (const [stageId, count] of Object.entries(point.stageConversions ?? {})) {
+      current.stageConversions![stageId] = (current.stageConversions![stageId] ?? 0) + count;
+    }
   }
   return [...grouped.values()].sort((left, right) => left.date.localeCompare(right.date));
 }
 
-function LeadPerformanceChart({ points, currency, label }: { points: LeadDashboardData["points"]; currency: string; label: string }) {
+function LeadPerformanceChart({ points, currency, label, stageSeries }: { points: LeadDashboardData["points"]; currency: string; label: string; stageSeries: LeadDashboardData["stageSeries"] }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const width = 860, height = 300, left = 54, right = 64, top = 18, bottom = 42;
   const spend = points.map((point) => point.metaSpend + point.googleSpend);
   const maxSpend = Math.max(1, ...spend);
-  const costPerEvent = points.map((point) => point.conversions > 0 ? (point.metaSpend + point.googleSpend) / point.conversions : null);
-  const maxCost = Math.max(1, ...costPerEvent.filter((value): value is number => value !== null));
+  const lines = (stageSeries.length ? stageSeries : [{ id: "aggregate", label: `Cost per ${label.toLowerCase()}` }]).map((series) => ({
+    ...series,
+    color: ["#14b87a", "#e16b42", "#8c62d9", "#d3a21b", "#258fc0", "#db5c83"][stageSeries.findIndex((item) => item.id === series.id) % 6] || "#14b87a",
+    values: points.map((point) => {
+      const conversions = series.id === "aggregate" ? point.conversions : point.stageConversions?.[series.id] ?? 0;
+      return conversions > 0 ? (point.metaSpend + point.googleSpend) / conversions : null;
+    }),
+  }));
+  const maxCost = Math.max(1, ...lines.flatMap((line) => line.values.filter((value): value is number => value !== null)));
   const chartWidth = width - left - right, chartHeight = height - top - bottom;
   const pointWidth = chartWidth / Math.max(points.length, 1);
   const x = (index: number) => left + pointWidth * (index + .5);
@@ -1529,28 +1540,28 @@ function LeadPerformanceChart({ points, currency, label }: { points: LeadDashboa
   const costY = (value: number) => top + chartHeight - (value / maxCost) * chartHeight;
   const format = new Intl.NumberFormat("en-GB", { style: "currency", currency, maximumFractionDigits: 0 });
   const selected = hovered === null ? null : points[hovered];
-  const costSegments: string[] = [];
-  let segment: string[] = [];
-  costPerEvent.forEach((value, index) => {
-    if (value === null) {
-      if (segment.length) costSegments.push(segment.join(" "));
-      segment = [];
-    } else segment.push(`${x(index)},${costY(value)}`);
+  const lineSegments = lines.map((line) => {
+    const segments: string[] = []; let segment: string[] = [];
+    line.values.forEach((value, index) => {
+      if (value === null) { if (segment.length) segments.push(segment.join(" ")); segment = []; }
+      else segment.push(`${x(index)},${costY(value)}`);
+    });
+    if (segment.length) segments.push(segment.join(" "));
+    return { ...line, segments };
   });
-  if (segment.length) costSegments.push(segment.join(" "));
   const ticks = [0, .25, .5, .75, 1];
   return <div className="lead-chart-wrap">
-    <div className="lead-chart-legend"><span><i className="lead-key meta"/>Meta spend</span><span><i className="lead-key google"/>Google spend</span><span><i className="lead-key result"/>Cost per {label.toLowerCase()}</span></div>
+    <div className="lead-chart-legend"><span><i className="lead-key meta"/>Meta spend</span><span><i className="lead-key google"/>Google spend</span>{lines.map((line) => <span key={line.id}><i className="lead-key result" style={{ backgroundColor: line.color }}/>{stageSeries.length ? line.label : `Cost per ${label.toLowerCase()}`}</span>)}</div>
     <div className="lead-chart" role="img" aria-label={`Marketing spend and cost per selected ${label}s across the selected reporting period`}>
       <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
         {ticks.map((tick) => { const y = top + chartHeight - tick * chartHeight; return <g key={tick}><line className="lead-gridline" x1={left} x2={width-right} y1={y} y2={y}/><text className="lead-axis-label" x={left-10} y={y+4} textAnchor="end">{format.format(maxSpend*tick)}</text><text className="lead-axis-label" x={width-right+10} y={y+4}>{format.format(maxCost*tick)}</text></g>; })}
         <line className="lead-axis" x1={left} x2={width-right} y1={top+chartHeight} y2={top+chartHeight}/>
-        {points.map((point, index) => { const barWidth = Math.max(1, Math.min(34, pointWidth * .64)); const googleH = (point.googleSpend/maxSpend)*chartHeight; const metaH = (point.metaSpend/maxSpend)*chartHeight; const base = top+chartHeight; return <g key={point.date} onMouseEnter={() => setHovered(index)} onMouseLeave={() => setHovered(null)} className="lead-chart-point"><rect className="lead-hover-target" x={x(index)-pointWidth/2} y={top} width={pointWidth} height={chartHeight}/><rect className="lead-google-bar" x={x(index)-barWidth/2} y={base-googleH} width={barWidth} height={googleH}/><rect className="lead-meta-bar" x={x(index)-barWidth/2} y={base-googleH-metaH} width={barWidth} height={metaH}/><text className="lead-x-label" x={x(index)} y={height-14} textAnchor="middle">{(index % labelEvery === 0 || index === points.length - 1) ? point.date.slice(5) : ""}</text>{hovered === index && costPerEvent[index] !== null && <circle className="lead-result-dot active" cx={x(index)} cy={costY(costPerEvent[index]!)} r="5"/>}</g>; })}
-        {costSegments.map((segmentPoints, index) => <polyline key={index} className="lead-results-line" points={segmentPoints}/>)}
-        {costPerEvent.map((value, index) => value === null ? null : <circle key={`dot-${points[index].date}`} className="lead-result-dot" cx={x(index)} cy={costY(value)} r="3"/>)}
+        {points.map((point, index) => { const barWidth = Math.max(1, Math.min(34, pointWidth * .64)); const googleH = (point.googleSpend/maxSpend)*chartHeight; const metaH = (point.metaSpend/maxSpend)*chartHeight; const base = top+chartHeight; return <g key={point.date} onMouseEnter={() => setHovered(index)} onMouseLeave={() => setHovered(null)} className="lead-chart-point"><rect className="lead-hover-target" x={x(index)-pointWidth/2} y={top} width={pointWidth} height={chartHeight}/><rect className="lead-google-bar" x={x(index)-barWidth/2} y={base-googleH} width={barWidth} height={googleH}/><rect className="lead-meta-bar" x={x(index)-barWidth/2} y={base-googleH-metaH} width={barWidth} height={metaH}/><text className="lead-x-label" x={x(index)} y={height-14} textAnchor="middle">{(index % labelEvery === 0 || index === points.length - 1) ? point.date.slice(5) : ""}</text></g>; })}
+        {lineSegments.flatMap((line) => line.segments.map((segmentPoints, index) => <polyline key={`${line.id}-${index}`} className="lead-results-line" points={segmentPoints} style={{ stroke: line.color }}/>))}
+        {lineSegments.flatMap((line) => line.values.map((value, index) => value === null ? null : <circle key={`${line.id}-${points[index].date}`} className={`lead-result-dot${hovered === index ? " active" : ""}`} cx={x(index)} cy={costY(value)} r={hovered === index ? "5" : "3"} style={{ stroke: line.color, ...(hovered === index ? { fill: line.color } : {}) }}/>))}
         <text className="lead-axis-title" x={left} y={12}>Spend</text><text className="lead-axis-title" x={width-right} y={12} textAnchor="end">Cost / event</text>
       </svg>
-      {selected && <div className="lead-tooltip" style={{ left: `${Math.max(12, Math.min(88, ((x(hovered!) - left) / chartWidth) * 100))}%` }}><strong>{selected.date}</strong><span>Meta: {format.format(selected.metaSpend)}</span><span>Google: {format.format(selected.googleSpend)}</span><span>Spend: {format.format(selected.metaSpend+selected.googleSpend)}</span><b>{selected.conversions.toLocaleString("en-GB")} {label}{selected.conversions === 1 ? "" : "s"}</b><b>Cost per event: {costPerEvent[hovered!] === null ? "—" : format.format(costPerEvent[hovered!]!)}</b></div>}
+      {selected && <div className="lead-tooltip" style={{ left: `${Math.max(12, Math.min(88, ((x(hovered!) - left) / chartWidth) * 100))}%` }}><strong>{selected.date}</strong><span>Meta: {format.format(selected.metaSpend)}</span><span>Google: {format.format(selected.googleSpend)}</span><span>Spend: {format.format(selected.metaSpend+selected.googleSpend)}</span><b>{selected.conversions.toLocaleString("en-GB")} selected events</b>{lineSegments.map((line) => { const count = line.id === "aggregate" ? selected.conversions : selected.stageConversions?.[line.id] ?? 0; const value = line.values[hovered!]; return <b key={line.id} style={{ color: line.color }}>{line.id === "aggregate" ? `Cost per ${label.toLowerCase()}` : line.label}: {count} · {value === null ? "—" : format.format(value)}</b>; })}</div>}
     </div>
   </div>;
 }
@@ -1617,7 +1628,7 @@ function Leads({ onOpenConnections, range, onRangeChange }: { onOpenConnections:
       <article className="metric-card"><div className="metric-label">Total marketing cost</div><strong>{format.format(data?.totals.totalSpend ?? 0)}</strong><div className="metric-foot">Meta + Google</div></article>
       <article className="metric-card"><div className="metric-label">Cost per event</div><strong>{data?.totals.costPerConversion === null || data?.totals.costPerConversion === undefined ? "—" : format.format(data.totals.costPerConversion)}</strong><div className="metric-foot">{data?.totals.conversions ?? 0} {configLabel}{(data?.totals.conversions ?? 0) === 1 ? "" : "s"} imported</div></article>
     </div>
-    <section className="panel lead-trend-panel"><div className="panel-head"><div><span className="eyebrow">TREND</span><h3>Spend and selected-stage events</h3><p className="lead-chart-description">Paid-media spend on the left axis and cost per selected GoHighLevel event on the right. Choose day, week or month grouping above.</p></div><div className="lead-selection"><span>{data?.config?.selection_name || data?.connection?.external_account_name || "GoHighLevel"}</span>{data?.connection && <button className="filter-button" onClick={() => void choosePipelineStage()} disabled={choosingStage}>{choosingStage ? "Loading…" : "Choose pipeline stage"}</button>}</div></div>{loading ? <div className="cost-empty"><RefreshCw className="spin"/><strong>Loading lead performance…</strong></div> : chartPoints.length ? <LeadPerformanceChart points={chartPoints} currency={data?.currency || "GBP"} label={configLabel} /> : <div className="cost-empty"><BarChart3/><strong>No reporting data has been imported yet</strong><span>Your GoHighLevel connection is saved. Choose a pipeline stage above, then refresh to import its opportunity events.</span></div>}</section>
+    <section className="panel lead-trend-panel"><div className="panel-head"><div><span className="eyebrow">TREND</span><h3>Spend and selected-stage events</h3><p className="lead-chart-description">Paid-media spend on the left axis and cost per selected GoHighLevel stage on the right. Choose day, week or month grouping above.</p></div><div className="lead-selection"><span>{data?.config?.selection_name || data?.connection?.external_account_name || "GoHighLevel"}</span>{data?.connection && <button className="filter-button" onClick={() => void choosePipelineStage()} disabled={choosingStage}>{choosingStage ? "Loading…" : "Choose pipeline stage"}</button>}</div></div>{loading ? <div className="cost-empty"><RefreshCw className="spin"/><strong>Loading lead performance…</strong></div> : chartPoints.length ? <LeadPerformanceChart points={chartPoints} currency={data?.currency || "GBP"} label={configLabel} stageSeries={data?.stageSeries ?? []} /> : <div className="cost-empty"><BarChart3/><strong>No reporting data has been imported yet</strong><span>Your GoHighLevel connection is saved. Choose a pipeline stage above, then refresh to import its opportunity events.</span></div>}</section>
     {!loading && chartPoints.length ? <section className="panel lead-event-table"><div className="panel-head"><div><span className="eyebrow">SELECTED STAGE</span><h3>{configLabel} events and cost</h3><p>Current opportunities in the selected stage, plus later stages if enabled, grouped by GoHighLevel’s last stage-change date. Records without that date use their created date.</p></div></div><div className="table-scroll"><table className="data-table"><thead><tr><th>Period</th><th>Meta spend</th><th>Google spend</th><th>Total spend</th><th>Selected-stage events</th><th>Cost per event</th></tr></thead><tbody>{chartPoints.map((point) => { const spend = point.metaSpend + point.googleSpend; return <tr key={point.date}><td>{point.date}</td><td>{format.format(point.metaSpend)}</td><td>{format.format(point.googleSpend)}</td><td><strong>{format.format(spend)}</strong></td><td>{point.conversions.toLocaleString("en-GB")}</td><td>{point.conversions ? format.format(spend / point.conversions) : "—"}</td></tr>; })}</tbody></table></div></section> : null}
     {!loading && chartPoints.length ? <section className="lead-insights-grid">
       <article className="panel lead-insight"><span className="eyebrow">CHANNEL MIX</span><h3>Paid media spend</h3><div className="lead-split"><span style={{width: `${Math.max(4, ((data?.totals.metaSpend ?? 0) / Math.max(1, data?.totals.totalSpend ?? 0))*100)}%`}}/><i style={{width: `${Math.max(0, ((data?.totals.googleSpend ?? 0) / Math.max(1, data?.totals.totalSpend ?? 0))*100)}%`}}/></div><div className="lead-insight-values"><span>Meta <b>{format.format(data?.totals.metaSpend ?? 0)}</b></span><span>Google <b>{format.format(data?.totals.googleSpend ?? 0)}</b></span></div></article>

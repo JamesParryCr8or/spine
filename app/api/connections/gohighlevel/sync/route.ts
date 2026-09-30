@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 import { requireWorkspace } from "@/lib/workspace/server";
+import { getReachedPipelineStages } from "@/lib/analytics/gohighlevel-stage-series";
 
 export const maxDuration = 60;
 
-type StageSelection = { pipelineId: string; stageId: string; position: number };
+type StageSelection = { pipelineId: string; pipelineName?: string; stageId: string; stageName?: string; position: number };
 type Pipeline = { id?: string; stages?: Array<{ id?: string; position?: number }> };
 type Opportunity = { pipelineId?: string; pipelineStageId?: string; createdAt?: string; lastStageChangeAt?: string };
 type OpportunityPage = { opportunities?: Opportunity[]; meta?: { total?: number; nextPage?: number | null; startAfter?: number | null; startAfterId?: string | null }; message?: string; error?: string };
@@ -59,6 +60,7 @@ export async function POST() {
   for (const selection of selections) selectionsByPipeline.set(selection.pipelineId, [...(selectionsByPipeline.get(selection.pipelineId) ?? []), selection]);
 
   const counts = new Map<string, number>();
+  const stageCounts = new Map<string, number>();
   let importedOpportunities = 0;
   for (const [pipelineId, pipelineSelections] of selectionsByPipeline) {
     let page = 1;
@@ -81,17 +83,18 @@ export async function POST() {
       const opportunities = payload.opportunities ?? [];
       fetched += opportunities.length;
       const positions = stagePositions.get(pipelineId);
-      const selectedPositions = pipelineSelections.map((item) => item.position).filter(Number.isFinite);
-      const firstSelectedPosition = selectedPositions.length ? Math.min(...selectedPositions) : 0;
       for (const opportunity of opportunities) {
         if (opportunity.pipelineId !== pipelineId || !opportunity.pipelineStageId) continue;
-        const selectedExact = pipelineSelections.some((item) => item.stageId === opportunity.pipelineStageId);
         const currentPosition = positions?.get(opportunity.pipelineStageId);
-        const progressedPastSelection = parsed.includeLaterStages !== false && currentPosition !== undefined && currentPosition >= firstSelectedPosition;
-        if (!selectedExact && !progressedPastSelection) continue;
+        const reachedSelections = getReachedPipelineStages(pipelineId, opportunity.pipelineStageId, currentPosition, pipelineSelections, parsed.includeLaterStages !== false);
+        if (!reachedSelections.length) continue;
         const eventDate = (opportunity.lastStageChangeAt ?? opportunity.createdAt ?? "").slice(0, 10);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDate)) continue;
         counts.set(eventDate, (counts.get(eventDate) ?? 0) + 1);
+        for (const selection of reachedSelections) {
+          const key = `${eventDate}|stage:${selection.pipelineId}:${selection.stageId}`;
+          stageCounts.set(key, (stageCounts.get(key) ?? 0) + 1);
+        }
         importedOpportunities += 1;
       }
 
@@ -117,6 +120,18 @@ export async function POST() {
     metric_label: config.metric_label,
     lead_count,
     synced_at: new Date().toISOString(),
+  })).concat([...stageCounts].map(([key, lead_count]) => {
+    const separator = key.indexOf("|");
+    return {
+      organization_id: workspace.membership.organizationId,
+      store_id: store.id,
+      metric_date: key.slice(0, separator),
+      source_type: "opportunities",
+      selection_id: config.selection_id,
+      metric_label: key.slice(separator + 1),
+      lead_count,
+      synced_at: new Date().toISOString(),
+    };
   }));
   if (rows.length) {
     const { error } = await supabase.from("gohighlevel_leads_daily").upsert(rows, { onConflict: "store_id,metric_date,source_type,metric_label" });

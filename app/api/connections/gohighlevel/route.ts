@@ -80,7 +80,7 @@ export async function PATCH(request: Request) {
     defaultPipelineId = parsed.defaultPipelineId;
   } catch { /* Older stage selections have no saved default pipeline. */ }
   const selectionId = JSON.stringify({
-    selections: selections.map((selection) => ({ pipelineId: selection.pipelineId!.trim(), stageId: selection.stageId!.trim(), position: Number(selection.position) || 0 })),
+    selections: selections.map((selection) => ({ pipelineId: selection.pipelineId!.trim(), pipelineName: selection.pipelineName!.trim(), stageId: selection.stageId!.trim(), stageName: selection.stageName!.trim(), position: Number(selection.position) || 0 })),
     includeLaterStages: body.includeLaterStages !== false,
     ...(defaultPipelineId ? { defaultPipelineId } : {}),
   });
