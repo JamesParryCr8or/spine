@@ -344,7 +344,7 @@ export async function GET(request: Request) {
   const netProfitAvailable = transactionFeesComplete && marketingSpendAvailable && shippingCostsAvailable && handlingCostsAvailable && missingCostLines === 0 && unallocatedOperatingCosts === 0;
   const calculated = calculateProfitAndLoss({ ...totals, refunds, cogs, marketingSpend, transactionFees, merchantShippingCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, complete: netProfitAvailable });
   const { data: microsoftConnection } = await supabase.from("data_connections")
-    .select("last_error").eq("store_id", store.id).eq("provider", "bing_ads").maybeSingle();
+    .select("status,last_error").eq("store_id", store.id).eq("provider", "bing_ads").maybeSingle();
 
   return NextResponse.json({
     hasData: shopifyDaily.length > 0 || includedOrders.length > 0,
@@ -357,7 +357,7 @@ export async function GET(request: Request) {
     calculatedAt: new Date().toISOString(),
     metrics: { ...totals, refunds, cogs, ...calculated, marketingSpend, metaMarketingSpend, googleMarketingSpend, bingMarketingSpend, transactionFees, merchantShippingCosts, variantShippingCosts, shippingFallbackCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, orders: shopifyDaily.length ? shopifyDaily.reduce((total, day) => total + day.orders, 0) : includedOrders.length, unitsSold: dailyUnitCount || totalOrderUnits, missingCostLines, missingShippingLines: shippingCoverage.missingLines, shippingOverrideLines: shippingCoverage.overrideLines, shippingFallbackLines: shippingCoverage.fallbackLines, shippingFallbackRate: shippingCoverage.fallbackRate, unallocatedOperatingCosts },
     period: rangeStart && rangeEnd ? { start: rangeStart, end: rangeEnd } : null,
-    availability: { marketingSpend: marketingSpendAvailable, metaMarketingSpend: metaInsights.length > 0, googleMarketingSpend: googleInsights.length > 0, bingMarketingSpend: bingInsights.length > 0, transactionFees: transactionFeesAvailable, transactionFeesComplete, shippingCosts: shippingCostsAvailable, handlingCosts: handlingCostsAvailable, operatingExpenses: true, netProfit: netProfitAvailable },
+    availability: { marketingSpend: marketingSpendAvailable, metaMarketingSpend: metaInsights.length > 0, googleMarketingSpend: googleInsights.length > 0, bingMarketingSpend: bingInsights.length > 0 || (microsoftConnection?.status === "connected" && !microsoftConnection.last_error), transactionFees: transactionFeesAvailable, transactionFeesComplete, shippingCosts: shippingCostsAvailable, handlingCosts: handlingCostsAvailable, operatingExpenses: true, netProfit: netProfitAvailable },
   });
 }
 
