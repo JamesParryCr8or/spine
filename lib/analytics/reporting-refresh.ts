@@ -302,7 +302,9 @@ export async function refreshMicrosoftAdsReporting(supabase: SupabaseClient, sto
     const imported = await refreshBing(supabase, store, from, to);
     if (imported) await supabase.from("data_connections").update({ last_error: null }).eq("store_id", store.id).eq("provider", "bing_ads");
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Microsoft Advertising spend could not be imported";
+    const message = error instanceof Error ? error.message
+      : error && typeof error === "object" && "message" in error && typeof error.message === "string" ? error.message
+      : "Microsoft Advertising spend could not be imported";
     await supabase.from("data_connections").update({ last_error: message }).eq("store_id", store.id).eq("provider", "bing_ads");
     throw error;
   }
