@@ -321,6 +321,9 @@ button { cursor:pointer; }
   min-width:132px;text-align:right
 }
 .pnl-table.period-table .indent{display:block;padding-left:0}
+.pnl-row-title{position:relative;display:inline-flex;align-items:center;gap:6px;cursor:help;text-decoration:underline;text-decoration-style:dotted;text-decoration-color:#aeb5c4;text-underline-offset:3px}
+.pnl-row-title:focus-visible{outline:2px solid #7260ee;outline-offset:3px;border-radius:3px}
+.pnl-row-help{display:inline-grid;place-items:center;width:13px;height:13px;border:1px solid #b9bfd0;border-radius:50%;color:#6e7890;font-size:9px;font-weight:800;line-height:1;text-decoration:none}
 .pnl-table.period-table .pnl-section td{text-align:left}
 .pnl-kpi-table .pnl-section td{padding:11px 16px!important;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:#363f52}
 
