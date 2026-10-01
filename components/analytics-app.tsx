@@ -395,19 +395,29 @@ function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId?: stri
     const controller = new AbortController();
     const timeout = window.setTimeout(() => {
       if (!pnlSummary?.period || !pnlSummary.hasData) { setTrendData([]); return; }
-      const periods = reportingPeriods(pnlSummary.period.start, pnlSummary.period.end, granularity, granularity === "daily" ? 31 : 60);
+      const periodStart = fromDate || pnlSummary.period.start;
+      const periodEnd = toDate || pnlSummary.period.end;
+      const dailyDays = Math.floor((Date.parse(periodEnd + "T00:00:00Z") - Date.parse(periodStart + "T00:00:00Z")) / 86400000) + 1;
+      const periods = reportingPeriods(periodStart, periodEnd, granularity, granularity === "daily" ? Math.max(dailyDays, 1) : 60);
       setTrendLoading(true);
-      Promise.all(periods.map(async (period) => {
-        if (period.start === pnlSummary.period?.start && period.end === pnlSummary.period?.end) return { period, data: pnlSummary };
-        const response = await fetch(`/api/analytics/pnl?from=${period.start}&to=${period.end}`, { signal: controller.signal });
-        return response.ok ? { period, data: await response.json() as PnlData } : null;
-      }))
-        .then((results) => setTrendData(results.filter((result): result is PnlPeriodData => result !== null)))
+      void (async () => {
+        const results: Array<PnlPeriodData | null> = [];
+        for (let index = 0; index < periods.length; index += 12) {
+          const batch = await Promise.all(periods.slice(index, index + 12).map(async (period) => {
+            if (period.start === pnlSummary.period?.start && period.end === pnlSummary.period?.end) return { period, data: pnlSummary };
+            const response = await fetch("/api/analytics/pnl?from=" + period.start + "&to=" + period.end + "&refresh=0", { signal: controller.signal });
+            return response.ok ? { period, data: await response.json() as PnlData } : null;
+          }));
+          if (controller.signal.aborted) return;
+          results.push(...batch);
+          setTrendData(results.filter((result): result is PnlPeriodData => result !== null));
+        }
+      })()
         .catch((error) => { if (error instanceof Error && error.name !== "AbortError") setTrendData([]); })
         .finally(() => { if (!controller.signal.aborted) setTrendLoading(false); });
     }, 0);
     return () => { window.clearTimeout(timeout); controller.abort(); };
-  }, [granularity, pnlSummary]);
+  }, [fromDate, toDate, granularity, pnlSummary]);
 
   const hasLiveData = Boolean(liveData?.hasData);
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: liveData?.currency || "GBP", maximumFractionDigits: 0 });
