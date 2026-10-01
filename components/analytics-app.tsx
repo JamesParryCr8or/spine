@@ -655,7 +655,7 @@ const pnlRowDescriptions: Record<string, string> = {
 function PnlRowTitle({ label }: { label: string }) {
   const baseLabel = label.replace(/\s*\([^)]*\)$/, "");
   const description = pnlRowDescriptions[label] ?? pnlRowDescriptions[baseLabel] ?? "This row shows the selected metric for the reporting period. See Metric definitions for calculation and coverage details.";
-  return <span className="pnl-row-title" tabIndex={0} title={description} aria-label={`${label}. ${description}`} data-tooltip={description}>{label}<span className="pnl-row-help" aria-hidden="true">i</span></span>;
+  return <span className="pnl-row-title" tabIndex={0} title={description} aria-label={`${label}. ${description}`} data-tooltip={description}>{label}<span className="pnl-row-help" aria-hidden="true">?</span></span>;
 }
 
 type PnlCustomerPeriod = {
