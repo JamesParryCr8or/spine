@@ -221,7 +221,17 @@ function parseDelimited(text: string) {
 }
 
 async function refreshBing(supabase: SupabaseClient, store: Store, from: string, to: string) {
-  if (!await needsRefresh(supabase, "bing_ads_insights_daily", store.id, "insight_date", from, to)) return;
+  // Microsoft only retains daily Campaign Performance data for 36 months.
+  // "All imported data" can start much earlier (for example, old Shopify
+  // orders), and submitting that entire range makes Microsoft reject the
+  // report before it returns any of the dates that are still available.
+  const retentionStart = new Date();
+  retentionStart.setUTCDate(1);
+  retentionStart.setUTCMonth(retentionStart.getUTCMonth() - 36);
+  const earliestAvailableDate = retentionStart.toISOString().slice(0, 10);
+  if (to < earliestAvailableDate) return;
+  const reportFrom = from < earliestAvailableDate ? earliestAvailableDate : from;
+  if (!await needsRefresh(supabase, "bing_ads_insights_daily", store.id, "insight_date", reportFrom, to)) return;
   const [{ data: connection }, secret, { data: account }] = await Promise.all([
     supabase.from("data_connections").select("external_account_id,external_account_name").eq("store_id", store.id).eq("provider", "bing_ads").eq("status", "connected").maybeSingle(),
     readSecret(supabase, store.id, "bing_ads"),
@@ -241,7 +251,7 @@ async function refreshBing(supabase: SupabaseClient, store: Store, from: string,
   }
   const requestHeaders = { Authorization: `Bearer ${token.access_token}`, DeveloperToken: developerToken, CustomerAccountId: String(account.account_id), CustomerId: String(account.customer_id), "Content-Type": "application/json" };
   const dateParts = (value: string) => { const [year, month, day] = value.split("-").map(Number); return { Year: year, Month: month, Day: day }; };
-  const submit = await fetch("https://reporting.api.bingads.microsoft.com/Reporting/v13/GenerateReport/Submit", { method: "POST", headers: requestHeaders, body: JSON.stringify({ ReportRequest: { Type: "CampaignPerformanceReportRequest", Aggregation: "Daily", Columns: ["TimePeriod", "Spend", "Impressions", "Clicks", "CurrencyCode"], Scope: { AccountIds: [String(account.account_id)] }, Time: { CustomDateRangeStart: dateParts(from), CustomDateRangeEnd: dateParts(to), ReportTimeZone: "PacificTimeUSCanadaTijuana" }, Format: "Csv", FormatVersion: "2.0", ReportName: `Spine spend ${from} ${to}`, ReturnOnlyCompleteData: false, ExcludeColumnHeaders: false, ExcludeReportHeader: true, ExcludeReportFooter: true } }), cache: "no-store" });
+  const submit = await fetch("https://reporting.api.bingads.microsoft.com/Reporting/v13/GenerateReport/Submit", { method: "POST", headers: requestHeaders, body: JSON.stringify({ ReportRequest: { Type: "CampaignPerformanceReportRequest", Aggregation: "Daily", Columns: ["TimePeriod", "Spend", "Impressions", "Clicks", "CurrencyCode"], Scope: { AccountIds: [String(account.account_id)] }, Time: { CustomDateRangeStart: dateParts(reportFrom), CustomDateRangeEnd: dateParts(to), ReportTimeZone: "GreenwichMeanTimeDublinEdinburghLisbonLondon" }, Format: "Csv", FormatVersion: "2.0", ReportName: `Spine spend ${reportFrom} ${to}`, ReturnOnlyCompleteData: false, ExcludeColumnHeaders: false, ExcludeReportHeader: true, ExcludeReportFooter: true } }), cache: "no-store" });
   const submitPayload = await submit.json().catch(() => ({})) as { ReportRequestId?: string; Errors?: Array<{ Message?: string }> };
   if (!submit.ok || !submitPayload.ReportRequestId) throw new Error(submitPayload.Errors?.[0]?.Message ?? "Microsoft Advertising did not accept the spend report");
   let downloadUrl = "";
@@ -259,6 +269,7 @@ async function refreshBing(supabase: SupabaseClient, store: Store, from: string,
   const zip = Buffer.from(await reportResponse.arrayBuffer()); const rows = parseDelimited(readZipText(zip));
   const header = rows.shift()?.map((item) => item.trim().toLowerCase()) ?? [];
   const index = (name: string) => header.indexOf(name.toLowerCase());
+  if (index("timeperiod") < 0 || index("spend") < 0) throw new Error("Microsoft Advertising report is missing its date or spend columns");
   const now = new Date().toISOString();
   const byDate = new Map<string, { spend: number; impressions: number; clicks: number; currency: string }>();
   rows.forEach((row) => {
