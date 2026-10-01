@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { inflateRawSync } from "node:zlib";
 
 import { getSupabasePublicEnvironment } from "@/lib/env";
 import { shopifyGraph } from "@/lib/shopify/graphql";
@@ -18,7 +19,7 @@ export function createReportingClient() {
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 const numeric = (value: unknown) => {
-  const number = Number(value ?? 0);
+  const number = Number(typeof value === "string" ? value.replace(/[£$,\s]/g, "") : value ?? 0);
   return Number.isFinite(number) ? number : 0;
 };
 
@@ -184,15 +185,109 @@ async function refreshGoogle(supabase: SupabaseClient, store: Store, from: strin
   }
 }
 
+function readZipText(zip: Buffer) {
+  let end = -1;
+  for (let i = zip.length - 22; i >= Math.max(0, zip.length - 65558); i--) if (zip.readUInt32LE(i) === 0x06054b50) { end = i; break; }
+  if (end < 0) throw new Error("Microsoft Advertising returned an unreadable report archive");
+  const count = zip.readUInt16LE(end + 10); let cursor = zip.readUInt32LE(end + 16);
+  for (let n = 0; n < count; n++) {
+    if (zip.readUInt32LE(cursor) !== 0x02014b50) break;
+    const method = zip.readUInt16LE(cursor + 10), compressedSize = zip.readUInt32LE(cursor + 20), nameSize = zip.readUInt16LE(cursor + 28), extraSize = zip.readUInt16LE(cursor + 30), commentSize = zip.readUInt16LE(cursor + 32), localOffset = zip.readUInt32LE(cursor + 42);
+    const name = zip.toString("utf8", cursor + 46, cursor + 46 + nameSize);
+    if (/\.(csv|tsv)$/i.test(name)) {
+      const localNameSize = zip.readUInt16LE(localOffset + 26), localExtraSize = zip.readUInt16LE(localOffset + 28), start = localOffset + 30 + localNameSize + localExtraSize;
+      const content = zip.subarray(start, start + compressedSize);
+      if (method === 0) return content.toString("utf8");
+      if (method === 8) return inflateRawSync(content).toString("utf8");
+      throw new Error("Microsoft Advertising returned an unsupported report format");
+    }
+    cursor += 46 + nameSize + extraSize + commentSize;
+  }
+  throw new Error("Microsoft Advertising report archive contained no CSV data");
+}
+
+function parseDelimited(text: string) {
+  const delimiter = text.split(/\r?\n/, 1)[0]?.includes("\t") ? "\t" : ",";
+  const rows: string[][] = []; let row: string[] = [], field = "", quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === '"') { if (quoted && text[i + 1] === '"') { field += '"'; i++; } else quoted = !quoted; }
+    else if (char === delimiter && !quoted) { row.push(field); field = ""; }
+    else if ((char === "\n" || char === "\r") && !quoted) { if (char === "\r" && text[i + 1] === "\n") i++; row.push(field); if (row.some(Boolean)) rows.push(row); row = []; field = ""; }
+    else field += char;
+  }
+  if (field || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+async function refreshBing(supabase: SupabaseClient, store: Store, from: string, to: string) {
+  if (!await needsRefresh(supabase, "bing_ads_insights_daily", store.id, "insight_date", from, to)) return;
+  const [{ data: connection }, secret, { data: account }] = await Promise.all([
+    supabase.from("data_connections").select("external_account_id,external_account_name").eq("store_id", store.id).eq("provider", "bing_ads").eq("status", "connected").maybeSingle(),
+    readSecret(supabase, store.id, "bing_ads"),
+    supabase.from("bing_ads_accounts").select("account_id,customer_id,name,currency").eq("store_id", store.id).eq("is_selected", true).maybeSingle(),
+  ]);
+  if (!connection?.external_account_id || !secret || !account) return;
+  const clientId = process.env.MICROSOFT_ADS_CLIENT_ID?.trim(); const clientSecret = process.env.MICROSOFT_ADS_CLIENT_SECRET?.trim(); const developerToken = process.env.MICROSOFT_ADS_DEVELOPER_TOKEN?.trim();
+  if (!clientId || !clientSecret || !developerToken) return;
+  let saved: { refreshToken: string; customerId: string };
+  try { saved = JSON.parse(secret) as typeof saved; } catch { throw new Error("Microsoft Advertising saved token is invalid; reconnect the account"); }
+  const tokenResponse = await fetch("https://login.microsoftonline.com/common/oauth2/v2.0/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, grant_type: "refresh_token", refresh_token: saved.refreshToken, scope: "openid offline_access https://ads.microsoft.com/msads.manage" }), cache: "no-store" });
+  const token = await tokenResponse.json().catch(() => ({})) as { access_token?: string; refresh_token?: string; error_description?: string };
+  if (!tokenResponse.ok || !token.access_token) throw new Error(token.error_description ?? "Microsoft Advertising authorization could not be refreshed");
+  if (token.refresh_token) {
+    const { error } = await supabase.rpc("rotate_bing_ads_secret", { requested_store_id: store.id, secret_payload: JSON.stringify({ refreshToken: token.refresh_token, customerId: saved.customerId }) });
+    if (error) throw error;
+  }
+  const requestHeaders = { Authorization: `Bearer ${token.access_token}`, DeveloperToken: developerToken, CustomerAccountId: String(account.account_id), CustomerId: String(account.customer_id), "Content-Type": "application/json" };
+  const dateParts = (value: string) => { const [year, month, day] = value.split("-").map(Number); return { Year: year, Month: month, Day: day }; };
+  const submit = await fetch("https://reporting.api.bingads.microsoft.com/Reporting/v13/GenerateReport/Submit", { method: "POST", headers: requestHeaders, body: JSON.stringify({ ReportRequest: { Type: "CampaignPerformanceReportRequest", Aggregation: "Daily", Columns: ["TimePeriod", "Spend", "Impressions", "Clicks", "CurrencyCode"], Scope: { AccountIds: [String(account.account_id)] }, Time: { CustomDateRangeStart: dateParts(from), CustomDateRangeEnd: dateParts(to), ReportTimeZone: "PacificTimeUSCanadaTijuana" }, Format: "Csv", FormatVersion: "2.0", ReportName: `Spine spend ${from} ${to}`, ReturnOnlyCompleteData: false, ExcludeColumnHeaders: false, ExcludeReportHeader: true, ExcludeReportFooter: true } }), cache: "no-store" });
+  const submitPayload = await submit.json().catch(() => ({})) as { ReportRequestId?: string; Errors?: Array<{ Message?: string }> };
+  if (!submit.ok || !submitPayload.ReportRequestId) throw new Error(submitPayload.Errors?.[0]?.Message ?? "Microsoft Advertising did not accept the spend report");
+  let downloadUrl = "";
+  for (let poll = 0; poll < 12; poll++) {
+    if (poll) await new Promise((resolve) => setTimeout(resolve, 1500));
+    const response = await fetch("https://reporting.api.bingads.microsoft.com/Reporting/v13/GenerateReport/Poll", { method: "POST", headers: requestHeaders, body: JSON.stringify({ ReportRequestId: submitPayload.ReportRequestId }), cache: "no-store" });
+    const payload = await response.json().catch(() => ({})) as { ReportRequestStatus?: { Status?: string; ReportDownloadUrl?: string }; Errors?: Array<{ Message?: string }> };
+    if (!response.ok) throw new Error(payload.Errors?.[0]?.Message ?? "Microsoft Advertising report status could not be read");
+    if (payload.ReportRequestStatus?.Status === "Success") { downloadUrl = payload.ReportRequestStatus.ReportDownloadUrl ?? ""; break; }
+    if (payload.ReportRequestStatus?.Status === "Error") throw new Error("Microsoft Advertising could not generate the spend report");
+  }
+  if (!downloadUrl) throw new Error("Microsoft Advertising spend report is still processing; it will retry on the next refresh");
+  const reportResponse = await fetch(downloadUrl, { cache: "no-store" });
+  if (!reportResponse.ok) throw new Error("Microsoft Advertising spend report could not be downloaded");
+  const zip = Buffer.from(await reportResponse.arrayBuffer()); const rows = parseDelimited(readZipText(zip));
+  const header = rows.shift()?.map((item) => item.trim().toLowerCase()) ?? [];
+  const index = (name: string) => header.indexOf(name.toLowerCase());
+  const now = new Date().toISOString();
+  const byDate = new Map<string, { spend: number; impressions: number; clicks: number; currency: string }>();
+  rows.forEach((row) => {
+    const rawDate = (row[index("timeperiod")] ?? "").trim();
+    const isoDate = rawDate.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    const usDate = rawDate.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    const date = isoDate ? `${isoDate[1]}-${isoDate[2].padStart(2, "0")}-${isoDate[3].padStart(2, "0")}` : usDate ? `${usDate[3]}-${usDate[1].padStart(2, "0")}-${usDate[2].padStart(2, "0")}` : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    const daily = byDate.get(date) ?? { spend: 0, impressions: 0, clicks: 0, currency: row[index("currencycode")] || account.currency || store.currency };
+    daily.spend += numeric(row[index("spend")]);
+    daily.impressions += Math.round(numeric(row[index("impressions")]));
+    daily.clicks += Math.round(numeric(row[index("clicks")]));
+    byDate.set(date, daily);
+  });
+  const imported = [...byDate].map(([insight_date, daily]) => ({ organization_id: store.organization_id, store_id: store.id, account_id: String(account.account_id), account_name: account.name, insight_date, ...daily, synced_at: now }));
+  if (imported.length) { const { error } = await supabase.from("bing_ads_insights_daily").upsert(imported, { onConflict: "store_id,account_id,insight_date" }); if (error) throw error; }
+}
+
 export async function refreshReportingData(_supabase: SupabaseClient, store: Store, from: string, to: string) {
   const reportingClient = createReportingClient();
   const results = await Promise.allSettled([
     refreshShopifyReporting(reportingClient, store, from, to),
     refreshMeta(reportingClient, store, from, to),
     refreshGoogle(reportingClient, store, from, to),
+    refreshBing(reportingClient, store, from, to),
   ]);
   results.forEach((result, index) => {
-    if (result.status === "rejected") console.error("Reporting refresh failed", { source: ["shopify", "meta", "google_ads"][index], message: result.reason instanceof Error ? result.reason.message : "Unknown error" });
+    if (result.status === "rejected") console.error("Reporting refresh failed", { source: ["shopify", "meta", "google_ads", "bing_ads"][index], message: result.reason instanceof Error ? result.reason.message : "Unknown error" });
   });
 }
+
 

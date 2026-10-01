@@ -25,16 +25,18 @@ export async function GET(request: Request) {
   let leadsQuery = supabase.from("gohighlevel_leads_daily").select("metric_date,lead_count,metric_label,selection_id").eq("store_id", store.id).order("metric_date");
   let metaQuery = supabase.from("meta_ad_insights_daily").select("date_start,spend,currency").eq("store_id", store.id).order("date_start");
   let googleQuery = supabase.from("google_ads_insights_daily").select("insight_date,spend,currency").eq("store_id", store.id).order("insight_date");
-  if (from) { leadsQuery = leadsQuery.gte("metric_date", from); metaQuery = metaQuery.gte("date_start", from); googleQuery = googleQuery.gte("insight_date", from); }
-  if (to) { leadsQuery = leadsQuery.lte("metric_date", to); metaQuery = metaQuery.lte("date_start", to); googleQuery = googleQuery.lte("insight_date", to); }
-  const [leadsResult, metaResult, googleResult] = await Promise.all([leadsQuery, metaQuery, googleQuery]);
-  if (leadsResult.error || metaResult.error || googleResult.error) return NextResponse.json({ error: leadsResult.error?.message ?? metaResult.error?.message ?? googleResult.error?.message }, { status: 500 });
+  let bingQuery = supabase.from("bing_ads_insights_daily").select("insight_date,spend,currency").eq("store_id", store.id).order("insight_date");
+  if (from) { leadsQuery = leadsQuery.gte("metric_date", from); metaQuery = metaQuery.gte("date_start", from); googleQuery = googleQuery.gte("insight_date", from); bingQuery = bingQuery.gte("insight_date", from); }
+  if (to) { leadsQuery = leadsQuery.lte("metric_date", to); metaQuery = metaQuery.lte("date_start", to); googleQuery = googleQuery.lte("insight_date", to); bingQuery = bingQuery.lte("insight_date", to); }
+  const [leadsResult, metaResult, googleResult, bingResult] = await Promise.all([leadsQuery, metaQuery, googleQuery, bingQuery]);
+  if (leadsResult.error || metaResult.error || googleResult.error || bingResult.error) return NextResponse.json({ error: leadsResult.error?.message ?? metaResult.error?.message ?? googleResult.error?.message ?? bingResult.error?.message }, { status: 500 });
 
-  type LeadPoint = { date: string; metaSpend: number; googleSpend: number; conversions: number; stageConversions: Record<string, number> };
+  type LeadPoint = { date: string; metaSpend: number; googleSpend: number; bingSpend: number; conversions: number; stageConversions: Record<string, number> };
   const dates = new Map<string, LeadPoint>();
-  const get = (date: string) => dates.get(date) ?? { date, metaSpend: 0, googleSpend: 0, conversions: 0, stageConversions: {} };
+  const get = (date: string) => dates.get(date) ?? { date, metaSpend: 0, googleSpend: 0, bingSpend: 0, conversions: 0, stageConversions: {} };
   for (const row of metaResult.data ?? []) { if (row.currency === store.currency) { const point = get(row.date_start); point.metaSpend += amount(row.spend); dates.set(row.date_start, point); } }
   for (const row of googleResult.data ?? []) { if (row.currency === store.currency) { const point = get(row.insight_date); point.googleSpend += amount(row.spend); dates.set(row.insight_date, point); } }
+  for (const row of bingResult.data ?? []) { if (row.currency === store.currency) { const point = get(row.insight_date); point.bingSpend += amount(row.spend); dates.set(row.insight_date, point); } }
   const currentLabel = configResult.data?.metric_label;
   let stageSeries: Array<{ id: string; label: string }> = [];
   if (configResult.data?.source_type === "opportunities") {
@@ -62,11 +64,13 @@ export async function GET(request: Request) {
   const points = [...dates.values()].sort((a, b) => a.date.localeCompare(b.date));
   const metaSpend = points.reduce((sum, point) => sum + point.metaSpend, 0);
   const googleSpend = points.reduce((sum, point) => sum + point.googleSpend, 0);
+  const bingSpend = points.reduce((sum, point) => sum + point.bingSpend, 0);
   const conversions = points.reduce((sum, point) => sum + point.conversions, 0);
   return NextResponse.json({
     currency: store.currency, connection: connectionResult.data, config: configResult.data,
-    totals: { metaSpend, googleSpend, totalSpend: metaSpend + googleSpend, conversions, costPerConversion: conversions ? (metaSpend + googleSpend) / conversions : null },
+    totals: { metaSpend, googleSpend, bingSpend, totalSpend: metaSpend + googleSpend + bingSpend, conversions, costPerConversion: conversions ? (metaSpend + googleSpend + bingSpend) / conversions : null },
     points,
     stageSeries: hasStageSeriesRows ? stageSeries : [],
   });
 }
+

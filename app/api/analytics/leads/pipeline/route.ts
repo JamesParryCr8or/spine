@@ -154,12 +154,14 @@ export async function GET(request: Request) {
 
     let metaQuery = supabase.from("meta_ad_insights_daily").select("spend,currency").eq("store_id", store.id);
     let googleQuery = supabase.from("google_ads_insights_daily").select("spend,currency").eq("store_id", store.id);
-    if (from) { metaQuery = metaQuery.gte("date_start", from); googleQuery = googleQuery.gte("insight_date", from); }
-    if (to) { metaQuery = metaQuery.lte("date_start", to); googleQuery = googleQuery.lte("insight_date", to); }
-    const [metaResult, googleResult] = await Promise.all([metaQuery, googleQuery]);
-    if (metaResult.error || googleResult.error) return NextResponse.json({ error: metaResult.error?.message ?? googleResult.error?.message }, { status: 500 });
+    let bingQuery = supabase.from("bing_ads_insights_daily").select("spend,currency").eq("store_id", store.id);
+    if (from) { metaQuery = metaQuery.gte("date_start", from); googleQuery = googleQuery.gte("insight_date", from); bingQuery = bingQuery.gte("insight_date", from); }
+    if (to) { metaQuery = metaQuery.lte("date_start", to); googleQuery = googleQuery.lte("insight_date", to); bingQuery = bingQuery.lte("insight_date", to); }
+    const [metaResult, googleResult, bingResult] = await Promise.all([metaQuery, googleQuery, bingQuery]);
+    if (metaResult.error || googleResult.error || bingResult.error) return NextResponse.json({ error: metaResult.error?.message ?? googleResult.error?.message ?? bingResult.error?.message }, { status: 500 });
     const metaSpend = (metaResult.data ?? []).filter((row) => row.currency === store.currency).reduce((sum, row) => sum + amount(row.spend), 0);
     const googleSpend = (googleResult.data ?? []).filter((row) => row.currency === store.currency).reduce((sum, row) => sum + amount(row.spend), 0);
+    const bingSpend = (bingResult.data ?? []).filter((row) => row.currency === store.currency).reduce((sum, row) => sum + amount(row.spend), 0);
 
     let lostReasons: Array<{ id: string; name: string }> = [];
     if (includeLostReasons) {
@@ -200,7 +202,7 @@ export async function GET(request: Request) {
         openCount, wonCount, lostCount, totalCount: opportunities.length,
         openValue, wonValue, averageWonValue: wonCount ? wonValue / wonCount : null,
         winRate: wonCount + lostCount ? wonCount / (wonCount + lostCount) : null,
-        metaSpend, googleSpend, totalSpend: metaSpend + googleSpend,
+        metaSpend, googleSpend, bingSpend, totalSpend: metaSpend + googleSpend + bingSpend,
       },
       range: { from, to },
       sourceNote: "Opportunity counts are the current location pipeline snapshot. Ad spend uses the selected date period.",
@@ -241,3 +243,4 @@ export async function PATCH(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ success: true, pipelineId });
 }
+

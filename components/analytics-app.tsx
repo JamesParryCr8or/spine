@@ -164,7 +164,7 @@ function Trend({ positive = true, children }: { positive?: boolean; children: Re
 
 type FinanceTrendPoint = {
   label: string; start: string; end: string; revenue: number; profit: number; complete: boolean;
-  cogs: number; metaMarketing: number; googleMarketing: number; paymentFees: number; shipping: number; operating: number;
+  cogs: number; metaMarketing: number; googleMarketing: number; bingMarketing: number; paymentFees: number; shipping: number; operating: number;
 };
 
 function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrendPoint[]; formatter: Intl.NumberFormat; onOpen: (point: FinanceTrendPoint) => void }) {
@@ -177,7 +177,7 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
   const labelEvery = Math.max(1, Math.ceil(points.length / 8));
   const dataMaximum = Math.max(
     ...points.flatMap((point) => [point.revenue, Math.abs(point.profit)]),
-    ...points.map((point) => point.cogs + point.metaMarketing + point.googleMarketing + point.paymentFees + point.shipping + point.operating),
+    ...points.map((point) => point.cogs + point.metaMarketing + point.googleMarketing + point.bingMarketing + point.paymentFees + point.shipping + point.operating),
     1,
   );
   const niceStep = (value: number) => {
@@ -204,7 +204,7 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
   const positiveTicks = [0, 1, 2, 3, 4].map((index) => ({ index, y: zeroY - (zeroY - top) * index / 4, value: axisStep * index }));
   const negativeTicks = [1, 2, 3, 4].map((index) => ({ index, y: zeroY + (bottom - zeroY) * index / 4, value: -axisStep * index }));
   const line = points.map((point, index) => `${left + step * index + step / 2},${y(point.profit)}`).join(" ");
-  const costColors = ["#f59e0b", "#1877f2", "#34a853", "#a855f7", "#06b6d4", "#64748b"];
+  const costColors = ["#f59e0b", "#1877f2", "#258ffa", "#34a853", "#a855f7", "#06b6d4", "#64748b"];
   const active = hovered === null ? null : points[hovered];
   return <div className="finance-chart">
     <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Revenue, costs and profit over time">
@@ -215,7 +215,7 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
         const center = left + step * index + step / 2;
         const barWidth = Math.min(30, step * .44);
         const revenueTop = y(point.revenue);
-        const costs = [point.cogs, point.metaMarketing, point.googleMarketing, point.paymentFees, point.shipping, point.operating];
+        const costs = [point.cogs, point.metaMarketing, point.googleMarketing, point.bingMarketing, point.paymentFees, point.shipping, point.operating];
         let currentY = zeroY;
         return <g key={`${point.start}-${index}`} onMouseEnter={() => setHovered(index)} onMouseLeave={() => setHovered(null)} onFocus={() => setHovered(index)} onBlur={() => setHovered(null)} onClick={() => onOpen(point)} tabIndex={0} role="button" aria-label={`${point.label}: revenue ${formatter.format(point.revenue)}, costs ${formatter.format(costs.reduce((sum,value)=>sum+value,0))}, profit ${formatter.format(point.profit)}`}>
           <rect x={center-barWidth/2} y={revenueTop} width={barWidth} height={Math.max(zeroY-revenueTop,1)} rx="4" className="finance-revenue"/>
@@ -232,7 +232,7 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
       <polyline points={line} className="finance-profit-line"/>
       {points.map((point,index) => <circle key={point.start} cx={left+step*index+step/2} cy={y(point.profit)} r={hovered===index?5:3.5} className="finance-profit-dot"/>)}
     </svg>
-    {active ? <div className="finance-tooltip"><strong>{active.label}</strong><span>Revenue <b>{formatter.format(active.revenue)}</b></span><span>COGS <b>-{formatter.format(active.cogs)}</b></span><span>Facebook ads <b>-{formatter.format(active.metaMarketing)}</b></span><span>Google Ads <b>-{formatter.format(active.googleMarketing)}</b></span><span>Payment fees <b>-{formatter.format(active.paymentFees)}</b></span><span>Shipping & handling <b>-{formatter.format(active.shipping)}</b></span><span>Operating costs <b>-{formatter.format(active.operating)}</b></span><span className="tooltip-profit">{active.complete ? "Net profit" : "Provisional profit"} <b>{formatter.format(active.profit)}</b></span></div> : null}
+    {active ? <div className="finance-tooltip"><strong>{active.label}</strong><span>Revenue <b>{formatter.format(active.revenue)}</b></span><span>COGS <b>-{formatter.format(active.cogs)}</b></span><span>Facebook ads <b>-{formatter.format(active.metaMarketing)}</b></span><span>Google Ads <b>-{formatter.format(active.googleMarketing)}</b></span><span>Microsoft Ads <b>-{formatter.format(active.bingMarketing)}</b></span><span>Payment fees <b>-{formatter.format(active.paymentFees)}</b></span><span>Shipping & handling <b>-{formatter.format(active.shipping)}</b></span><span>Operating costs <b>-{formatter.format(active.operating)}</b></span><span className="tooltip-profit">{active.complete ? "Net profit" : "Provisional profit"} <b>{formatter.format(active.profit)}</b></span></div> : null}
   </div>;
 }
 
@@ -429,9 +429,9 @@ function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId?: stri
     { label: "Shipping revenue", value: formatter.format(liveData.metrics.shippingRevenue), ...moneyDelta(liveData.metrics.shippingRevenue, comparisonData?.metrics.shippingRevenue, "Shopify orders"), hint: "Excludes tax and duties" },
     { label: "Blended CAC", value: liveData.metrics.blendedCac === null ? "—" : formatter.format(liveData.metrics.blendedCac), ...moneyDelta(liveData.metrics.blendedCac, comparisonData?.metrics.blendedCac, "Ad spend ÷ new customers", true), hint: `${liveData.metrics.newCustomers.toLocaleString()} first-observed customers` },
     { label: "Blended MER", value: liveData.metrics.blendedMer === null ? "—" : `${liveData.metrics.blendedMer.toFixed(2)}x`, ...ratioDelta(liveData.metrics.blendedMer, comparisonData?.metrics.blendedMer, "Net sales ÷ ad spend"), hint: liveData.metrics.marketingSpend ? `${formatter.format(liveData.metrics.marketingSpend)} imported spend` : "Connect ad spend" },
-    { label: "New-customer ROAS", value: liveData.metrics.newCustomerRoas === null ? "—" : `${liveData.metrics.newCustomerRoas.toFixed(2)}x`, ...ratioDelta(liveData.metrics.newCustomerRoas, comparisonData?.metrics.newCustomerRoas, "First observed order sales"), hint: "Uses combined Meta and Google spend for the imported window" },
+    { label: "New-customer ROAS", value: liveData.metrics.newCustomerRoas === null ? "—" : `${liveData.metrics.newCustomerRoas.toFixed(2)}x`, ...ratioDelta(liveData.metrics.newCustomerRoas, comparisonData?.metrics.newCustomerRoas, "First observed order sales"), hint: "Uses Meta, Google and Microsoft spend for the imported window" },
     { label: "Gross profit", value: pnlSummary?.hasData ? formatter.format(pnlSummary.metrics.grossProfit) : "—", ...moneyDelta(pnlSummary?.hasData ? pnlSummary.metrics.grossProfit : null, pnlComparison?.hasData ? pnlComparison.metrics.grossProfit : null, "Net product sales less refunds and COGS"), hint: pnlSummary?.metrics.missingCostLines ? `${pnlSummary.metrics.missingCostLines.toLocaleString()} lines need costs` : "Product costs covered" },
-    { label: "Marketing cost", value: pnlSummary?.availability.marketingSpend ? formatter.format(pnlSummary.metrics.marketingSpend) : "—", ...moneyDelta(pnlSummary?.availability.marketingSpend ? pnlSummary.metrics.marketingSpend : null, pnlComparison?.availability.marketingSpend ? pnlComparison.metrics.marketingSpend : null, "Imported ad spend", true), hint: pnlSummary?.availability.marketingSpend ? "Meta + Google Ads" : "Connect ad spend" },
+    { label: "Marketing cost", value: pnlSummary?.availability.marketingSpend ? formatter.format(pnlSummary.metrics.marketingSpend) : "—", ...moneyDelta(pnlSummary?.availability.marketingSpend ? pnlSummary.metrics.marketingSpend : null, pnlComparison?.availability.marketingSpend ? pnlComparison.metrics.marketingSpend : null, "Imported ad spend", true), hint: pnlSummary?.availability.marketingSpend ? "Meta + Google + Microsoft Ads" : "Connect ad spend" },
     { label: "Postage cost", value: pnlSummary?.availability.shippingCosts ? formatter.format(pnlSummary.metrics.merchantShippingCosts) : "—", ...moneyDelta(pnlSummary?.availability.shippingCosts ? pnlSummary.metrics.merchantShippingCosts : null, pnlComparison?.availability.shippingCosts ? pnlComparison.metrics.merchantShippingCosts : null, "Delivery and product shipping costs", true), hint: pnlSummary?.availability.shippingCosts ? "Product overrides and store postage" : "Complete postage costs" },
     { label: "Warehouse fulfilment", value: pnlSummary?.availability.handlingCosts ? formatter.format(pnlSummary.metrics.handlingCosts) : "—", ...moneyDelta(pnlSummary?.availability.handlingCosts ? pnlSummary.metrics.handlingCosts : null, pnlComparison?.availability.handlingCosts ? pnlComparison.metrics.handlingCosts : null, "Fulfilment cost by order or unit", true), hint: pnlSummary?.availability.handlingCosts ? "Store fulfilment default applied" : "Set fulfilment cost" },
     { label: "Contribution margin", value: pnlSummary?.availability.marketingSpend && pnlSummary.availability.shippingCosts && pnlSummary.availability.handlingCosts ? formatter.format(pnlSummary.metrics.contributionMargin) : "—", ...moneyDelta(pnlSummary?.availability.marketingSpend && pnlSummary.availability.shippingCosts && pnlSummary.availability.handlingCosts ? pnlSummary.metrics.contributionMargin : null, pnlComparison?.availability.marketingSpend && pnlComparison.availability.shippingCosts && pnlComparison.availability.handlingCosts ? pnlComparison.metrics.contributionMargin : null, "After variable direct costs"), hint: pnlSummary?.availability.shippingCosts && pnlSummary?.availability.handlingCosts ? "Shipping and handling included" : "Complete shipping and handling costs" },
@@ -445,6 +445,7 @@ function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId?: stri
       cogs: data.metrics.cogs,
       metaMarketing: data.metrics.metaMarketingSpend,
       googleMarketing: data.metrics.googleMarketingSpend,
+      bingMarketing: data.metrics.bingMarketingSpend,
       paymentFees: data.metrics.transactionFees,
       shipping: data.metrics.merchantShippingCosts + data.metrics.handlingCosts,
       operating: data.metrics.operatingExpenses,
@@ -580,8 +581,8 @@ type PnlData = {
   currencyCoverage: CurrencyCoverage;
   marketingCurrencyCoverage: CurrencyConversionCoverage;
   transactionFeeCoverage?: { salesDays: number; reportedFeeDays: number; latestReportedFeeDate: string | null };
-  metrics: { grossSales: number; discounts: number; refunds: number; netProductSales: number; shippingRevenue: number; tax: number; duties: number; totalSales: number; cogs: number; grossProfit: number; grossMargin: number | null; marketingSpend: number; metaMarketingSpend: number; googleMarketingSpend: number; transactionFees: number; merchantShippingCosts: number; variantShippingCosts: number; shippingFallbackCosts: number; handlingCosts: number; fixedOperatingExpenses: number; variableOperatingExpenses: number; operatingExpenses: number; contributionMarginBeforeShipping: number; contributionMarginBeforeShippingPercentage: number | null; contributionMargin: number; contributionMarginPercentage: number | null; profitAfterOperatingCosts: number; profitAfterKnownCosts: number; profitAfterMarketingSpend: number; netProfit: number | null; netMargin: number | null; orders: number; unitsSold: number; missingCostLines: number; missingShippingLines: number; shippingOverrideLines: number; shippingFallbackLines: number; shippingFallbackRate: number | null; unallocatedOperatingCosts: number };
-  availability: { marketingSpend: boolean; metaMarketingSpend: boolean; googleMarketingSpend: boolean; transactionFees: boolean; transactionFeesComplete?: boolean; shippingCosts: boolean; handlingCosts: boolean; operatingExpenses: boolean; netProfit: boolean };
+  metrics: { grossSales: number; discounts: number; refunds: number; netProductSales: number; shippingRevenue: number; tax: number; duties: number; totalSales: number; cogs: number; grossProfit: number; grossMargin: number | null; marketingSpend: number; metaMarketingSpend: number; googleMarketingSpend: number; bingMarketingSpend: number; transactionFees: number; merchantShippingCosts: number; variantShippingCosts: number; shippingFallbackCosts: number; handlingCosts: number; fixedOperatingExpenses: number; variableOperatingExpenses: number; operatingExpenses: number; contributionMarginBeforeShipping: number; contributionMarginBeforeShippingPercentage: number | null; contributionMargin: number; contributionMarginPercentage: number | null; profitAfterOperatingCosts: number; profitAfterKnownCosts: number; profitAfterMarketingSpend: number; netProfit: number | null; netMargin: number | null; orders: number; unitsSold: number; missingCostLines: number; missingShippingLines: number; shippingOverrideLines: number; shippingFallbackLines: number; shippingFallbackRate: number | null; unallocatedOperatingCosts: number };
+  availability: { marketingSpend: boolean; metaMarketingSpend: boolean; googleMarketingSpend: boolean; bingMarketingSpend: boolean; transactionFees: boolean; transactionFeesComplete?: boolean; shippingCosts: boolean; handlingCosts: boolean; operatingExpenses: boolean; netProfit: boolean };
   period: { start: string; end: string } | null;
 };
 type PnlPeriodData = { period: ReportingPeriod; data: PnlData };
@@ -614,7 +615,8 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
   const [feeRefreshBusy, setFeeRefreshBusy] = useState(false);
   const [feeRefreshStatus, setFeeRefreshStatus] = useState("");
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
-  const appliedSavedPreset = useRef<string | null>(null);
+  const appliedSavedPreset = useRef<str
+ing | null>(null);
   const autoFeeRefreshRanges = useRef(new Set<string>());
   const [datePrefsReady, setDatePrefsReady] = useState(false);
   const restoredDatePrefs = useRef(false);
@@ -749,6 +751,7 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
     ["Profit after known costs", signed(pnl.metrics.profitAfterKnownCosts)],
     ["Facebook Ads spend", pnl.availability.metaMarketingSpend ? signed(-pnl.metrics.metaMarketingSpend) : "Not imported"],
     ["Google Ads spend", pnl.availability.googleMarketingSpend ? signed(-pnl.metrics.googleMarketingSpend) : "Not imported"],
+    ["Microsoft Ads spend", pnl.availability.bingMarketingSpend ? signed(-pnl.metrics.bingMarketingSpend) : "Not imported"],
     ["Total marketing spend", pnl.availability.marketingSpend ? signed(-pnl.metrics.marketingSpend) : "Not imported"],
     ["Contribution margin before shipping", pnl.availability.marketingSpend ? signed(pnl.metrics.contributionMarginBeforeShipping) : "Import ad spend to calculate"],
     ["Profit after marketing spend", pnl.availability.marketingSpend ? signed(pnl.metrics.profitAfterMarketingSpend) : "Import ad spend to calculate"],
@@ -773,6 +776,7 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
     { section: "Product costs", label: "Gross profit", value: (data) => (data.metrics.grossProfit) },
     { section: "Marketing", label: "Facebook Ads spend", value: (data) => data.availability.metaMarketingSpend ? (-data.metrics.metaMarketingSpend) : "Not imported" },
     { section: "Marketing", label: "Google Ads spend", value: (data) => data.availability.googleMarketingSpend ? (-data.metrics.googleMarketingSpend) : "Not imported" },
+    { section: "Marketing", label: "Microsoft Ads spend", value: (data) => data.availability.bingMarketingSpend ? (-data.metrics.bingMarketingSpend) : "Not imported" },
     { section: "Marketing", label: "Total marketing spend", value: (data) => data.availability.marketingSpend ? (-data.metrics.marketingSpend) : "Not imported" },
     { section: "Transaction costs", label: "Shopify payment fees", value: (data) => data.availability.transactionFees ? (-data.metrics.transactionFees) : "Not available" },
     { section: "Shipping and handling", label: "Store fulfilment fallback", value: (data) => (-data.metrics.shippingFallbackCosts) },
@@ -795,10 +799,10 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
     ["GROSS PROFIT", formatter.format(pnl.metrics.grossProfit), pnl.metrics.grossMargin === null ? "Cost coverage needed" : `${(pnl.metrics.grossMargin * 100).toFixed(1)}% margin`],
     ["OPERATING EXPENSES", formatter.format(pnl.metrics.operatingExpenses), pnl.metrics.unallocatedOperatingCosts ? `${pnl.metrics.unallocatedOperatingCosts} costs need attention` : `${formatter.format(pnl.metrics.fixedOperatingExpenses)} fixed · ${formatter.format(pnl.metrics.variableOperatingExpenses)} variable`],
     ["MISSING COST LINES", pnl.metrics.missingCostLines.toLocaleString(), pnl.metrics.missingCostLines ? "Add costs to improve profit" : "All order lines costed"],
-    ["PROFIT AFTER MARKETING", pnl.availability.marketingSpend ? formatter.format(pnl.metrics.profitAfterMarketingSpend) : "—", pnl.availability.marketingSpend ? "Meta + Google Ads spend included" : "Import ad spend"],
+    ["PROFIT AFTER MARKETING", pnl.availability.marketingSpend ? formatter.format(pnl.metrics.profitAfterMarketingSpend) : "—", pnl.availability.marketingSpend ? "Meta, Google Ads + Microsoft Ads spend included" : "Import ad spend"],
     ["CONTRIBUTION MARGIN", pnl.availability.marketingSpend && pnl.availability.shippingCosts && pnl.availability.handlingCosts ? formatter.format(pnl.metrics.contributionMargin) : pnl.availability.marketingSpend ? formatter.format(pnl.metrics.contributionMarginBeforeShipping) : "—", pnl.availability.marketingSpend && pnl.availability.shippingCosts && pnl.availability.handlingCosts ? `${pnl.metrics.contributionMarginPercentage === null ? "—" : `${(pnl.metrics.contributionMarginPercentage * 100).toFixed(1)}%`} after shipping and handling` : pnl.availability.marketingSpend ? `${pnl.metrics.contributionMarginBeforeShippingPercentage === null ? "—" : `${(pnl.metrics.contributionMarginBeforeShippingPercentage * 100).toFixed(1)}%`} before shipping and handling` : "Import ad spend"],
   ] : [["NET SALES", "£236,582", "+11.2%"], ["GROSS PROFIT", "£143,487", "+9.4%"], ["MARKETING", "£27,911", "+4.1%"], ["NET PROFIT", "£92,917", "+18.2%"]];
-  const totalRows = hasLiveData ? new Set([3, 5, 9, 13, 14, 17, 18, 19, 22, 24, 25]) : new Set([3, 5, 8, 10]);
+  const totalRows = hasLiveData ? new Set([3, 5, 9, 13, 14, 18, 19, 20, 23, 25, 26]) : new Set([3, 5, 8, 10]);
   const reconciliationIssues = pnl ? [
     pnl.metrics.missingCostLines > 0 ? `${pnl.metrics.missingCostLines.toLocaleString()} product lines need costs` : null,
     pnl.metrics.missingShippingLines > 0 ? `${pnl.metrics.missingShippingLines.toLocaleString()} product lines need shipping costs` : null,
@@ -1087,7 +1091,8 @@ function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: string; init
   });
   const mappedRows = rows.filter((row) => row.marketingCost !== null);
   const mappedSales = mappedRows.reduce((sum, row) => sum + Math.max(row.sales - row.refunds, 0), 0);
-  const mappedSpend = mappedRows.reduce((sum, row) => sum + (row.marketingCost ?? 0), 0);
+  const mappedSpend = mappedRows.reduc
+e((sum, row) => sum + (row.marketingCost ?? 0), 0);
   const mappedNewCustomers = mappedRows.reduce((sum, row) => sum + (row.customerType === "New" ? row.customers : 0), 0);
   const mappedProfitReady = mappedRows.length > 0 && mappedRows.every((row) => row.contributionProfit !== null);
   const mappedProfit = mappedProfitReady ? mappedRows.reduce((sum, row) => sum + (row.contributionProfit ?? 0), 0) : null;
@@ -1475,7 +1480,8 @@ function Expenses() {
   return <>
     <section className="cost-toolbar">
       <div><span className="eyebrow">COST INPUTS</span><h2>Expenses and payment fees</h2><p>Use effective dates so the P&amp;L applies each cost and gateway rate to the right orders.</p></div>
-      <div className="feature-actions"><button className="primary" disabled={!canEdit} onClick={() => setShowAdd(true)}><Plus/> Add expense</button><button disabled={!canEdit} onClick={() => setShowAddPaymentRule(true)}><Plus/> Add payment rule</button></div>
+      <div className="feature-actions"><button className="primary" disabled={!canEdit} onClick
+={() => setShowAdd(true)}><Plus/> Add expense</button><button disabled={!canEdit} onClick={() => setShowAddPaymentRule(true)}><Plus/> Add payment rule</button></div>
     </section>
     {error && <div className="connection-error cost-error">{error}</div>}
     <section className="panel report-panel">
@@ -1495,9 +1501,9 @@ type LeadDashboardData = {
   currency: string;
   connection: { status: string; external_account_name: string | null } | null;
   config: { source_type: "contacts" | "opportunities"; metric_label: string; selection_name: string | null } | null;
-  totals: { metaSpend: number; googleSpend: number; totalSpend: number; conversions: number; costPerConversion: number | null };
+  totals: { metaSpend: number; googleSpend: number; bingSpend: number; totalSpend: number; conversions: number; costPerConversion: number | null };
   stageSeries: Array<{ id: string; label: string }>;
-  points: Array<{ date: string; metaSpend: number; googleSpend: number; conversions: number; stageConversions?: Record<string, number> }>;
+  points: Array<{ date: string; metaSpend: number; googleSpend: number; bingSpend: number; conversions: number; stageConversions?: Record<string, number> }>;
 };
 
 function groupLeadPoints(points: LeadDashboardData["points"], granularity: ReportingGranularity) {
@@ -1510,8 +1516,8 @@ function groupLeadPoints(points: LeadDashboardData["points"], granularity: Repor
     if (granularity === "monthly") key = `${point.date.slice(0, 7)}-01`;
     if (granularity === "quarterly") key = `${point.date.slice(0, 4)}-Q${Math.floor(date.getUTCMonth() / 3) + 1}`;
     if (granularity === "annual") key = point.date.slice(0, 4);
-    const current = grouped.get(key) ?? { date: key, metaSpend: 0, googleSpend: 0, conversions: 0, stageConversions: {} };
-    current.metaSpend += point.metaSpend; current.googleSpend += point.googleSpend; current.conversions += point.conversions; grouped.set(key, current);
+    const current = grouped.get(key) ?? { date: key, metaSpend: 0, googleSpend: 0, bingSpend: 0, conversions: 0, stageConversions: {} };
+    current.metaSpend += point.metaSpend; current.googleSpend += point.googleSpend; current.bingSpend += point.bingSpend; current.conversions += point.conversions; grouped.set(key, current);
     for (const [stageId, count] of Object.entries(point.stageConversions ?? {})) {
       current.stageConversions![stageId] = (current.stageConversions![stageId] ?? 0) + count;
     }
@@ -1522,14 +1528,14 @@ function groupLeadPoints(points: LeadDashboardData["points"], granularity: Repor
 function LeadPerformanceChart({ points, currency, label, stageSeries }: { points: LeadDashboardData["points"]; currency: string; label: string; stageSeries: LeadDashboardData["stageSeries"] }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const width = 860, height = 300, left = 54, right = 64, top = 18, bottom = 42;
-  const spend = points.map((point) => point.metaSpend + point.googleSpend);
+  const spend = points.map((point) => point.metaSpend + point.googleSpend + point.bingSpend);
   const maxSpend = Math.max(1, ...spend);
   const lines = (stageSeries.length ? stageSeries : [{ id: "aggregate", label: `Cost per ${label.toLowerCase()}` }]).map((series) => ({
     ...series,
     color: ["#14b87a", "#e16b42", "#8c62d9", "#d3a21b", "#258fc0", "#db5c83"][stageSeries.findIndex((item) => item.id === series.id) % 6] || "#14b87a",
     values: points.map((point) => {
       const conversions = series.id === "aggregate" ? point.conversions : point.stageConversions?.[series.id] ?? 0;
-      return conversions > 0 ? (point.metaSpend + point.googleSpend) / conversions : null;
+      return conversions > 0 ? (point.metaSpend + point.googleSpend + point.bingSpend) / conversions : null;
     }),
   }));
   const maxCost = Math.max(1, ...lines.flatMap((line) => line.values.filter((value): value is number => value !== null)));
@@ -1551,17 +1557,17 @@ function LeadPerformanceChart({ points, currency, label, stageSeries }: { points
   });
   const ticks = [0, .25, .5, .75, 1];
   return <div className="lead-chart-wrap">
-    <div className="lead-chart-legend"><span><i className="lead-key meta"/>Meta spend</span><span><i className="lead-key google"/>Google spend</span>{lines.map((line) => <span key={line.id}><i className="lead-key result" style={{ backgroundColor: line.color }}/>{stageSeries.length ? line.label : `Cost per ${label.toLowerCase()}`}</span>)}</div>
+    <div className="lead-chart-legend"><span><i className="lead-key meta"/>Meta spend</span><span><i className="lead-key google"/>Google spend</span><span><i className="lead-key microsoft"/>Microsoft spend</span>{lines.map((line) => <span key={line.id}><i className="lead-key result" style={{ backgroundColor: line.color }}/>{stageSeries.length ? line.label : `Cost per ${label.toLowerCase()}`}</span>)}</div>
     <div className="lead-chart" role="img" aria-label={`Marketing spend and cost per selected ${label}s across the selected reporting period`}>
       <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
         {ticks.map((tick) => { const y = top + chartHeight - tick * chartHeight; return <g key={tick}><line className="lead-gridline" x1={left} x2={width-right} y1={y} y2={y}/><text className="lead-axis-label" x={left-10} y={y+4} textAnchor="end">{format.format(maxSpend*tick)}</text><text className="lead-axis-label" x={width-right+10} y={y+4}>{format.format(maxCost*tick)}</text></g>; })}
         <line className="lead-axis" x1={left} x2={width-right} y1={top+chartHeight} y2={top+chartHeight}/>
-        {points.map((point, index) => { const barWidth = Math.max(1, Math.min(34, pointWidth * .64)); const googleH = (point.googleSpend/maxSpend)*chartHeight; const metaH = (point.metaSpend/maxSpend)*chartHeight; const base = top+chartHeight; return <g key={point.date} onMouseEnter={() => setHovered(index)} onMouseLeave={() => setHovered(null)} className="lead-chart-point"><rect className="lead-hover-target" x={x(index)-pointWidth/2} y={top} width={pointWidth} height={chartHeight}/><rect className="lead-google-bar" x={x(index)-barWidth/2} y={base-googleH} width={barWidth} height={googleH}/><rect className="lead-meta-bar" x={x(index)-barWidth/2} y={base-googleH-metaH} width={barWidth} height={metaH}/><text className="lead-x-label" x={x(index)} y={height-14} textAnchor="middle">{(index % labelEvery === 0 || index === points.length - 1) ? point.date.slice(5) : ""}</text></g>; })}
+        {points.map((point, index) => { const barWidth = Math.max(1, Math.min(34, pointWidth * .64)); const googleH = (point.googleSpend/maxSpend)*chartHeight; const bingH = (point.bingSpend/maxSpend)*chartHeight; const metaH = (point.metaSpend/maxSpend)*chartHeight; const base = top+chartHeight; return <g key={point.date} onMouseEnter={() => setHovered(index)} onMouseLeave={() => setHovered(null)} className="lead-chart-point"><rect className="lead-hover-target" x={x(index)-pointWidth/2} y={top} width={pointWidth} height={chartHeight}/><rect className="lead-google-bar" x={x(index)-barWidth/2} y={base-googleH} width={barWidth} height={googleH}/><rect className="lead-bing-bar" x={x(index)-barWidth/2} y={base-googleH-bingH} width={barWidth} height={bingH}/><rect className="lead-meta-bar" x={x(index)-barWidth/2} y={base-googleH-bingH-metaH} width={barWidth} height={metaH}/><text className="lead-x-label" x={x(index)} y={height-14} textAnchor="middle">{(index % labelEvery === 0 || index === points.length - 1) ? point.date.slice(5) : ""}</text></g>; })}
         {lineSegments.flatMap((line) => line.segments.map((segmentPoints, index) => <polyline key={`${line.id}-${index}`} className="lead-results-line" points={segmentPoints} style={{ stroke: line.color }}/>))}
         {lineSegments.flatMap((line) => line.values.map((value, index) => value === null ? null : <circle key={`${line.id}-${points[index].date}`} className={`lead-result-dot${hovered === index ? " active" : ""}`} cx={x(index)} cy={costY(value)} r={hovered === index ? "5" : "3"} style={{ stroke: line.color, ...(hovered === index ? { fill: line.color } : {}) }}/>))}
         <text className="lead-axis-title" x={left} y={12}>Spend</text><text className="lead-axis-title" x={width-right} y={12} textAnchor="end">Cost / event</text>
       </svg>
-      {selected && <div className="lead-tooltip" style={{ left: `${Math.max(12, Math.min(88, ((x(hovered!) - left) / chartWidth) * 100))}%` }}><strong>{selected.date}</strong><span>Meta: {format.format(selected.metaSpend)}</span><span>Google: {format.format(selected.googleSpend)}</span><span>Spend: {format.format(selected.metaSpend+selected.googleSpend)}</span><b>{selected.conversions.toLocaleString("en-GB")} selected events</b>{lineSegments.map((line) => { const count = line.id === "aggregate" ? selected.conversions : selected.stageConversions?.[line.id] ?? 0; const value = line.values[hovered!]; return <b key={line.id} style={{ color: line.color }}>{line.id === "aggregate" ? `Cost per ${label.toLowerCase()}` : line.label}: {count} · {value === null ? "—" : format.format(value)}</b>; })}</div>}
+      {selected && <div className="lead-tooltip" style={{ left: `${Math.max(12, Math.min(88, ((x(hovered!) - left) / chartWidth) * 100))}%` }}><strong>{selected.date}</strong><span>Meta: {format.format(selected.metaSpend)}</span><span>Google: {format.format(selected.googleSpend)}</span><span>Microsoft: {format.format(selected.bingSpend)}</span><span>Spend: {format.format(selected.metaSpend+selected.googleSpend+selected.bingSpend)}</span><b>{selected.conversions.toLocaleString("en-GB")} selected events</b>{lineSegments.map((line) => { const count = line.id === "aggregate" ? selected.conversions : selected.stageConversions?.[line.id] ?? 0; const value = line.values[hovered!]; return <b key={line.id} style={{ color: line.color }}>{line.id === "aggregate" ? `Cost per ${label.toLowerCase()}` : line.label}: {count} · {value === null ? "—" : format.format(value)}</b>; })}</div>}
     </div>
   </div>;
 }
@@ -1625,13 +1631,14 @@ function Leads({ onOpenConnections, range, onRangeChange }: { onOpenConnections:
     <div className="metric-grid">
       <article className="metric-card"><div className="metric-label">Meta cost</div><strong>{format.format(data?.totals.metaSpend ?? 0)}</strong><div className="metric-foot">Imported Meta Ads spend</div></article>
       <article className="metric-card"><div className="metric-label">Google cost</div><strong>{format.format(data?.totals.googleSpend ?? 0)}</strong><div className="metric-foot">Imported Google Ads spend</div></article>
-      <article className="metric-card"><div className="metric-label">Total marketing cost</div><strong>{format.format(data?.totals.totalSpend ?? 0)}</strong><div className="metric-foot">Meta + Google</div></article>
+      <article className="metric-card"><div className="metric-label">Microsoft cost</div><strong>{format.format(data?.totals.bingSpend ?? 0)}</strong><div className="metric-foot">Imported Microsoft Ads spend</div></article>
+      <article className="metric-card"><div className="metric-label">Total marketing cost</div><strong>{format.format(data?.totals.totalSpend ?? 0)}</strong><div className="metric-foot">Meta + Google + Microsoft</div></article>
       <article className="metric-card"><div className="metric-label">Cost per event</div><strong>{data?.totals.costPerConversion === null || data?.totals.costPerConversion === undefined ? "—" : format.format(data.totals.costPerConversion)}</strong><div className="metric-foot">{data?.totals.conversions ?? 0} {configLabel}{(data?.totals.conversions ?? 0) === 1 ? "" : "s"} imported</div></article>
     </div>
     <section className="panel lead-trend-panel"><div className="panel-head"><div><span className="eyebrow">TREND</span><h3>Spend and selected-stage events</h3><p className="lead-chart-description">Paid-media spend on the left axis and cost per selected GoHighLevel stage on the right. Choose day, week or month grouping above.</p></div><div className="lead-selection"><span>{data?.config?.selection_name || data?.connection?.external_account_name || "GoHighLevel"}</span>{data?.connection && <button className="filter-button" onClick={() => void choosePipelineStage()} disabled={choosingStage}>{choosingStage ? "Loading…" : "Choose pipeline stage"}</button>}</div></div>{loading ? <div className="cost-empty"><RefreshCw className="spin"/><strong>Loading lead performance…</strong></div> : chartPoints.length ? <LeadPerformanceChart points={chartPoints} currency={data?.currency || "GBP"} label={configLabel} stageSeries={data?.stageSeries ?? []} /> : <div className="cost-empty"><BarChart3/><strong>No reporting data has been imported yet</strong><span>Your GoHighLevel connection is saved. Choose a pipeline stage above, then refresh to import its opportunity events.</span></div>}</section>
-    {!loading && chartPoints.length ? <section className="panel lead-event-table"><div className="panel-head"><div><span className="eyebrow">SELECTED STAGE</span><h3>{configLabel} events and cost</h3><p>Current opportunities in the selected stage, plus later stages if enabled, grouped by GoHighLevel’s last stage-change date. Records without that date use their created date.</p></div></div><div className="table-scroll"><table className="data-table"><thead><tr><th>Period</th><th>Meta spend</th><th>Google spend</th><th>Total spend</th><th>Selected-stage events</th><th>Cost per event</th></tr></thead><tbody>{chartPoints.map((point) => { const spend = point.metaSpend + point.googleSpend; return <tr key={point.date}><td>{point.date}</td><td>{format.format(point.metaSpend)}</td><td>{format.format(point.googleSpend)}</td><td><strong>{format.format(spend)}</strong></td><td>{point.conversions.toLocaleString("en-GB")}</td><td>{point.conversions ? format.format(spend / point.conversions) : "—"}</td></tr>; })}</tbody></table></div></section> : null}
+    {!loading && chartPoints.length ? <section className="panel lead-event-table"><div className="panel-head"><div><span className="eyebrow">SELECTED STAGE</span><h3>{configLabel} events and cost</h3><p>Current opportunities in the selected stage, plus later stages if enabled, grouped by GoHighLevel’s last stage-change date. Records without that date use their created date.</p></div></div><div className="table-scroll"><table className="data-table"><thead><tr><th>Period</th><th>Meta spend</th><th>Google spend</th><th>Microsoft spend</th><th>Total spend</th><th>Selected-stage events</th><th>Cost per event</th></tr></thead><tbody>{chartPoints.map((point) => { const spend = point.metaSpend + point.googleSpend + point.bingSpend; return <tr key={point.date}><td>{point.date}</td><td>{format.format(point.metaSpend)}</td><td>{format.format(point.googleSpend)}</td><td>{format.format(point.bingSpend)}</td><td><strong>{format.format(spend)}</strong></td><td>{point.conversions.toLocaleString("en-GB")}</td><td>{point.conversions ? format.format(spend / point.conversions) : "—"}</td></tr>; })}</tbody></table></div></section> : null}
     {!loading && chartPoints.length ? <section className="lead-insights-grid">
-      <article className="panel lead-insight"><span className="eyebrow">CHANNEL MIX</span><h3>Paid media spend</h3><div className="lead-split"><span style={{width: `${Math.max(4, ((data?.totals.metaSpend ?? 0) / Math.max(1, data?.totals.totalSpend ?? 0))*100)}%`}}/><i style={{width: `${Math.max(0, ((data?.totals.googleSpend ?? 0) / Math.max(1, data?.totals.totalSpend ?? 0))*100)}%`}}/></div><div className="lead-insight-values"><span>Meta <b>{format.format(data?.totals.metaSpend ?? 0)}</b></span><span>Google <b>{format.format(data?.totals.googleSpend ?? 0)}</b></span></div></article>
+      <article className="panel lead-insight"><span className="eyebrow">CHANNEL MIX</span><h3>Paid media spend</h3><div className="lead-split"><span style={{width: `${Math.max(0, ((data?.totals.metaSpend ?? 0) / Math.max(1, data?.totals.totalSpend ?? 0))*100)}%`}}/><i style={{width: `${Math.max(0, ((data?.totals.googleSpend ?? 0) / Math.max(1, data?.totals.totalSpend ?? 0))*100)}%`}}/><b style={{width: `${Math.max(0, ((data?.totals.bingSpend ?? 0) / Math.max(1, data?.totals.totalSpend ?? 0))*100)}%`}}/></div><div className="lead-insight-values"><span>Meta <b>{format.format(data?.totals.metaSpend ?? 0)}</b></span><span>Google <b>{format.format(data?.totals.googleSpend ?? 0)}</b></span><span>Microsoft <b>{format.format(data?.totals.bingSpend ?? 0)}</b></span></div></article>
       <article className="panel lead-insight"><span className="eyebrow">EFFICIENCY</span><h3>Cost per result</h3><strong>{data?.totals.costPerConversion == null ? "—" : format.format(data.totals.costPerConversion)}</strong><p>{data?.totals.conversions ?? 0} selected {configLabel}{(data?.totals.conversions ?? 0) === 1 ? "" : "s"} across the current reporting window.</p></article>
       <article className="panel lead-insight"><span className="eyebrow">DAILY SIGNAL</span><h3>Best result day</h3><strong>{bestPoint?.date || "—"}</strong><p>{bestPoint ? `${bestPoint.conversions} ${configLabel}${bestPoint.conversions === 1 ? "" : "s"} recorded.` : "No selected-stage results recorded."}</p></article>
     </section> : null}
@@ -1645,6 +1652,7 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
     Shopify: "https://cdn.simpleicons.org/shopify/95BF47",
     "Meta Ads": "https://cdn.simpleicons.org/meta/0668E1",
     "Google Ads": "https://upload.wikimedia.org/wikipedia/commons/c/cc/Google_Ads_icon.svg",
+    "Microsoft Ads": "https://cdn.simpleicons.org/microsoftadvertising/258FFA",
     Klaviyo: "https://images.seeklogo.com/logo-png/51/1/klaviyo-logo-png_seeklogo-512370.png",
     GoHighLevel: goHighLevelLogo,
   };
@@ -1666,6 +1674,11 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
   const [googleAdsAccounts, setGoogleAdsAccounts] = useState<Array<{ customer_id: string; name: string; is_manager: boolean; hierarchy_level: number; direct_access: boolean }>>([]);
   const [showGoogleAdsAccounts, setShowGoogleAdsAccounts] = useState(false);
   const [selectingGoogleAdsAccount, setSelectingGoogleAdsAccount] = useState(false);
+  const [bingAdsConnected, setBingAdsConnected] = useState(false);
+  const [bingAdsAccountName, setBingAdsAccountName] = useState("");
+  const [bingAdsAccounts, setBingAdsAccounts] = useState<Array<{ account_id: string; customer_id: string; name: string; account_number: string | null; currency: string | null; status: string | null; is_selected: boolean }>>([]);
+  const [showBingAdsAccounts, setShowBingAdsAccounts] = useState(false);
+  const [selectingBingAdsAccount, setSelectingBingAdsAccount] = useState(false);
   const [klaviyoConnected, setKlaviyoConnected] = useState(false);
   const [ghlConnected, setGhlConnected] = useState(false);
   const [ghlAccountName, setGhlAccountName] = useState("");
@@ -1713,6 +1726,8 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
       .catch(() => undefined);
     fetch("/api/connections/google-ads").then((response) => response.ok ? response.json() : null).then((payload) => { setGoogleAdsConnected(payload?.connection?.status === "connected"); setGoogleAdsAccountName(payload?.connection?.external_account_name ?? ""); }).catch(() => undefined);
     fetch("/api/connections/google-ads/accounts").then((response) => response.ok ? response.json() : null).then((payload) => setGoogleAdsAccounts(payload?.accounts ?? [])).catch(() => undefined);
+    fetch("/api/connections/bing-ads").then((response) => response.ok ? response.json() : null).then((payload) => { setBingAdsConnected(payload?.connection?.status === "connected"); setBingAdsAccountName(payload?.connection?.external_account_name ?? ""); }).catch(() => undefined);
+    fetch("/api/connections/bing-ads/accounts").then((response) => response.ok ? response.json() : null).then((payload) => setBingAdsAccounts(payload?.accounts ?? [])).catch(() => undefined);
     const googleAdsQuery = new URLSearchParams(window.location.search);
     if (googleAdsQuery.get("googleAds") === "select") {
       const discoveryError = googleAdsQuery.get("googleAdsError");
@@ -1721,6 +1736,11 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
         if (discoveryError) setConnectionError(discoveryError);
         window.history.replaceState({}, "", "/protected");
       }, 0);
+      return () => window.clearTimeout(timeout);
+    }
+    if (googleAdsQuery.get("bingAds") === "select" || googleAdsQuery.get("bingAdsError")) {
+      const discoveryError = googleAdsQuery.get("bingAdsError");
+      const timeout = window.setTimeout(() => { setShowBingAdsAccounts(true); if (discoveryError) setConnectionError(discoveryError); window.history.replaceState({}, "", "/protected"); }, 0);
       return () => window.clearTimeout(timeout);
     }
     fetch("/api/connections/klaviyo").then((response) => response.ok ? response.json() : null).then((payload) => setKlaviyoConnected(payload?.connection?.status === "connected")).catch(() => undefined);
@@ -1860,6 +1880,7 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
     } finally { setSavingConnection(false); }
   };
   const connectGoogleAds = () => { window.location.assign("/api/google-ads/authorize"); };
+  const connectBingAds = () => { window.location.assign("/api/bing-ads/authorize"); };
   const selectGoogleAdsAccount = async (customerId: string) => {
     setSelectingGoogleAdsAccount(true); setConnectionError("");
     try {
@@ -1870,10 +1891,20 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
       setGoogleAdsConnected(true); setShowGoogleAdsAccounts(false);
     } catch (reason) { setConnectionError(reason instanceof Error ? reason.message : "Could not select Google Ads account"); } finally { setSelectingGoogleAdsAccount(false); }
   };
+  const selectBingAdsAccount = async (accountId: string) => {
+    setSelectingBingAdsAccount(true); setConnectionError("");
+    try {
+      const response = await fetch("/api/connections/bing-ads/accounts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accountId }) });
+      const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Could not select Microsoft Advertising account");
+      setBingAdsAccountName(payload.connection?.external_account_name ?? ""); setBingAdsConnected(true); setShowBingAdsAccounts(false);
+      const accounts = await fetch("/api/connections/bing-ads/accounts").then((result) => result.ok ? result.json() : null); setBingAdsAccounts(accounts?.accounts ?? []);
+    } catch (reason) { setConnectionError(reason instanceof Error ? reason.message : "Could not select Microsoft Advertising account"); } finally { setSelectingBingAdsAccount(false); }
+  };
   const connections = [
     ["Shopify", "Sales, orders, products & customers", shopifyConnected ? "Connected" : "Connect", "S"],
     ["Meta Ads", "Campaign spend & performance", metaConnectionStatus === "error" ? (/(expired|revoked)/i.test(metaConnectionError) ? "Expired" : "Needs attention") : metaConnected ? "Connected" : "Connect", "M"],
     ["Google Ads", googleAdsConnected ? (googleAdsAccountName || "Google Ads account") : "Campaign and keyword reporting", googleAdsConnected ? "Connected" : "Connect", "G"],
+    ["Microsoft Ads", bingAdsConnected ? (bingAdsAccountName || "Microsoft Advertising account") : "Campaign spend and performance", bingAdsConnected ? "Connected" : "Connect", "B"],
     ["Klaviyo", "Campaign and flow analytics", klaviyoConnected ? "Connected" : "Connect", "K"],
     ["GoHighLevel", ghlConnected ? (ghlAccountName || "GoHighLevel location") : "Lead, call and pipeline conversion reporting", ghlConnected ? "Connected" : "Connect", "H"],
   ];
@@ -1885,9 +1916,10 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
 
   return <>
     <div className="connection-notice"><Info/><div><strong>{canManage ? "Secure connection storage" : "Connection access is view only"}</strong><span>{canManage ? "Access tokens are encrypted in Supabase Vault and are never returned to the browser after saving." : "Ask an owner, admin or connections manager to add or remove integrations."}</span></div></div>{connectionError && <div className="connection-error" role="alert">{connectionError}</div>}
-    <section className="connection-grid">{connections.map(([name,desc,status])=><article className="connection-card" key={name}>{integrationLogo(name)}<div><h3>{name}</h3><p>{desc}</p></div><button disabled={!canManage || status === "Coming next"} onClick={() => { if (name === "Meta Ads") setShowMetaSetup(true); else if (name === "Shopify") setShowShopifySetup(true); else if (name === "Google Ads") { if (googleAdsConnected) setShowGoogleAdsAccounts(true); else connectGoogleAds(); } else if (name === "Klaviyo") void connectKlaviyo(); else if (name === "GoHighLevel") { setConnectionError(""); setShowGhlSetup(true); } }} className={status==="Connected" ? "connected" : status === "Expired" || status === "Needs attention" ? "expired" : ""}>{(status==="Connected" || status === "Expired" || status === "Needs attention")&&<span/>}{status}</button></article>)}</section>
+    <section className="connection-grid">{connections.map(([name,desc,status])=><article className="connection-card" key={name}>{integrationLogo(name)}<div><h3>{name}</h3><p>{desc}</p></div><button disabled={!canManage || status === "Coming next"} onClick={() => { if (name === "Meta Ads") setShowMetaSetup(true); else if (name === "Shopify") setShowShopifySetup(true); else if (name === "Google Ads") { if (googleAdsConnected) setShowGoogleAdsAccounts(true); else connectGoogleAds(); } else if (name === "Microsoft Ads") { if (bingAdsConnected) setShowBingAdsAccounts(true); else connectBingAds(); } else if (name === "Klaviyo") void connectKlaviyo(); else if (name === "GoHighLevel") { setConnectionError(""); setShowGhlSetup(true); } }} className={status==="Connected" ? "connected" : status === "Expired" || status === "Needs attention" ? "expired" : ""}>{(status==="Connected" || status === "Expired" || status === "Needs attention")&&<span/>}{status}</button></article>)}</section>
     {leadGeneration && <RevenueConnectors/>}
     {showGoogleAdsAccounts && <div className="modal-backdrop" onMouseDown={() => setShowGoogleAdsAccounts(false)}><section className="connection-modal" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowGoogleAdsAccounts(false)}><X/></button><div className="modal-brand">{integrationLogo("Google Ads")}<div><span className="eyebrow">GOOGLE ADS</span><h2>Choose an ad account</h2></div></div><p className="modal-intro">Select the Google Ads account for this brand. Manager accounts and their enabled client accounts are listed separately.</p>{connectionError && <div className="connection-error">{connectionError}</div>}{googleAdsAccounts.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Account</th><th>Customer ID</th><th>Type</th><th/></tr></thead><tbody>{googleAdsAccounts.map((account) => <tr key={account.customer_id}><td><strong>{account.name}</strong>{account.direct_access && <small>Direct Google access</small>}</td><td>{account.customer_id}</td><td>{account.is_manager ? "Manager (MCC)" : "Client account"}</td><td><button className="primary" disabled={selectingGoogleAdsAccount} onClick={() => void selectGoogleAdsAccount(account.customer_id)}>{googleAdsAccountName === account.name ? "Selected" : "Use this account"}</button></td></tr>)}</tbody></table></div> : <div className="cost-empty"><Database/><strong>No Google Ads accounts have been loaded yet</strong><span>Reconnect Google Ads to load the MCC hierarchy.</span></div>}<div className="modal-actions"><button onClick={() => setShowGoogleAdsAccounts(false)}>Close</button><button className="primary" onClick={connectGoogleAds}>Reconnect and refresh accounts</button></div></section></div>}
+    {showBingAdsAccounts && <div className="modal-backdrop" onMouseDown={() => setShowBingAdsAccounts(false)}><section className="connection-modal" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" onClick={() => setShowBingAdsAccounts(false)}><X/></button><div className="modal-brand">{integrationLogo("Microsoft Ads")}<div><span className="eyebrow">MICROSOFT ADVERTISING</span><h2>Choose an ad account</h2></div></div><p className="modal-intro">Select which Microsoft Advertising account supplies campaign spend for this brand.</p>{connectionError && <div className="connection-error">{connectionError}</div>}{bingAdsAccounts.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Account</th><th>Account number</th><th>Currency</th><th/></tr></thead><tbody>{bingAdsAccounts.map((account) => <tr key={account.account_id}><td><strong>{account.name}</strong><small>{account.status || "Microsoft Advertising account"}</small></td><td>{account.account_number || account.account_id}</td><td>{account.currency || "—"}</td><td><button className="primary" disabled={selectingBingAdsAccount} onClick={() => void selectBingAdsAccount(account.account_id)}>{account.is_selected ? "Selected" : "Use this account"}</button></td></tr>)}</tbody></table></div> : <div className="cost-empty"><Database/><strong>No Microsoft Advertising accounts loaded</strong><span>Reconnect Microsoft Advertising to discover the accounts available to you.</span></div>}<div className="modal-actions"><button onClick={() => setShowBingAdsAccounts(false)}>Close</button><button className="primary" onClick={connectBingAds}>Reconnect and refresh accounts</button></div></section></div>}
     {showShopifySetup && <div className="modal-backdrop" onMouseDown={()=>setShowShopifySetup(false)}><section className="connection-modal" onMouseDown={(event)=>event.stopPropagation()}>
       <button className="modal-close" onClick={()=>setShowShopifySetup(false)}><X/></button><div className="modal-brand">{integrationLogo("Shopify")}<div><span className="eyebrow">PRIMARY SALES SOURCE</span><h2>Connect Shopify</h2></div></div>
       <p className="modal-intro">Connect an Admin API token to validate the store and import catalogue, order, customer, refund and attribution data. Disconnecting removes the encrypted token but preserves your imported reporting data.</p>
@@ -1905,7 +1937,8 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
       <p className="modal-intro">Connect with Facebook to grant Spine read-only access to your Meta Ads account. There is no Graph API Explorer token to copy and your Facebook password never reaches Spine.</p>
       <div className="connection-notice meta-oauth-notice"><Info/><div><strong>Connect your own Facebook account</strong><span>Choose the Meta ad account you manage, then Spine securely saves the approved connection and imports its daily spend.</span></div><button className="primary" disabled={savingConnection} onClick={connectMetaWithFacebook}><ExternalLink/>{metaConnectionStatus === "error" ? "Reconnect Facebook" : "Connect Facebook"}</button></div>
       {metaConnectionStatus === "error" && metaConnectionError && <div className="connection-error" role="alert">{metaConnectionError}</div>}
-      {metaConnected && metaAccountName && <div className="connected-account"><span/><div><small>CURRENT ACCOUNT</small><strong>{metaAccountName}</strong>{metaLastSync ? <small>{metaLastSync.importedDays.toLocaleString()} daily spend records · latest {metaLastSync.latestDate ? new Date(`${metaLastSync.latestDate}T00:00:00Z`).toLocaleDateString("en-GB") : "date unavailable"}</small> : <small>Spend data has not been imported yet.</small>}</div></div>}
+      {metaConnected && metaAccountName && <div className="connected-account"><span/><div><small>CURRENT ACCOUNT</small><strong>{metaAccountName}</strong>{metaLastSync ? <small>{metaLastSync.importedDays.toLocaleString()} daily spend records · latest {metaLastSync.late
+stDate ? new Date(`${metaLastSync.latestDate}T00:00:00Z`).toLocaleDateString("en-GB") : "date unavailable"}</small> : <small>Spend data has not been imported yet.</small>}</div></div>}
       <div className="help-card"><Info/><div><strong>Alternative for agency-managed accounts</strong><p>Use a Meta system-user token only if your business manages the connection centrally. For normal use, choose <b>Connect Facebook</b> above.</p><a className="meta-developer-link" href="https://developers.facebook.com/tools/explorer" target="_blank" rel="noreferrer"><ExternalLink/>Open Graph API Explorer</a></div></div>
       <label className="form-field"><span>System-user token <small>Optional alternative</small><b className="tooltip-trigger">?<em>Use this only for a centrally managed Meta system user with ads_read and read_insights.</em></b></span><div className="secret-input"><KeyRound/><input value={token} onChange={(event)=>{setToken(event.target.value);setMetaAccounts([]);setAccountId("");setMetaAccountSearch("");setConnectionError("");}} type={showToken?"text":"password"} placeholder="EAAB..." autoComplete="off"/><button onClick={()=>setShowToken(!showToken)}>{showToken?<EyeOff/>:<Eye/>}</button></div></label>
       <div className="meta-account-discovery"><button type="button" disabled={!token.trim() || loadingMetaAccounts} onClick={() => void loadMetaAccounts()}>{loadingMetaAccounts ? "Loading accounts…" : metaAccounts.length ? "Reload ad accounts" : "Find ad accounts"}</button><small>{metaAccounts.length ? `${metaAccounts.length} account${metaAccounts.length === 1 ? "" : "s"} available to this token.` : "Enter your token, then load the ad accounts it can access."}</small></div>
@@ -2175,7 +2208,8 @@ function Customers({ reportRunId, initialRange, focus = "summary" }: { reportRun
     const maxValue = Math.max(...otherValues, 0);
     const intensity = period.period === 0 || value <= 0 || maxValue === 0 ? 0 : Math.max(0.12, Math.min(1, value / maxValue));
     const backgroundColor = period.period === 0 ? "#f0edff" : value <= 0 ? "#f8fafc" : cohortMetric === "retention" ? `hsl(166 63% ${97 - intensity * 22}%)` : `hsl(254 80% ${97 - intensity * 18}%)`;
-    const detail = cohortMetric === "retention" ? `${period.activeCustomers.toLocaleString()} of ${cohort.customers.toLocaleString()} customers returned` : `${formatter.format(period.cumulativeRevenue)} cumulative revenue`;
+    const detail = cohortMetric === "retention" ? `${period.activeCustome
+rs.toLocaleString()} of ${cohort.customers.toLocaleString()} customers returned` : `${formatter.format(period.cumulativeRevenue)} cumulative revenue`;
     return <td className={`cohort-cell ${period.period === 0 ? "cohort-baseline" : value <= 0 ? "cohort-empty" : "cohort-active"}`} key={period.period} style={{ backgroundColor }} title={`${cohort.key} · Month ${period.period}: ${detail}`}>
       <strong>{cohortMetric === "retention" ? (period.period > 0 && period.activeCustomers === 0 ? "—" : `${(period.retentionRate * 100).toFixed(1)}%`) : period.cumulativeRevenue === 0 ? "—" : formatter.format(period.cumulativeRevenue)}</strong>
       <small>{cohortMetric === "retention" ? period.period === 0 ? "starting customers" : period.activeCustomers ? `${period.activeCustomers.toLocaleString()} returned` : "no repeat orders" : period.period === 0 ? "starting revenue" : `through Month ${period.period}`}</small>
@@ -2455,6 +2489,7 @@ export function AnalyticsApp() {
     </main>
   </div>;
 }
+
 
 
 

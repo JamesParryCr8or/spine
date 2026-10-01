@@ -11,6 +11,8 @@ import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { calculateProfitAndLoss } from "@/lib/analytics/profit-and-loss";
 import { refreshReportingData } from "@/lib/analytics/reporting-refresh";
 
+export const maxDuration = 60;
+
 type Order = { id: string; processed_at: string | null; gross_sales: string; discounts: string; net_product_sales: string; shipping_revenue: string; tax: string; duties: string; total_sales: string; currency: string; exchange_rate: number };
 type Line = { order_id: string; variant_gid: string | null; sku: string | null; current_quantity: number; net_sales: string };
 type Variant = { id: string; shopify_gid: string; sku: string | null; shopify_unit_cost: string | null };
@@ -250,15 +252,18 @@ export async function GET(request: Request) {
   const rangeEnd = reportDates.length ? reportDates.reduce((last, date) => date > last ? date : last) : null;
   const metaInsights: MetaInsight[] = [];
   const googleInsights: GoogleInsight[] = [];
+  const bingInsights: Array<{ insight_date: string; spend: string; currency: string }> = [];
   if (rangeStart && rangeEnd) {
-    const [metaResult, googleResult] = await Promise.all([
+    const [metaResult, googleResult, bingResult] = await Promise.all([
       supabase.from("meta_ad_insights_daily").select("date_start,spend,currency").eq("store_id", store.id).gte("date_start", rangeStart).lte("date_start", rangeEnd).order("date_start", { ascending: true }),
       supabase.from("google_ads_insights_daily").select("insight_date,spend,currency").eq("store_id", store.id).gte("insight_date", rangeStart).lte("insight_date", rangeEnd).order("insight_date", { ascending: true }),
+      supabase.from("bing_ads_insights_daily").select("insight_date,spend,currency").eq("store_id", store.id).gte("insight_date", rangeStart).lte("insight_date", rangeEnd).order("insight_date", { ascending: true }),
     ]);
-    const insightError = metaResult.error ?? googleResult.error;
+    const insightError = metaResult.error ?? googleResult.error ?? bingResult.error;
     if (insightError) return NextResponse.json({ error: insightError.message }, { status: 500 });
     metaInsights.push(...((metaResult.data ?? []) as MetaInsight[]));
     googleInsights.push(...((googleResult.data ?? []) as GoogleInsight[]));
+    bingInsights.push(...(bingResult.data ?? []));
   }
   const marketingCurrencyCoverage = createCurrencyConversionCoverage(store.currency);
   const convertedMarketingSpend = (rows: Array<{ date: string; spend: string; currency: string }>) => rows.reduce((total, insight) => {
@@ -268,7 +273,8 @@ export async function GET(request: Request) {
   }, 0);
   const metaMarketingSpend = convertedMarketingSpend(metaInsights.map((insight) => ({ date: insight.date_start, spend: insight.spend, currency: insight.currency })));
   const googleMarketingSpend = convertedMarketingSpend(googleInsights.map((insight) => ({ date: insight.insight_date, spend: insight.spend, currency: insight.currency })));
-  const marketingSpend = metaMarketingSpend + googleMarketingSpend;
+  const bingMarketingSpend = convertedMarketingSpend(bingInsights.map((insight) => ({ date: insight.insight_date, spend: insight.spend, currency: insight.currency })));
+  const marketingSpend = metaMarketingSpend + googleMarketingSpend + bingMarketingSpend;
   const marketingCoverage = marketingCurrencyCoverage.summary();
   const marketingSpendAvailable = marketingCoverage.includedRows > 0 && marketingCoverage.excludedRows === 0;
 
@@ -334,9 +340,10 @@ export async function GET(request: Request) {
     marketingCurrencyCoverage: marketingCoverage,
     transactionFeeCoverage: { salesDays: salesDays.length, reportedFeeDays: reportedFeeDays.length, latestReportedFeeDate: reportedFeeDays.at(-1)?.sales_date ?? null },
     calculatedAt: new Date().toISOString(),
-    metrics: { ...totals, refunds, cogs, ...calculated, marketingSpend, metaMarketingSpend, googleMarketingSpend, transactionFees, merchantShippingCosts, variantShippingCosts, shippingFallbackCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, orders: shopifyDaily.length ? shopifyDaily.reduce((total, day) => total + day.orders, 0) : includedOrders.length, unitsSold: dailyUnitCount || totalOrderUnits, missingCostLines, missingShippingLines: shippingCoverage.missingLines, shippingOverrideLines: shippingCoverage.overrideLines, shippingFallbackLines: shippingCoverage.fallbackLines, shippingFallbackRate: shippingCoverage.fallbackRate, unallocatedOperatingCosts },
+    metrics: { ...totals, refunds, cogs, ...calculated, marketingSpend, metaMarketingSpend, googleMarketingSpend, bingMarketingSpend, transactionFees, merchantShippingCosts, variantShippingCosts, shippingFallbackCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, orders: shopifyDaily.length ? shopifyDaily.reduce((total, day) => total + day.orders, 0) : includedOrders.length, unitsSold: dailyUnitCount || totalOrderUnits, missingCostLines, missingShippingLines: shippingCoverage.missingLines, shippingOverrideLines: shippingCoverage.overrideLines, shippingFallbackLines: shippingCoverage.fallbackLines, shippingFallbackRate: shippingCoverage.fallbackRate, unallocatedOperatingCosts },
     period: rangeStart && rangeEnd ? { start: rangeStart, end: rangeEnd } : null,
-    availability: { marketingSpend: marketingSpendAvailable, metaMarketingSpend: metaInsights.length > 0, googleMarketingSpend: googleInsights.length > 0, transactionFees: transactionFeesAvailable, transactionFeesComplete, shippingCosts: shippingCostsAvailable, handlingCosts: handlingCostsAvailable, operatingExpenses: true, netProfit: netProfitAvailable },
+    availability: { marketingSpend: marketingSpendAvailable, metaMarketingSpend: metaInsights.length > 0, googleMarketingSpend: googleInsights.length > 0, bingMarketingSpend: bingInsights.length > 0, transactionFees: transactionFeesAvailable, transactionFeesComplete, shippingCosts: shippingCostsAvailable, handlingCosts: handlingCostsAvailable, operatingExpenses: true, netProfit: netProfitAvailable },
   });
 }
+
 

@@ -21,7 +21,7 @@ export async function GET(request: Request) {
   ]);
   if (costDefaults.error) return NextResponse.json({ error: "Business contribution margin is unavailable" }, { status: 503 });
   const currency = w.store.reporting_currency || w.store.currency;
-  const spendResults = await Promise.all(["meta_ad_insights_daily", "google_ads_insights_daily"].map(async table => {
+  const spendResults = await Promise.all(["meta_ad_insights_daily", "google_ads_insights_daily", "bing_ads_insights_daily"].map(async table => {
     let total = 0, rows = 0, foreign = 0;
     const dateColumn = table === "meta_ad_insights_daily" ? "date_start" : "insight_date";
     for (let offset = 0; ; offset += 1000) {
@@ -41,3 +41,4 @@ export async function GET(request: Request) {
     return NextResponse.json({ currency, summary: { ...summary, businessContributionMarginPercent, estimatedContributionAfterCosts, adSpend, afterAdSpend: adSpend === null ? null : estimatedContributionAfterCosts-adSpend, foreignSpendRows: spendResults.reduce((sum,s) => sum+(s?.foreign||0),0) }, entries: entries.sort((a,b) => b.entry_date.localeCompare(a.entry_date)).slice(0,100), count: entries.length, batches: batches.data || [], canEdit: ["owner", "admin"].includes(w.membership.role) });
   } catch { return NextResponse.json({ error: "Revenue totals exceed the supported range. Choose a smaller period." }, { status: 400 }); }
 }
+

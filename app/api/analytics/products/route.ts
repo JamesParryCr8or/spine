@@ -243,18 +243,39 @@ export async function GET(request: Request) {
   }
 
   const metaInsights: MetaInsight[] = [];
+  const googleInsights: Array<{ insight_date: string; spend: string; currency: string }> = [];
+  const bingInsights: Array<{ insight_date: string; spend: string; currency: string }> = [];
   if (rangeStart && rangeEnd) {
-    for (let from = 0; ; from += pageSize) {
-      const { data, error } = await supabase.from("meta_ad_insights_daily").select("date_start,spend,currency").eq("store_id", store.id).gte("date_start", rangeStart).lte("date_start", rangeEnd).range(from, from + pageSize - 1);
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-      const page = (data ?? []) as MetaInsight[];
-      metaInsights.push(...page);
-      if (page.length < pageSize) break;
+    const loadInsights = async (table: "meta_ad_insights_daily" | "google_ads_insights_daily" | "bing_ads_insights_daily", column: "date_start" | "insight_date") => {
+      const rows: Array<{ date_start?: string; insight_date?: string; spend: string; currency: string }> = [];
+      for (let from = 0; ; from += pageSize) {
+        const { data, error } = await supabase.from(table).select(`${column},spend,currency`).eq("store_id", store.id).gte(column, rangeStart).lte(column, rangeEnd).range(from, from + pageSize - 1);
+        if (error) throw error;
+        rows.push(...(data ?? []));
+        if ((data ?? []).length < pageSize) return rows;
+      }
+    };
+    try {
+      const [metaRows, googleRows, bingRows] = await Promise.all([
+        loadInsights("meta_ad_insights_daily", "date_start"),
+        loadInsights("google_ads_insights_daily", "insight_date"),
+        loadInsights("bing_ads_insights_daily", "insight_date"),
+      ]);
+      metaInsights.push(...metaRows as MetaInsight[]);
+      googleInsights.push(...googleRows as typeof googleInsights);
+      bingInsights.push(...bingRows as typeof bingInsights);
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : "Marketing spend is unavailable" }, { status: 500 });
     }
   }
   const marketingCurrencyCoverage = createCurrencyConversionCoverage(store.currency);
-  const marketingSpend = metaInsights.reduce((total, insight) => {
-    const exchangeRate = resolveDatedExchangeRate(exchangeRates, insight.currency, store.currency, insight.date_start);
+  const marketingRows = [
+    ...metaInsights.map((insight) => ({ date: insight.date_start, spend: insight.spend, currency: insight.currency })),
+    ...googleInsights.map((insight) => ({ date: insight.insight_date, spend: insight.spend, currency: insight.currency })),
+    ...bingInsights.map((insight) => ({ date: insight.insight_date, spend: insight.spend, currency: insight.currency })),
+  ];
+  const marketingSpend = marketingRows.reduce((total, insight) => {
+    const exchangeRate = resolveDatedExchangeRate(exchangeRates, insight.currency, store.currency, insight.date);
     if (!marketingCurrencyCoverage.include(insight.currency, exchangeRate)) return total;
     return total + convertDatedAmount(monetary(insight.spend), exchangeRate ?? 1, store.currency);
   }, 0);
@@ -293,3 +314,4 @@ export async function GET(request: Request) {
     products,
   });
 }
+
