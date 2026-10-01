@@ -237,9 +237,11 @@ async function refreshBing(supabase: SupabaseClient, store: Store, from: string,
     readSecret(supabase, store.id, "bing_ads"),
     supabase.from("bing_ads_accounts").select("account_id,customer_id,name,currency").eq("store_id", store.id).eq("is_selected", true).maybeSingle(),
   ]);
-  if (!connection?.external_account_id || !secret || !account) return;
+  if (!connection?.external_account_id) return;
+  if (!secret) throw new Error("Microsoft Advertising connection has no saved authorization; reconnect the account");
+  if (!account) throw new Error("Choose a Microsoft Advertising account in Connections");
   const clientId = process.env.MICROSOFT_ADS_CLIENT_ID?.trim(); const clientSecret = process.env.MICROSOFT_ADS_CLIENT_SECRET?.trim(); const developerToken = process.env.MICROSOFT_ADS_DEVELOPER_TOKEN?.trim();
-  if (!clientId || !clientSecret || !developerToken) return;
+  if (!clientId || !clientSecret || !developerToken) throw new Error("Microsoft Advertising reporting credentials are not configured on the server");
   let saved: { refreshToken: string; customerId: string };
   try { saved = JSON.parse(secret) as typeof saved; } catch { throw new Error("Microsoft Advertising saved token is invalid; reconnect the account"); }
   const tokenResponse = await fetch("https://login.microsoftonline.com/common/oauth2/v2.0/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, grant_type: "refresh_token", refresh_token: saved.refreshToken, scope: "openid offline_access https://ads.microsoft.com/msads.manage" }), cache: "no-store" });
@@ -255,12 +257,16 @@ async function refreshBing(supabase: SupabaseClient, store: Store, from: string,
   const submitPayload = await submit.json().catch(() => ({})) as { ReportRequestId?: string; Errors?: Array<{ Message?: string }> };
   if (!submit.ok || !submitPayload.ReportRequestId) throw new Error(submitPayload.Errors?.[0]?.Message ?? "Microsoft Advertising did not accept the spend report");
   let downloadUrl = "";
-  for (let poll = 0; poll < 12; poll++) {
-    if (poll) await new Promise((resolve) => setTimeout(resolve, 1500));
+  for (let poll = 0; poll < 20; poll++) {
+    if (poll) await new Promise((resolve) => setTimeout(resolve, 2000));
     const response = await fetch("https://reporting.api.bingads.microsoft.com/Reporting/v13/GenerateReport/Poll", { method: "POST", headers: requestHeaders, body: JSON.stringify({ ReportRequestId: submitPayload.ReportRequestId }), cache: "no-store" });
     const payload = await response.json().catch(() => ({})) as { ReportRequestStatus?: { Status?: string; ReportDownloadUrl?: string }; Errors?: Array<{ Message?: string }> };
     if (!response.ok) throw new Error(payload.Errors?.[0]?.Message ?? "Microsoft Advertising report status could not be read");
-    if (payload.ReportRequestStatus?.Status === "Success") { downloadUrl = payload.ReportRequestStatus.ReportDownloadUrl ?? ""; break; }
+    if (payload.ReportRequestStatus?.Status === "Success") {
+      if (!payload.ReportRequestStatus.ReportDownloadUrl) throw new Error(`Microsoft Advertising returned no spend rows for ${reportFrom} to ${to}`);
+      downloadUrl = payload.ReportRequestStatus.ReportDownloadUrl;
+      break;
+    }
     if (payload.ReportRequestStatus?.Status === "Error") throw new Error("Microsoft Advertising could not generate the spend report");
   }
   if (!downloadUrl) throw new Error("Microsoft Advertising spend report is still processing; it will retry on the next refresh");
@@ -285,7 +291,21 @@ async function refreshBing(supabase: SupabaseClient, store: Store, from: string,
     byDate.set(date, daily);
   });
   const imported = [...byDate].map(([insight_date, daily]) => ({ organization_id: store.organization_id, store_id: store.id, account_id: String(account.account_id), account_name: account.name, insight_date, ...daily, synced_at: now }));
-  if (imported.length) { const { error } = await supabase.from("bing_ads_insights_daily").upsert(imported, { onConflict: "store_id,account_id,insight_date" }); if (error) throw error; }
+  if (!imported.length) throw new Error(`Microsoft Advertising returned no dated spend rows for ${reportFrom} to ${to}`);
+  const { error } = await supabase.from("bing_ads_insights_daily").upsert(imported, { onConflict: "store_id,account_id,insight_date" });
+  if (error) throw error;
+  return imported.length;
+}
+
+export async function refreshMicrosoftAdsReporting(supabase: SupabaseClient, store: Store, from: string, to: string) {
+  try {
+    const imported = await refreshBing(supabase, store, from, to);
+    if (imported) await supabase.from("data_connections").update({ last_error: null }).eq("store_id", store.id).eq("provider", "bing_ads");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Microsoft Advertising spend could not be imported";
+    await supabase.from("data_connections").update({ last_error: message }).eq("store_id", store.id).eq("provider", "bing_ads");
+    throw error;
+  }
 }
 
 export async function refreshReportingData(_supabase: SupabaseClient, store: Store, from: string, to: string) {
@@ -294,7 +314,7 @@ export async function refreshReportingData(_supabase: SupabaseClient, store: Sto
     refreshShopifyReporting(reportingClient, store, from, to),
     refreshMeta(reportingClient, store, from, to),
     refreshGoogle(reportingClient, store, from, to),
-    refreshBing(reportingClient, store, from, to),
+    refreshMicrosoftAdsReporting(reportingClient, store, from, to),
   ]);
   results.forEach((result, index) => {
     if (result.status === "rejected") console.error("Reporting refresh failed", { source: ["shopify", "meta", "google_ads", "bing_ads"][index], message: result.reason instanceof Error ? result.reason.message : "Unknown error" });
