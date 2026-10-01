@@ -615,8 +615,7 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
   const [feeRefreshBusy, setFeeRefreshBusy] = useState(false);
   const [feeRefreshStatus, setFeeRefreshStatus] = useState("");
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
-  const appliedSavedPreset = useRef<str
-ing | null>(null);
+  const appliedSavedPreset = useRef<string | null>(null);
   const autoFeeRefreshRanges = useRef(new Set<string>());
   const [datePrefsReady, setDatePrefsReady] = useState(false);
   const restoredDatePrefs = useRef(false);
@@ -1091,8 +1090,7 @@ function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: string; init
   });
   const mappedRows = rows.filter((row) => row.marketingCost !== null);
   const mappedSales = mappedRows.reduce((sum, row) => sum + Math.max(row.sales - row.refunds, 0), 0);
-  const mappedSpend = mappedRows.reduc
-e((sum, row) => sum + (row.marketingCost ?? 0), 0);
+  const mappedSpend = mappedRows.reduce((sum, row) => sum + (row.marketingCost ?? 0), 0);
   const mappedNewCustomers = mappedRows.reduce((sum, row) => sum + (row.customerType === "New" ? row.customers : 0), 0);
   const mappedProfitReady = mappedRows.length > 0 && mappedRows.every((row) => row.contributionProfit !== null);
   const mappedProfit = mappedProfitReady ? mappedRows.reduce((sum, row) => sum + (row.contributionProfit ?? 0), 0) : null;
@@ -1480,8 +1478,7 @@ function Expenses() {
   return <>
     <section className="cost-toolbar">
       <div><span className="eyebrow">COST INPUTS</span><h2>Expenses and payment fees</h2><p>Use effective dates so the P&amp;L applies each cost and gateway rate to the right orders.</p></div>
-      <div className="feature-actions"><button className="primary" disabled={!canEdit} onClick
-={() => setShowAdd(true)}><Plus/> Add expense</button><button disabled={!canEdit} onClick={() => setShowAddPaymentRule(true)}><Plus/> Add payment rule</button></div>
+      <div className="feature-actions"><button className="primary" disabled={!canEdit} onClick={() => setShowAdd(true)}><Plus/> Add expense</button><button disabled={!canEdit} onClick={() => setShowAddPaymentRule(true)}><Plus/> Add payment rule</button></div>
     </section>
     {error && <div className="connection-error cost-error">{error}</div>}
     <section className="panel report-panel">
@@ -1652,7 +1649,7 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
     Shopify: "https://cdn.simpleicons.org/shopify/95BF47",
     "Meta Ads": "https://cdn.simpleicons.org/meta/0668E1",
     "Google Ads": "https://upload.wikimedia.org/wikipedia/commons/c/cc/Google_Ads_icon.svg",
-    "Microsoft Ads": "https://cdn.simpleicons.org/microsoftadvertising/258FFA",
+    "Microsoft Ads": "https://upload.wikimedia.org/wikipedia/commons/9/9f/Microsoft_Advertising_Logo.png?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=original",
     Klaviyo: "https://images.seeklogo.com/logo-png/51/1/klaviyo-logo-png_seeklogo-512370.png",
     GoHighLevel: goHighLevelLogo,
   };
@@ -1937,8 +1934,7 @@ function Connections({ leadGeneration = false, canManage = false }: { leadGenera
       <p className="modal-intro">Connect with Facebook to grant Spine read-only access to your Meta Ads account. There is no Graph API Explorer token to copy and your Facebook password never reaches Spine.</p>
       <div className="connection-notice meta-oauth-notice"><Info/><div><strong>Connect your own Facebook account</strong><span>Choose the Meta ad account you manage, then Spine securely saves the approved connection and imports its daily spend.</span></div><button className="primary" disabled={savingConnection} onClick={connectMetaWithFacebook}><ExternalLink/>{metaConnectionStatus === "error" ? "Reconnect Facebook" : "Connect Facebook"}</button></div>
       {metaConnectionStatus === "error" && metaConnectionError && <div className="connection-error" role="alert">{metaConnectionError}</div>}
-      {metaConnected && metaAccountName && <div className="connected-account"><span/><div><small>CURRENT ACCOUNT</small><strong>{metaAccountName}</strong>{metaLastSync ? <small>{metaLastSync.importedDays.toLocaleString()} daily spend records · latest {metaLastSync.late
-stDate ? new Date(`${metaLastSync.latestDate}T00:00:00Z`).toLocaleDateString("en-GB") : "date unavailable"}</small> : <small>Spend data has not been imported yet.</small>}</div></div>}
+      {metaConnected && metaAccountName && <div className="connected-account"><span/><div><small>CURRENT ACCOUNT</small><strong>{metaAccountName}</strong>{metaLastSync ? <small>{metaLastSync.importedDays.toLocaleString()} daily spend records · latest {metaLastSync.latestDate ? new Date(`${metaLastSync.latestDate}T00:00:00Z`).toLocaleDateString("en-GB") : "date unavailable"}</small> : <small>Spend data has not been imported yet.</small>}</div></div>}
       <div className="help-card"><Info/><div><strong>Alternative for agency-managed accounts</strong><p>Use a Meta system-user token only if your business manages the connection centrally. For normal use, choose <b>Connect Facebook</b> above.</p><a className="meta-developer-link" href="https://developers.facebook.com/tools/explorer" target="_blank" rel="noreferrer"><ExternalLink/>Open Graph API Explorer</a></div></div>
       <label className="form-field"><span>System-user token <small>Optional alternative</small><b className="tooltip-trigger">?<em>Use this only for a centrally managed Meta system user with ads_read and read_insights.</em></b></span><div className="secret-input"><KeyRound/><input value={token} onChange={(event)=>{setToken(event.target.value);setMetaAccounts([]);setAccountId("");setMetaAccountSearch("");setConnectionError("");}} type={showToken?"text":"password"} placeholder="EAAB..." autoComplete="off"/><button onClick={()=>setShowToken(!showToken)}>{showToken?<EyeOff/>:<Eye/>}</button></div></label>
       <div className="meta-account-discovery"><button type="button" disabled={!token.trim() || loadingMetaAccounts} onClick={() => void loadMetaAccounts()}>{loadingMetaAccounts ? "Loading accounts…" : metaAccounts.length ? "Reload ad accounts" : "Find ad accounts"}</button><small>{metaAccounts.length ? `${metaAccounts.length} account${metaAccounts.length === 1 ? "" : "s"} available to this token.` : "Enter your token, then load the ad accounts it can access."}</small></div>
@@ -2208,8 +2204,7 @@ function Customers({ reportRunId, initialRange, focus = "summary" }: { reportRun
     const maxValue = Math.max(...otherValues, 0);
     const intensity = period.period === 0 || value <= 0 || maxValue === 0 ? 0 : Math.max(0.12, Math.min(1, value / maxValue));
     const backgroundColor = period.period === 0 ? "#f0edff" : value <= 0 ? "#f8fafc" : cohortMetric === "retention" ? `hsl(166 63% ${97 - intensity * 22}%)` : `hsl(254 80% ${97 - intensity * 18}%)`;
-    const detail = cohortMetric === "retention" ? `${period.activeCustome
-rs.toLocaleString()} of ${cohort.customers.toLocaleString()} customers returned` : `${formatter.format(period.cumulativeRevenue)} cumulative revenue`;
+    const detail = cohortMetric === "retention" ? `${period.activeCustomers.toLocaleString()} of ${cohort.customers.toLocaleString()} customers returned` : `${formatter.format(period.cumulativeRevenue)} cumulative revenue`;
     return <td className={`cohort-cell ${period.period === 0 ? "cohort-baseline" : value <= 0 ? "cohort-empty" : "cohort-active"}`} key={period.period} style={{ backgroundColor }} title={`${cohort.key} · Month ${period.period}: ${detail}`}>
       <strong>{cohortMetric === "retention" ? (period.period > 0 && period.activeCustomers === 0 ? "—" : `${(period.retentionRate * 100).toFixed(1)}%`) : period.cumulativeRevenue === 0 ? "—" : formatter.format(period.cumulativeRevenue)}</strong>
       <small>{cohortMetric === "retention" ? period.period === 0 ? "starting customers" : period.activeCustomers ? `${period.activeCustomers.toLocaleString()} returned` : "no repeat orders" : period.period === 0 ? "starting revenue" : `through Month ${period.period}`}</small>
@@ -2489,7 +2484,6 @@ export function AnalyticsApp() {
     </main>
   </div>;
 }
-
 
 
 
