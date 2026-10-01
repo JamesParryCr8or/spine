@@ -9,7 +9,7 @@ import { allocatePeriodCost, operatingCostBucket } from "@/lib/analytics/cost-al
 import { selectEffectiveShippingCost, summarizeShippingCoverage, type ProductShippingCost, type ShippingCoverage } from "@/lib/analytics/shipping-cost";
 import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { calculateProfitAndLoss } from "@/lib/analytics/profit-and-loss";
-import { refreshReportingData } from "@/lib/analytics/reporting-refresh";
+import { createReportingClient, refreshMicrosoftAdsReporting, refreshReportingData } from "@/lib/analytics/reporting-refresh";
 
 export const maxDuration = 60;
 
@@ -250,6 +250,18 @@ export async function GET(request: Request) {
   const reportDates = shopifyDaily.length ? shopifyDaily.map((day) => day.sales_date) : orderDates;
   const rangeStart = reportDates.length ? reportDates.reduce((first, date) => date < first ? date : first) : null;
   const rangeEnd = reportDates.length ? reportDates.reduce((last, date) => date > last ? date : last) : null;
+
+  // "All imported data" has no URL dates. Refresh Microsoft spend using the
+  // actual imported sales window before reading the marketing rows below.
+  if (!fromDate && !toDate && rangeStart && rangeEnd && params.get("refresh") !== "0") {
+    try {
+      await refreshMicrosoftAdsReporting(createReportingClient(), store, rangeStart, rangeEnd);
+    } catch (error) {
+      console.warn("Microsoft Advertising refresh failed", {
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
   const metaInsights: MetaInsight[] = [];
   const googleInsights: GoogleInsight[] = [];
   const bingInsights: Array<{ insight_date: string; spend: string; currency: string }> = [];
@@ -331,6 +343,8 @@ export async function GET(request: Request) {
   shippingCostsAvailable = lines.length > 0 ? shippingCoverage.missingLines === 0 : Boolean(usableStoreCostDefault || defaultShippingCosts.length > 0);
   const netProfitAvailable = transactionFeesComplete && marketingSpendAvailable && shippingCostsAvailable && handlingCostsAvailable && missingCostLines === 0 && unallocatedOperatingCosts === 0;
   const calculated = calculateProfitAndLoss({ ...totals, refunds, cogs, marketingSpend, transactionFees, merchantShippingCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, complete: netProfitAvailable });
+  const { data: microsoftConnection } = await supabase.from("data_connections")
+    .select("last_error").eq("store_id", store.id).eq("provider", "bing_ads").maybeSingle();
 
   return NextResponse.json({
     hasData: shopifyDaily.length > 0 || includedOrders.length > 0,
@@ -338,6 +352,7 @@ export async function GET(request: Request) {
     timezone: store.timezone || "UTC",
     currencyCoverage: currencyCoverage.summary(),
     marketingCurrencyCoverage: marketingCoverage,
+    microsoftAdsImportError: microsoftConnection?.last_error ?? null,
     transactionFeeCoverage: { salesDays: salesDays.length, reportedFeeDays: reportedFeeDays.length, latestReportedFeeDate: reportedFeeDays.at(-1)?.sales_date ?? null },
     calculatedAt: new Date().toISOString(),
     metrics: { ...totals, refunds, cogs, ...calculated, marketingSpend, metaMarketingSpend, googleMarketingSpend, bingMarketingSpend, transactionFees, merchantShippingCosts, variantShippingCosts, shippingFallbackCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, orders: shopifyDaily.length ? shopifyDaily.reduce((total, day) => total + day.orders, 0) : includedOrders.length, unitsSold: dailyUnitCount || totalOrderUnits, missingCostLines, missingShippingLines: shippingCoverage.missingLines, shippingOverrideLines: shippingCoverage.overrideLines, shippingFallbackLines: shippingCoverage.fallbackLines, shippingFallbackRate: shippingCoverage.fallbackRate, unallocatedOperatingCosts },
