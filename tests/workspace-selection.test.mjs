@@ -60,3 +60,32 @@ test("returns an empty selection without memberships", () => {
     store: null,
   });
 });
+
+test("selects only the invited store when a person has memberships in several stores", () => {
+  const invitedMemberships = [
+    { organizationId: "org-a", storeId: "store-a-1", role: "viewer" },
+    { organizationId: "org-a", storeId: "store-a-2", role: "admin" },
+  ];
+  assert.deepEqual(selectActiveWorkspace({
+    memberships: invitedMemberships,
+    stores,
+    requestedOrganizationId: "org-a",
+    requestedStoreId: "store-a-2",
+  }), {
+    membership: invitedMemberships[1],
+    store: stores[1],
+  });
+});
+
+test("selects an invited store when the organization cookie is stale", () => {
+  const invitedMembership = { organizationId: "org-b", storeId: "store-b-1", role: "viewer" };
+  assert.deepEqual(selectActiveWorkspace({
+    memberships: [invitedMembership],
+    stores,
+    requestedOrganizationId: "org-missing",
+    requestedStoreId: "store-b-1",
+  }), {
+    membership: invitedMembership,
+    store: stores[2],
+  });
+});

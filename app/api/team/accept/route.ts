@@ -9,12 +9,13 @@ export async function GET(request: NextRequest) {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return NextResponse.json({ error: "This invitation is invalid or expired" }, { status: 404 });
   const admin = createAdminClient();
   const { data, error } = await admin.from("organization_invitations")
-    .select("email")
+    .select("email,store_id,stores(name)")
     .eq("token_hash", createHash("sha256").update(token).digest("hex"))
     .is("accepted_at", null).is("revoked_at", null)
     .gt("expires_at", new Date().toISOString()).maybeSingle();
   if (error || !data) return NextResponse.json({ error: "This invitation is invalid or expired" }, { status: 404 });
-  return NextResponse.json({ email: data.email }, { headers: { "Cache-Control": "no-store" } });
+  const store = Array.isArray(data.stores) ? data.stores[0] : data.stores;
+  return NextResponse.json({ email: data.email, storeName: store?.name ?? null }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(request: Request) {
@@ -24,14 +25,15 @@ export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: { user }, error: userError } = await supabase.auth.getUser();
   if (userError || !user) return NextResponse.json({ error: "Sign in with the invited email first" }, { status: 401 });
-  const { data: organizationId, error } = await supabase.rpc("accept_organization_invitation", {
+  const { data: storeId, error } = await supabase.rpc("accept_organization_invitation", {
     invite_token_hash: createHash("sha256").update(token).digest("hex"),
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  const { data: store } = await supabase.from("stores").select("id").eq("organization_id", organizationId).order("created_at").limit(1).maybeSingle();
+  const { data: store } = await supabase.from("stores").select("id,organization_id").eq("id", storeId).maybeSingle();
+  if (!store) return NextResponse.json({ error: "The invited store could not be opened" }, { status: 500 });
   const response = NextResponse.json({ ok: true });
   const cookieOptions = { httpOnly: true, sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 365 };
-  response.cookies.set(activeOrganizationCookie, organizationId, cookieOptions);
-  if (store) response.cookies.set(activeStoreCookie, store.id, cookieOptions);
+  response.cookies.set(activeOrganizationCookie, store.organization_id, cookieOptions);
+  response.cookies.set(activeStoreCookie, store.id, cookieOptions);
   return response;
 }

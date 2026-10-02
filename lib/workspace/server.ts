@@ -39,23 +39,41 @@ export async function requireWorkspace(options: WorkspaceOptions = {}) {
     };
   }
 
-  const { data: membershipRows, error: membershipError } = await supabase
+  const [{ data: membershipRows, error: membershipError }, { data: storeMembershipRows, error: storeMembershipError }] = await Promise.all([
+    supabase
     .from("organization_members")
     .select("organization_id,role,created_at")
     .eq("user_id", userId)
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: true }),
+    supabase
+      .from("store_memberships")
+      .select("store_id,role,created_at,stores!inner(organization_id)")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true }),
+  ]);
 
-  if (membershipError) {
+  if (membershipError || storeMembershipError) {
     return {
       ok: false as const,
-      response: NextResponse.json({ error: membershipError.message }, { status: 500 }),
+      response: NextResponse.json({ error: membershipError?.message ?? storeMembershipError?.message }, { status: 500 }),
     };
   }
 
-  const memberships = (membershipRows ?? []).map((membership) => ({
-    organizationId: membership.organization_id,
-    role: membership.role as WorkspaceRole,
-  })) satisfies WorkspaceMembership[];
+  const memberships = [
+    ...(membershipRows ?? []).map((membership) => ({
+      organizationId: membership.organization_id,
+      role: membership.role as WorkspaceRole,
+      storeId: null,
+    })),
+    ...(storeMembershipRows ?? []).map((membership) => {
+      const store = Array.isArray(membership.stores) ? membership.stores[0] : membership.stores;
+      return {
+        organizationId: store.organization_id,
+        role: membership.role as WorkspaceRole,
+        storeId: membership.store_id,
+      };
+    }),
+  ] satisfies WorkspaceMembership[];
 
   if (!memberships.length) {
     return {
@@ -64,7 +82,7 @@ export async function requireWorkspace(options: WorkspaceOptions = {}) {
     };
   }
 
-  const organizationIds = memberships.map((membership) => membership.organizationId);
+  const organizationIds = [...new Set(memberships.map((membership) => membership.organizationId))];
   const { data: storeRows, error: storeError } = await supabase
     .from("stores")
     .select("id,organization_id,name,currency,reporting_currency,timezone,shopify_domain,business_model")
