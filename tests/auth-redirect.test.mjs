@@ -6,6 +6,7 @@ import { safeAuthRedirect } from "../lib/auth/redirect.ts";
 test("allows local auth destinations", () => {
   assert.equal(safeAuthRedirect("/protected"), "/protected");
   assert.equal(safeAuthRedirect("/protected?view=Reports"), "/protected?view=Reports");
+  assert.equal(safeAuthRedirect("/auth/update-password?next=%2Finvite%2Fabc"), "/auth/update-password?next=%2Finvite%2Fabc");
 });
 
 test("rejects external and malformed auth destinations", () => {

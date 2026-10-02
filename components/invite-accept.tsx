@@ -4,11 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Check, Mail, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, Check, LockKeyhole, Mail, ShieldCheck, Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import "./invite-accept.css";
 
-type InviteState = "checking" | "signed-out" | "sending-code" | "code-sent" | "accepting" | "accepted" | "error";
+type InviteState = "checking" | "ready" | "working" | "email-sent" | "accepting" | "accepted" | "error";
+type InviteMode = "create" | "sign-in";
 
 async function readInviteResponse(response: Response) {
   const contentType = response.headers.get("content-type") ?? "";
@@ -24,10 +25,14 @@ export function InviteAccept({ token }: { token: string }) {
   const router = useRouter();
   const attempted = useRef(false);
   const [state, setState] = useState<InviteState>("checking");
+  const [mode, setMode] = useState<InviteMode>("create");
   const [email, setEmail] = useState("");
   const [storeName, setStoreName] = useState("");
-  const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
+
+  const callbackUrl = () => `${window.location.origin}/auth/confirm?next=${encodeURIComponent(`/invite/${token}`)}`;
 
   const acceptInvitation = useCallback(async () => {
     setState("accepting");
@@ -53,7 +58,7 @@ export function InviteAccept({ token }: { token: string }) {
     setStoreName(preview.storeName || "your store");
 
     const { data: { user } } = await createClient().auth.getUser();
-    if (!user) { setState("signed-out"); return; }
+    if (!user) { setState("ready"); return; }
     await acceptInvitation();
   }, [acceptInvitation, token]);
 
@@ -66,41 +71,64 @@ export function InviteAccept({ token }: { token: string }) {
     });
   }, [checkInvitation]);
 
-  const sendCode = async (event: React.FormEvent<HTMLFormElement>) => {
+  const createAccount = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (password.length < 8) { setError("Use at least eight characters for your password."); return; }
+    if (password !== confirmPassword) { setError("The passwords do not match."); return; }
     setError("");
-    setState("sending-code");
+    setState("working");
     try {
-      const { error: authError } = await createClient().auth.signInWithOtp({
-        email,
-        options: { shouldCreateUser: true },
+      const { data, error: authError } = await createClient().auth.signUp({
+        email, password, options: { emailRedirectTo: callbackUrl() },
       });
       if (authError) throw authError;
-      setState("code-sent");
+      if (data.user?.identities?.length === 0) {
+        setMode("sign-in");
+        setState("ready");
+        setError("This email already has a Spine account. Sign in to join the store.");
+        return;
+      }
+      if (data.session) await acceptInvitation();
+      else setState("email-sent");
     } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : "Could not send the verification code");
-      setState("signed-out");
+      setError(reason instanceof Error ? reason.message : "Could not create your account");
+      setState("ready");
     }
   };
 
-  const verifyCode = async (event: React.FormEvent<HTMLFormElement>) => {
+  const signIn = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
-    setState("accepting");
+    setState("working");
     try {
-      const { error: authError } = await createClient().auth.verifyOtp({ email, token: code.trim(), type: "email" });
+      const { error: authError } = await createClient().auth.signInWithPassword({ email, password });
       if (authError) throw authError;
       await acceptInvitation();
     } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : "That code could not be verified");
-      setState("code-sent");
+      setError(reason instanceof Error ? reason.message : "Could not sign in");
+      setState("ready");
+    }
+  };
+
+  const sendEmailLink = async () => {
+    setError("");
+    setState("working");
+    try {
+      const { error: authError } = await createClient().auth.signInWithOtp({
+        email, options: { shouldCreateUser: false, emailRedirectTo: callbackUrl() },
+      });
+      if (authError) throw authError;
+      setState("email-sent");
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : "Could not send a sign-in link");
+      setState("ready");
     }
   };
 
   const switchAccount = async () => {
     await createClient().auth.signOut();
     setError("");
-    setState("signed-out");
+    setState("ready");
     router.refresh();
   };
 
@@ -128,38 +156,36 @@ export function InviteAccept({ token }: { token: string }) {
           <div className="auth-form invite-form">
             <div className="auth-form-heading">
               <span className="auth-welcome">SPINE STORE INVITATION</span>
-              <h2>{state === "code-sent" ? "Check your inbox" : state === "accepted" ? "You’re in" : "Join your team"}</h2>
-              <p>{state === "code-sent" ? <>We sent a secure sign-in code to <strong>{email}</strong>.</> : <>Accept your invitation to <strong>{storeName}</strong>.</>}</p>
+              <h2>{state === "email-sent" ? "Check your inbox" : state === "accepted" ? "You’re in" : mode === "create" ? "Create your account" : "Sign in to join"}</h2>
+              <p>{state === "email-sent" ? <>Open the confirmation or sign-in link sent to <strong>{email}</strong>, then we’ll take you back here to join <strong>{storeName}</strong>.</> : <>Accept your invitation to <strong>{storeName}</strong>.</>}</p>
             </div>
 
             {state === "checking" || state === "accepting" || state === "accepted" ? (
               <div className="invite-progress" role="status"><span className="invite-spinner" />{state === "accepted" ? "Opening your workspace…" : state === "accepting" ? "Securing your access…" : "Checking your invitation…"}</div>
-            ) : state === "signed-out" || state === "sending-code" ? (
-              <form className="invite-code-form" onSubmit={(event) => void sendCode(event)}>
-                <label htmlFor="invite-email">Invited email</label>
-                <div className="invite-email-field"><Mail aria-hidden="true"/><input id="invite-email" type="email" autoComplete="email" value={email} readOnly /></div>
-                <p className="invite-form-hint">We’ll email you a one-time code to securely confirm this address.</p>
-                {error && <p className="auth-error" role="alert">{error}</p>}
-                <button className="auth-submit" disabled={state === "sending-code"} type="submit"><span>{state === "sending-code" ? "Sending your code…" : "Email me a sign-in code"}</span><ArrowRight /></button>
-              </form>
-            ) : state === "code-sent" ? (
-              <form className="invite-code-form" onSubmit={(event) => void verifyCode(event)}>
-                <label htmlFor="invite-code">Six-digit email code</label>
-                <input className="invite-code-input" id="invite-code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} placeholder="000000" value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} required />
-                {error && <p className="auth-error" role="alert">{error}</p>}
-                <button className="auth-submit" disabled={code.length !== 6} type="submit"><span>Verify and join store</span><ArrowRight /></button>
-                <button className="invite-resend" type="button" onClick={() => { setCode(""); setState("signed-out"); }}>Send a new code</button>
-              </form>
-            ) : (
+            ) : state === "email-sent" ? (
+              <div className="invite-email-sent" role="status"><Mail aria-hidden="true"/><p>Use the link in your email. It will bring you back to this invitation automatically.</p><button className="invite-resend" type="button" onClick={() => setState("ready")}>Try another sign-in method</button></div>
+            ) : state === "error" ? (
               <div className="invite-error-state">
                 <p className="auth-error" role="alert">{error}</p>
                 <p>Invitation links expire after seven days and can only be used by the invited email address.</p>
                 <button className="auth-submit" onClick={() => window.location.reload()}><span>Try again</span><ArrowRight /></button>
                 <button className="invite-resend" type="button" onClick={() => void switchAccount()}>Switch account</button>
               </div>
+            ) : (
+              <form className="invite-code-form" onSubmit={(event) => void (mode === "create" ? createAccount(event) : signIn(event))}>
+                <label htmlFor="invite-email">Invited email</label>
+                <div className="invite-email-field"><Mail aria-hidden="true"/><input id="invite-email" type="email" autoComplete="email" value={email} readOnly /></div>
+                <label htmlFor="invite-password">{mode === "create" ? "Create password" : "Password"}</label>
+                <div className="invite-email-field"><LockKeyhole aria-hidden="true"/><input id="invite-password" type="password" autoComplete={mode === "create" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} minLength={mode === "create" ? 8 : undefined} required /></div>
+                {mode === "create" && <><label htmlFor="invite-confirm-password">Confirm password</label><div className="invite-email-field"><LockKeyhole aria-hidden="true"/><input id="invite-confirm-password" type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></div><p className="invite-form-hint">We’ll send a confirmation link to your invited email before opening the store.</p></>}
+                {error && <p className="auth-error" role="alert">{error}</p>}
+                <button className="auth-submit" disabled={state === "working"} type="submit"><span>{state === "working" ? "Please wait…" : mode === "create" ? "Create account and join" : "Sign in and join"}</span><ArrowRight /></button>
+                {mode === "sign-in" && <><button className="invite-resend" disabled={state === "working"} type="button" onClick={() => void sendEmailLink()}>Email me a sign-in link instead</button><Link className="invite-back-link" href={`/auth/forgot-password?next=${encodeURIComponent(`/invite/${token}`)}`}>Forgot password?</Link></>}
+                <button className="invite-resend" disabled={state === "working"} type="button" onClick={() => { setMode(mode === "create" ? "sign-in" : "create"); setPassword(""); setConfirmPassword(""); setError(""); }}>{mode === "create" ? "Already have an account? Sign in" : "New to Spine? Create an account"}</button>
+              </form>
             )}
             <div className="invite-security"><ShieldCheck aria-hidden="true"/><span>Secure sign-in for the invited email address</span></div>
-            <Link className="invite-back-link" href="/auth/login">Back to sign in</Link>
+            <Link className="invite-back-link" href={`/auth/login?next=${encodeURIComponent(`/invite/${token}`)}`}>Back to sign in</Link>
           </div>
           <p className="auth-legal">Your invitation grants access only to {storeName} with the role selected by its administrator.</p>
         </section>

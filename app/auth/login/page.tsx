@@ -2,13 +2,15 @@ import { LoginForm } from "@/components/login-form";
 import { createClient } from "@/lib/supabase/server";
 import { BarChart3, Check, Sparkles, TrendingUp } from "lucide-react";
 import { redirect } from "next/navigation";
+import { safeAuthRedirect } from "@/lib/auth/redirect";
 
 export const instant = false;
 
-export default async function Page() {
+export default async function Page({ searchParams }: { searchParams: Promise<{ next?: string | string[] }> }) {
   const supabase = await createClient();
   const { data } = await supabase.auth.getClaims();
-  if (data?.claims) redirect("/protected");
+  const { next } = await searchParams;
+  if (data?.claims) redirect(safeAuthRedirect(typeof next === "string" ? next : null));
 
   return (
     <div className="auth-page">
@@ -35,7 +37,7 @@ export default async function Page() {
         </aside>
         <section className="auth-form-side">
           <div className="auth-mobile-brand"><span><BarChart3 /></span>Spine</div>
-          <LoginForm />
+          <LoginForm next={safeAuthRedirect(typeof next === "string" ? next : null)} />
           <p className="auth-legal">By continuing, you agree to secure and responsible use of your connected store data.</p>
         </section>
       </main>

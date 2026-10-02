@@ -1,105 +1,44 @@
 "use client";
 
-import { cn } from "@/lib/utils";
-import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useState } from "react";
+import { ArrowRight, Mail } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
-export function ForgotPasswordForm({
-  className,
-  ...props
-}: React.ComponentPropsWithoutRef<"div">) {
+export function ForgotPasswordForm({ next = "/protected" }: { next?: string }) {
   const [email, setEmail] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const handleForgotPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const supabase = createClient();
-    setIsLoading(true);
-    setError(null);
-
+  const sendReset = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
     try {
-      // The url which will be included in the email. This URL needs to be configured in your redirect URLs in the Supabase dashboard at https://supabase.com/dashboard/project/_/auth/url-configuration
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/update-password`,
-      });
-      if (error) throw error;
-      setSuccess(true);
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "An error occurred");
+      const updatePasswordPath = `/auth/update-password?next=${encodeURIComponent(next)}`;
+      const redirectTo = `${window.location.origin}/auth/confirm?next=${encodeURIComponent(updatePasswordPath)}`;
+      const { error: authError } = await createClient().auth.resetPasswordForEmail(email.trim(), { redirectTo });
+      if (authError) throw authError;
+      setSent(true);
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : "Could not send the reset link. Please try again.");
     } finally {
-      setIsLoading(false);
+      setBusy(false);
     }
   };
 
-  return (
-    <div className={cn("flex flex-col gap-6", className)} {...props}>
-      {success ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl">Check Your Email</CardTitle>
-            <CardDescription>Password reset instructions sent</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">
-              If you registered using your email and password, you will receive
-              a password reset email.
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl">Reset Your Password</CardTitle>
-            <CardDescription>
-              Type in your email and we&apos;ll send you a link to reset your
-              password
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleForgotPassword}>
-              <div className="flex flex-col gap-6">
-                <div className="grid gap-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="m@example.com"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-                {error && <p className="text-sm text-red-500">{error}</p>}
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Sending..." : "Send reset email"}
-                </Button>
-              </div>
-              <div className="mt-4 text-center text-sm">
-                Already have an account?{" "}
-                <Link
-                  href="/auth/login"
-                  className="underline underline-offset-4"
-                >
-                  Login
-                </Link>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      )}
+  return <div className="auth-form">
+    <div className="auth-form-heading">
+      <span className="auth-welcome">ACCOUNT RECOVERY</span>
+      <h2>{sent ? "Check your inbox" : "Forgot your password?"}</h2>
+      <p>{sent ? <>If <strong>{email}</strong> has a Spine account, we’ve sent a password reset link. Open it to choose a new password.</> : "Enter your account email and we’ll send a secure link to reset your password."}</p>
     </div>
-  );
+    {!sent && <form onSubmit={(event) => void sendReset(event)} className="auth-fields">
+      <div className="auth-field"><label htmlFor="recovery-email">Email address</label><div className="auth-input-wrap"><Mail aria-hidden="true"/><input id="recovery-email" type="email" autoComplete="email" placeholder="you@company.com" required value={email} onChange={(event) => setEmail(event.target.value)} /></div></div>
+      {error && <p className="auth-error" role="alert">{error}</p>}
+      <button type="submit" className="auth-submit" disabled={busy}><span>{busy ? "Sending…" : "Send reset link"}</span><ArrowRight aria-hidden="true"/></button>
+    </form>}
+    <div className="auth-signup"><Link href={`/auth/login?next=${encodeURIComponent(next)}`}>Back to sign in</Link></div>
+  </div>;
 }

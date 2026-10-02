@@ -12,8 +12,9 @@ import { useState } from "react";
 
 export function LoginForm({
   className,
+  next = "/protected",
   ...props
-}: React.ComponentPropsWithoutRef<"div">) {
+}: React.ComponentPropsWithoutRef<"div"> & { next?: string }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +26,7 @@ export function LoginForm({
 
   const nextDestination = () => {
     const candidate = new URLSearchParams(window.location.search).get("next");
-    return candidate && /^\/(?!\/)[^\r\n]*$/.test(candidate) ? candidate : "/protected";
+    return candidate && /^\/(?!\/)[^\r\n]*$/.test(candidate) ? candidate : next;
   };
   const callbackUrl = () => `${window.location.origin}/auth/confirm?next=${encodeURIComponent(nextDestination())}`;
 
@@ -128,7 +129,7 @@ export function LoginForm({
           <div className="auth-field">
             <div className="auth-label-row">
               <Label htmlFor="password">Password</Label>
-              <Link href="/auth/forgot-password">Forgot password?</Link>
+              <Link href={`/auth/forgot-password?next=${encodeURIComponent(next)}`}>Forgot password?</Link>
             </div>
             <div className="auth-input-wrap">
               <LockKeyhole aria-hidden="true" />
@@ -153,7 +154,7 @@ export function LoginForm({
             <Mail aria-hidden="true"/><span>{isLoading && authMethod === "magic" ? "Sending link…" : "Email me a sign-in link"}</span>
           </Button>
         </div>
-        <div className="auth-signup">New to Spine? <Link href="/auth/sign-up">Create an account</Link></div>
+        <div className="auth-signup">New to Spine? <Link href={`/auth/sign-up?next=${encodeURIComponent(next)}`}>Create an account</Link></div>
         <a className="auth-demo-link" href="/api/demo">Explore the demo first <ArrowRight /></a>
       </form>
     </div>
