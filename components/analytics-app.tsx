@@ -700,7 +700,6 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
   const autoFeeRefreshRanges = useRef(new Set<string>());
   const [datePrefsReady, setDatePrefsReady] = useState(false);
   const restoredDatePrefs = useRef(false);
-  const lastFeeRefreshVersion = useRef(0);
   useEffect(() => {
     if (initialRange) { setDatePrefsReady(true); return; }
     setDatePrefsReady(false);
@@ -729,10 +728,12 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
     if (fromDate) params.set("from", fromDate);
     if (toDate) params.set("to", toDate);
     const url = `/api/analytics/pnl${params.size ? `?${params}` : ""}`;
-    const force = feeRefreshVersion !== lastFeeRefreshVersion.current;
-    lastFeeRefreshVersion.current = feeRefreshVersion;
-    fetchCachedJson<PnlData>(url, { force })
+    fetchCachedJson<PnlData>(url, { force: true })
       .then(async (payload: PnlData) => {
+        // A full-period request may import newly available payment-gateway days.
+        // Discard period responses calculated before that import so the monthly
+        // fee rows and profit figures agree with the full-period total.
+        invalidateCachedJson("/api/analytics/pnl?from=");
         setPnl(payload); setComparison(null); setYearComparison(null);
         finishReportRun(payload ? "completed" : "failed", payload?.metrics.orders ?? null);
         if (!payload?.period) return;
@@ -745,8 +746,8 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
         const previousYearStart = new Date(start); previousYearStart.setUTCFullYear(previousYearStart.getUTCFullYear() - 1);
         const previousYearEnd = new Date(end); previousYearEnd.setUTCFullYear(previousYearEnd.getUTCFullYear() - 1);
         const [previousPayload, previousYearPayload] = await Promise.all([
-          fetchCachedJson<PnlData>(`/api/analytics/pnl?from=${date(previousStart)}&to=${date(previousEnd)}&refresh=0`),
-          fetchCachedJson<PnlData>(`/api/analytics/pnl?from=${date(previousYearStart)}&to=${date(previousYearEnd)}&refresh=0`),
+          fetchCachedJson<PnlData>(`/api/analytics/pnl?from=${date(previousStart)}&to=${date(previousEnd)}&refresh=0`, { force: true }),
+          fetchCachedJson<PnlData>(`/api/analytics/pnl?from=${date(previousYearStart)}&to=${date(previousYearEnd)}&refresh=0`, { force: true }),
         ]);
         setComparison(previousPayload);
         setYearComparison(previousYearPayload);
@@ -778,7 +779,7 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
       setPeriodLoading(true);
       Promise.all(periods.map(async (period) => {
         if (period.start === pnl.period?.start && period.end === pnl.period?.end) return { period, data: pnl };
-        const data = await fetchCachedJson<PnlData>("/api/analytics/pnl?from=" + period.start + "&to=" + period.end + "&refresh=0");
+        const data = await fetchCachedJson<PnlData>("/api/analytics/pnl?from=" + period.start + "&to=" + period.end + "&refresh=0", { force: true });
         return { period, data };
       })).then((results) => setPeriodData(results.filter((result): result is PnlPeriodData => result !== null))).catch((error) => { if (error instanceof Error && error.name !== "AbortError") setPeriodData([]); }).finally(() => { if (!controller.signal.aborted) setPeriodLoading(false); });
     }, 0);
