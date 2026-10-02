@@ -22,7 +22,8 @@ export function shopifyThirdPartyRate(plan: string | null | undefined) {
 export function calculateExternalPaymentFees(days: GatewayPaymentDay[], rules: EffectivePaymentFeeRule[], settings: PaymentEstimateSettings | null, currency: string) {
   const defaultPercentage = Number(settings?.default_percentage_rate ?? 2);
   const defaultFixed = Number(settings?.default_fixed_fee ?? (currency === "GBP" ? 0.23 : 0.25));
-  const plan = settings?.plan_override || settings?.shopify_plan || null;
+  // Start with Basic until Shopify reports a plan or the merchant chooses one.
+  const plan = settings?.plan_override || settings?.shopify_plan || "Basic";
   const surchargeRate = settings?.surcharge_rate_override == null
     ? shopifyThirdPartyRate(plan) : Number(settings.surcharge_rate_override);
   const shopifyPaymentsPresent = days.some((day) => ["shopify payments", "shopify_payments"].includes(day.gateway.trim().toLowerCase()) && day.transactions > 0);

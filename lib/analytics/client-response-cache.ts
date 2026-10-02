@@ -1,6 +1,12 @@
 const responseCache = new Map<string, { expiresAt: number; value: unknown }>();
 const inFlight = new Map<string, Promise<unknown>>();
 
+export function invalidateCachedJson(prefix: string) {
+  for (const key of responseCache.keys()) {
+    if (key.startsWith(prefix)) responseCache.delete(key);
+  }
+}
+
 export function peekCachedJson<T>(key: string): T | null {
   const cached = responseCache.get(key);
   if (!cached || cached.expiresAt <= Date.now()) {

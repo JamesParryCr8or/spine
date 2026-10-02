@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { reportingPeriods, type ReportingGranularity, type ReportingPeriod } from "@/lib/analytics/reporting-periods";
 import { buildCampaignUrl } from "@/lib/analytics/utm-builder";
-import { fetchCachedJson } from "@/lib/analytics/client-response-cache";
+import { fetchCachedJson, invalidateCachedJson } from "@/lib/analytics/client-response-cache";
 import { calculateProfitPerNewCustomer } from "@/lib/analytics/customer-profit";
 import { buildPnlExport, formatPnlValue, type PnlExportGroup } from "@/lib/exports/pnl";
 import type { ColumnStyle } from "@/lib/exports/xlsx";
@@ -826,7 +826,7 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
     ["Gross profit", signed(pnl.metrics.grossProfit)],
     ["Shopify payment fees", pnl.metrics.shopifyPaymentFees > 0 ? signed(-pnl.metrics.shopifyPaymentFees) : "Not available"],
     ["Estimated external processor fees", pnl.externalPaymentFees?.available ? signed(-pnl.metrics.estimatedProcessorFees) : "Not imported"],
-    ["Estimated Shopify third-party fees", pnl.externalPaymentFees?.available && pnl.externalPaymentFees.surchargeRate !== null ? signed(-pnl.metrics.estimatedShopifySurcharge) : "Select Shopify plan"],
+    ["Estimated Shopify third-party fees", !pnl.externalPaymentFees?.available ? "Not imported" : pnl.externalPaymentFees.surchargeRate !== null ? signed(-pnl.metrics.estimatedShopifySurcharge) : "Select Shopify plan"],
     ["Fixed operating costs", signed(-pnl.metrics.fixedOperatingExpenses)],
     ["Variable operating costs", signed(-pnl.metrics.variableOperatingExpenses)],
     ["Operating expenses", signed(-pnl.metrics.operatingExpenses)],
@@ -862,7 +862,7 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
     { section: "Marketing", label: "Total marketing spend", value: (data) => data.availability.marketingSpend ? (-data.metrics.marketingSpend) : "Not imported" },
     { section: "Transaction costs", label: "Shopify payment fees", value: (data) => data.metrics.shopifyPaymentFees > 0 ? (-data.metrics.shopifyPaymentFees) : "Not available" },
     { section: "Transaction costs", label: "Estimated external processor fees", value: (data) => data.externalPaymentFees?.available ? (-data.metrics.estimatedProcessorFees) : "Not imported" },
-    { section: "Transaction costs", label: "Estimated Shopify third-party fees", value: (data) => data.externalPaymentFees?.available && data.externalPaymentFees.surchargeRate !== null ? (-data.metrics.estimatedShopifySurcharge) : "Select Shopify plan" },
+    { section: "Transaction costs", label: "Estimated Shopify third-party fees", value: (data) => !data.externalPaymentFees?.available ? "Not imported" : data.externalPaymentFees.surchargeRate !== null ? (-data.metrics.estimatedShopifySurcharge) : "Select Shopify plan" },
     { section: "Transaction costs", label: "Total payment fees", value: (data) => (-data.metrics.transactionFees) },
     { section: "Shipping and handling", label: "Store fulfilment fallback", value: (data) => (-data.metrics.shippingFallbackCosts) },
     { section: "Shipping and handling", label: "Variant shipping overrides", value: (data) => (-data.metrics.variantShippingCosts) },
@@ -1583,6 +1583,7 @@ function Expenses() {
       const response = await fetch("/api/costs/payment-fees", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(estimateForm) });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Could not save payment estimate settings");
+      invalidateCachedJson("/api/analytics/pnl");
       await load();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save payment estimate settings"); } finally { setSaving(false); }
   };
@@ -1599,7 +1600,7 @@ function Expenses() {
     </section>
     <section className="panel report-panel">
       <div className="panel-head"><div><span className="eyebrow">PAYMENT ESTIMATES</span><h2>External processor defaults</h2><p>Successful external payments use these estimates until you set a rate for that processor. The fixed fee applies once per payment, in {currency}. Shopify&apos;s third-party surcharge is estimated separately from the store plan.</p></div></div>
-      <div className="cost-form-grid"><label className="form-field"><span>Shopify plan {paymentSettings?.shopify_plan ? `(detected: ${paymentSettings.shopify_plan})` : "(not detected yet)"}</span><select value={estimateForm.planOverride} onChange={(event) => setEstimateForm({ ...estimateForm, planOverride: event.target.value })}><option value="">Use detected plan</option>{["Basic", "Grow", "Advanced", "Plus"].map((plan) => <option key={plan} value={plan}>{plan}</option>)}</select></label><label className="form-field"><span>Default processor rate (%)</span><input inputMode="decimal" value={estimateForm.defaultPercentageRate} onChange={(event) => setEstimateForm({ ...estimateForm, defaultPercentageRate: event.target.value })}/></label><label className="form-field"><span>Default fixed fee per payment ({currency})</span><input inputMode="decimal" value={estimateForm.defaultFixedFee} onChange={(event) => setEstimateForm({ ...estimateForm, defaultFixedFee: event.target.value })}/></label><label className="form-field"><span>Shopify surcharge override (%) <small>Optional</small></span><input inputMode="decimal" value={estimateForm.surchargeRateOverride} onChange={(event) => setEstimateForm({ ...estimateForm, surchargeRateOverride: event.target.value })} placeholder="Use plan rate"/></label></div>
+      <div className="cost-form-grid"><label className="form-field"><span>Shopify plan {paymentSettings?.shopify_plan ? `(detected: ${paymentSettings.shopify_plan})` : "(Basic until detected)"}</span><select value={estimateForm.planOverride} onChange={(event) => setEstimateForm({ ...estimateForm, planOverride: event.target.value })}><option value="">Automatic (Basic until detected)</option>{["Basic", "Grow", "Advanced", "Plus"].map((plan) => <option key={plan} value={plan}>{plan}</option>)}</select></label><label className="form-field"><span>Default processor rate (%)</span><input inputMode="decimal" value={estimateForm.defaultPercentageRate} onChange={(event) => setEstimateForm({ ...estimateForm, defaultPercentageRate: event.target.value })}/></label><label className="form-field"><span>Default fixed fee per payment ({currency})</span><input inputMode="decimal" value={estimateForm.defaultFixedFee} onChange={(event) => setEstimateForm({ ...estimateForm, defaultFixedFee: event.target.value })}/></label><label className="form-field"><span>Shopify surcharge override (%) <small>Optional</small></span><input inputMode="decimal" value={estimateForm.surchargeRateOverride} onChange={(event) => setEstimateForm({ ...estimateForm, surchargeRateOverride: event.target.value })} placeholder="Use plan rate"/></label></div>
       <div className="feature-actions"><button className="primary" disabled={!canEdit || saving} onClick={() => void saveEstimateSettings()}>{saving ? "Saving…" : "Save estimate settings"}</button></div>
     </section>
     <section className="panel report-panel">

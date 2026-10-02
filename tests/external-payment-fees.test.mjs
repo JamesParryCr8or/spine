@@ -31,6 +31,12 @@ test("processor-specific rates and plan override replace defaults", () => {
   assert.equal(result.surchargeRate, 0.2);
 });
 
+test("starts new stores on Basic but keeps a selected Advanced plan", () => {
+  const day = [{ payment_date: "2026-09-01", gateway: "Klarna", gross_payments: 100, transactions: 1, currency: "GBP" }];
+  assert.equal(calculateExternalPaymentFees(day, [], null, "GBP").surchargeRate, 2);
+  assert.equal(calculateExternalPaymentFees(day, [], { ...settings, shopify_plan: null, plan_override: "Advanced" }, "GBP").surchargeRate, 0.6);
+});
+
 test("unknown plan does not invent a Shopify surcharge", () => {
   assert.equal(shopifyThirdPartyRate("Other"), null);
   const result = calculateExternalPaymentFees([
