@@ -124,6 +124,73 @@ export async function refreshShopifyReporting(supabase: SupabaseClient, store: S
   }
 }
 
+function paymentQueryWindows(from: string, to: string) {
+  const windows: Array<{ from: string; to: string }> = [];
+  let cursor = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  while (cursor <= end) {
+    const start = cursor.toISOString().slice(0, 10);
+    const last = new Date(Math.min(cursor.getTime() + 59 * 86400000, end.getTime()));
+    windows.push({ from: start, to: last.toISOString().slice(0, 10) });
+    cursor = new Date(last.getTime() + 86400000);
+  }
+  return windows;
+}
+
+/** ShopifyQL supplies payment value and count by gateway, including historical orders
+ * that predate our order-transaction importer. It does not supply provider fees. */
+export async function refreshShopifyPaymentGateways(supabase: SupabaseClient, store: Store, from: string, to: string) {
+  if (!store.shopify_domain) return;
+  const { data: settings, error: settingsError } = await supabase.from("payment_fee_estimate_settings")
+    .select("gateway_synced_from,gateway_synced_to,gateway_synced_at").eq("store_id", store.id).maybeSingle();
+  if (settingsError) throw settingsError;
+  if (settings?.gateway_synced_from && settings.gateway_synced_to && settings.gateway_synced_at &&
+      settings.gateway_synced_from <= from && settings.gateway_synced_to >= to &&
+      settings.gateway_synced_at >= freshAfter()) return;
+  const token = await readSecret(supabase, store.id, "shopify");
+  if (!token) return;
+  const run = (query: string) => shopifyGraph<ShopifyQlResult>(store.shopify_domain!, token,
+    `query Reporting($shopifyQl:String!){ shopifyqlQuery(query:$shopifyQl){ tableData{ rows } parseErrors } }`, { shopifyQl: query });
+  const windows = paymentQueryWindows(from, to);
+  const reportRows: ShopifyQlRow[] = [];
+  for (let index = 0; index < windows.length; index += 3) {
+    const reports = await Promise.all(windows.slice(index, index + 3).map(({ from: start, to: end }) => run(
+      `FROM payments\nSHOW gross_payments, transactions\nWHERE transaction_kind IN ('sale', 'capture') AND transaction_status = 'success'\nGROUP BY payment_gateway\nTIMESERIES day\nSINCE ${start} UNTIL ${end}\nORDER BY day ASC\nLIMIT 1000`
+    )));
+    for (const report of reports) {
+      if (report.shopifyqlQuery.parseErrors[0]) throw new Error(`Shopify payment report: ${report.shopifyqlQuery.parseErrors[0]}`);
+      const rows = report.shopifyqlQuery.tableData?.rows ?? [];
+      if (rows.length >= 1000) throw new Error("Shopify payment report exceeded its row limit; use shorter query windows");
+      reportRows.push(...rows);
+    }
+  }
+  const planResult = await shopifyGraph<{ shop: { plan: { publicDisplayName: string } } }>(
+    store.shopify_domain, token, `query ShopPlan { shop { plan { publicDisplayName } } }`).catch(() => null);
+  const now = new Date().toISOString();
+  const rows = reportRows.flatMap((row) => {
+    const date = typeof row.day === "string" ? row.day.slice(0, 10) : "";
+    const gateway = typeof row.payment_gateway === "string" ? row.payment_gateway.trim() : "";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !gateway) return [];
+    return [{ organization_id: store.organization_id, store_id: store.id, payment_date: date,
+      gateway, gross_payments: Math.max(0, numeric(row.gross_payments)),
+      transactions: Math.max(0, Math.trunc(numeric(row.transactions))), currency: store.currency, synced_at: now }];
+  });
+  const { error: deleteError } = await supabase.from("shopify_payment_gateway_daily")
+    .delete().eq("store_id", store.id).gte("payment_date", from).lte("payment_date", to);
+  if (deleteError) throw deleteError;
+  for (let index = 0; index < rows.length; index += 500) {
+    const { error } = await supabase.from("shopify_payment_gateway_daily").upsert(rows.slice(index, index + 500),
+      { onConflict: "store_id,payment_date,gateway" });
+    if (error) throw error;
+  }
+  const metadata = { ...(planResult ? { shopify_plan: planResult.shop.plan.publicDisplayName } : {}),
+    gateway_synced_from: from, gateway_synced_to: to, gateway_synced_at: now, updated_at: now };
+  const { error: saveError } = settings
+    ? await supabase.from("payment_fee_estimate_settings").update(metadata).eq("store_id", store.id)
+    : await supabase.from("payment_fee_estimate_settings").insert({ ...metadata, organization_id: store.organization_id, store_id: store.id });
+  if (saveError) throw saveError;
+}
+
 async function refreshMeta(supabase: SupabaseClient, store: Store, from: string, to: string) {
   if (!await needsRefresh(supabase, "meta_ad_insights_daily", store.id, "date_start", from, to)) return;
   const [{ data: connection }, token] = await Promise.all([
@@ -328,12 +395,13 @@ export async function refreshReportingData(_supabase: SupabaseClient, store: Sto
   const reportingClient = createReportingClient();
   const results = await Promise.allSettled([
     refreshShopifyReporting(reportingClient, store, from, to),
+    refreshShopifyPaymentGateways(reportingClient, store, from, to),
     refreshMeta(reportingClient, store, from, to),
     refreshGoogle(reportingClient, store, from, to),
     refreshMicrosoftAdsReporting(reportingClient, store, from, to),
   ]);
   results.forEach((result, index) => {
-    if (result.status === "rejected") console.error("Reporting refresh failed", { source: ["shopify", "meta", "google_ads", "bing_ads"][index], message: result.reason instanceof Error ? result.reason.message : "Unknown error" });
+    if (result.status === "rejected") console.error("Reporting refresh failed", { source: ["shopify", "shopify_payments", "meta", "google_ads", "bing_ads"][index], message: result.reason instanceof Error ? result.reason.message : "Unknown error" });
   });
 }
 

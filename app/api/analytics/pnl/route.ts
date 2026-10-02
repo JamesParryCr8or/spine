@@ -5,11 +5,12 @@ import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 import { costKey, monetary, resolveEffectiveCost, type EffectiveCost } from "@/lib/analytics/effective-cost";
 import { estimatedTransactionFee, reconcileDailyTransactionFees, selectEffectivePaymentFeeRule, type EffectivePaymentFeeRule, type ShopifyTransactionFee } from "@/lib/analytics/transaction-fees";
+import { calculateExternalPaymentFees, isExternalProcessor, type GatewayPaymentDay, type PaymentEstimateSettings } from "@/lib/analytics/external-payment-fees";
 import { allocatePeriodCost, operatingCostBucket } from "@/lib/analytics/cost-allocation";
 import { selectEffectiveShippingCost, summarizeShippingCoverage, type ProductShippingCost, type ShippingCoverage } from "@/lib/analytics/shipping-cost";
 import { reportingDateKey, reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { calculateProfitAndLoss } from "@/lib/analytics/profit-and-loss";
-import { createReportingClient, refreshMicrosoftAdsReporting, refreshReportingData } from "@/lib/analytics/reporting-refresh";
+import { createReportingClient, refreshMicrosoftAdsReporting, refreshReportingData, refreshShopifyPaymentGateways } from "@/lib/analytics/reporting-refresh";
 
 export const maxDuration = 60;
 
@@ -84,6 +85,15 @@ export async function GET(request: Request) {
     if (page.length < pageSize) break;
   }
 
+  if (!fromDate && !toDate && shopifyDaily.length && params.get("refresh") !== "0") {
+    try {
+      await refreshShopifyPaymentGateways(createReportingClient(), store,
+        shopifyDaily[0].sales_date, shopifyDaily[shopifyDaily.length - 1].sales_date);
+    } catch (error) {
+      console.warn("Shopify gateway report refresh was skipped", { message: error instanceof Error ? error.message : "Unknown error" });
+    }
+  }
+
   const { data: exchangeRateRows, error: exchangeRateError } = await supabase.from("exchange_rates").select("base_currency,quote_currency,rate,effective_date").eq("store_id", store.id).eq("quote_currency", store.currency).order("effective_date", { ascending: true });
   if (exchangeRateError) return NextResponse.json({ error: exchangeRateError.message }, { status: 500 });
   const exchangeRates = (exchangeRateRows ?? []) as DatedExchangeRate[];
@@ -114,7 +124,7 @@ export async function GET(request: Request) {
   const orderIds = includedOrders.map((order) => order.id);
   const orderChunks = chunks(orderIds, 500);
 
-  const [lineResults, refundResults, transactionResults, variantResult, costResult, operatingCostResult, paymentFeeRuleResult, productShippingCostResult, storeCostDefaultResult] = await Promise.all([
+  const [lineResults, refundResults, transactionResults, variantResult, costResult, operatingCostResult, paymentFeeRuleResult, productShippingCostResult, storeCostDefaultResult, estimateSettingsResult] = await Promise.all([
     Promise.all(orderChunks.map((ids) => supabase.from("shopify_order_lines").select("order_id,variant_gid,sku,current_quantity,net_sales").in("order_id", ids))),
     Promise.all(orderChunks.map((ids) => supabase.from("shopify_refunds").select("order_id,total_refunded").in("order_id", ids))),
     Promise.all(orderChunks.map((ids) => supabase.from("shopify_transactions").select("order_id,fee_amount,fee_tax,currency,status,gateway,amount,processed_at_shopify,created_at_shopify").in("order_id", ids))),
@@ -124,8 +134,9 @@ export async function GET(request: Request) {
     supabase.from("payment_fee_rules").select("gateway,percentage_rate,fixed_fee,tax_rate,minimum_fee,currency,effective_from,effective_to").eq("store_id", store.id),
     supabase.from("product_shipping_costs").select("id,variant_id,sku,amount,allocation_basis,currency,effective_from,effective_to").eq("store_id", store.id),
     supabase.from("store_cost_defaults").select("fulfilment_amount,fulfilment_basis,postage_amount,postage_basis,default_cogs_percent,currency").eq("store_id", store.id).maybeSingle(),
+    supabase.from("payment_fee_estimate_settings").select("shopify_plan,plan_override,default_percentage_rate,default_fixed_fee,surcharge_rate_override").eq("store_id", store.id).maybeSingle(),
   ]);
-  const allResults = [...lineResults, ...refundResults, ...transactionResults, variantResult, costResult, operatingCostResult, paymentFeeRuleResult, productShippingCostResult, storeCostDefaultResult];
+  const allResults = [...lineResults, ...refundResults, ...transactionResults, variantResult, costResult, operatingCostResult, paymentFeeRuleResult, productShippingCostResult, storeCostDefaultResult, estimateSettingsResult];
   const fetchError = allResults.find((result) => result.error)?.error;
   if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 });
   const lines = lineResults.flatMap((result) => result.data ?? []) as Line[];
@@ -229,6 +240,21 @@ export async function GET(request: Request) {
     ? shopifyDaily.reduce((total, day) => total + Math.abs(monetary(day.sales_reversals)), 0)
     : importedRefunds;
   const paymentFeeRules = ((paymentFeeRuleResult.data ?? []) as PaymentFeeRuleRow[]).map((rule): EffectivePaymentFeeRule => ({ gateway: rule.gateway, currency: rule.currency, effectiveFrom: rule.effective_from, effectiveTo: rule.effective_to, percentageRate: monetary(rule.percentage_rate), fixedFee: monetary(rule.fixed_fee), taxRate: monetary(rule.tax_rate), minimumFee: monetary(rule.minimum_fee) }));
+  const gatewayPaymentDays: GatewayPaymentDay[] = [];
+  for (let offset = 0; ; offset += pageSize) {
+    let query = supabase.from("shopify_payment_gateway_daily")
+      .select("payment_date,gateway,gross_payments,transactions,currency")
+      .eq("store_id", store.id).order("payment_date", { ascending: true }).order("gateway", { ascending: true });
+    if (fromDate) query = query.gte("payment_date", fromDate);
+    if (toDate) query = query.lte("payment_date", toDate);
+    const { data, error } = await query.range(offset, offset + pageSize - 1);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const page = (data ?? []) as GatewayPaymentDay[];
+    gatewayPaymentDays.push(...page);
+    if (page.length < pageSize) break;
+  }
+  const externalPaymentFees = calculateExternalPaymentFees(gatewayPaymentDays, paymentFeeRules,
+    estimateSettingsResult.data as PaymentEstimateSettings | null, store.currency);
   let actualFees = 0;
   const actualFeesByDate: Record<string, number> = {};
   const estimatedFeesByDate: Record<string, number> = {};
@@ -244,7 +270,7 @@ export async function GET(request: Request) {
       actualFees += convertedFee;
       actualFeesByDate[feeDate] = (actualFeesByDate[feeDate] ?? 0) + convertedFee;
     }
-    else {
+    else if (!isExternalProcessor(transaction.gateway ?? "")) {
       const rule = selectEffectivePaymentFeeRule(paymentFeeRules, transaction.gateway, store.currency, occurredAt);
       if (rule) {
         const estimate = estimatedTransactionFee(convertDatedAmount(monetary(transaction.amount), transactionRate, store.currency), rule);
@@ -255,7 +281,8 @@ export async function GET(request: Request) {
   const reportedFeesByDate = Object.fromEntries(shopifyDaily.map((day) => [day.sales_date, monetary(day.total_payment_fees)]));
   const salesDays = shopifyDaily.filter((day) => day.orders > 0);
   const reportedFeeDays = salesDays.filter((day) => monetary(day.total_payment_fees) > 0);
-  const transactionFees = reconcileDailyTransactionFees(reportedFeesByDate, actualFeesByDate, estimatedFeesByDate);
+  const shopifyPaymentFees = reconcileDailyTransactionFees(reportedFeesByDate, actualFeesByDate, estimatedFeesByDate);
+  const transactionFees = shopifyPaymentFees + externalPaymentFees.processorFees + externalPaymentFees.shopifySurcharge;
   const transactionFeesAvailable = transactionFees > 0;
   const transactionFeesComplete = salesDays.length > 0
     ? salesDays.every((day) => monetary(day.total_payment_fees) > 0 || (actualFeesByDate[day.sales_date] ?? 0) > 0)
@@ -370,7 +397,8 @@ export async function GET(request: Request) {
     microsoftAdsImportError: microsoftConnection?.last_error ?? null,
     transactionFeeCoverage: { salesDays: salesDays.length, reportedFeeDays: reportedFeeDays.length, latestReportedFeeDate: reportedFeeDays.at(-1)?.sales_date ?? null },
     calculatedAt: new Date().toISOString(),
-    metrics: { ...totals, refunds, cogs, ...calculated, marketingSpend, metaMarketingSpend, googleMarketingSpend, bingMarketingSpend, transactionFees, merchantShippingCosts, variantShippingCosts, shippingFallbackCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, orders: shopifyDaily.length ? shopifyDaily.reduce((total, day) => total + day.orders, 0) : includedOrders.length, unitsSold: dailyUnitCount || totalOrderUnits, missingCostLines, missingShippingLines: shippingCoverage.missingLines, shippingOverrideLines: shippingCoverage.overrideLines, shippingFallbackLines: shippingCoverage.fallbackLines, shippingFallbackRate: shippingCoverage.fallbackRate, unallocatedOperatingCosts },
+    metrics: { ...totals, refunds, cogs, ...calculated, marketingSpend, metaMarketingSpend, googleMarketingSpend, bingMarketingSpend, transactionFees, shopifyPaymentFees, estimatedProcessorFees: externalPaymentFees.processorFees, estimatedShopifySurcharge: externalPaymentFees.shopifySurcharge, merchantShippingCosts, variantShippingCosts, shippingFallbackCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, orders: shopifyDaily.length ? shopifyDaily.reduce((total, day) => total + day.orders, 0) : includedOrders.length, unitsSold: dailyUnitCount || totalOrderUnits, missingCostLines, missingShippingLines: shippingCoverage.missingLines, shippingOverrideLines: shippingCoverage.overrideLines, shippingFallbackLines: shippingCoverage.fallbackLines, shippingFallbackRate: shippingCoverage.fallbackRate, unallocatedOperatingCosts },
+    externalPaymentFees: { ...externalPaymentFees, available: gatewayPaymentDays.length > 0 },
     period: rangeStart && rangeEnd ? { start: rangeStart, end: rangeEnd } : null,
     availability: { marketingSpend: marketingSpendAvailable, metaMarketingSpend: metaInsights.length > 0, googleMarketingSpend: googleInsights.length > 0, bingMarketingSpend: bingInsights.length > 0 || (microsoftConnection?.status === "connected" && !microsoftConnection.last_error), transactionFees: transactionFeesAvailable, transactionFeesComplete, shippingCosts: shippingCostsAvailable, handlingCosts: handlingCostsAvailable, operatingExpenses: true, netProfit: netProfitAvailable },
   });

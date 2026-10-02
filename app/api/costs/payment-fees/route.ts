@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireWorkspace } from "@/lib/workspace/server";
+import { isExternalProcessor } from "@/lib/analytics/external-payment-fees";
 
 type PaymentFeeInput = {
   gateway?: string;
@@ -37,7 +38,38 @@ export async function GET() {
     .eq("store_id", store.id)
     .order("effective_from", { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ currency: store.currency, canEdit: ["owner", "admin"].includes(membership.role), rules: data ?? [] });
+  const [settingsResult, gatewayResult] = await Promise.all([
+    supabase.from("payment_fee_estimate_settings")
+      .select("shopify_plan,plan_override,default_percentage_rate,default_fixed_fee,surcharge_rate_override,gateway_synced_at")
+      .eq("store_id", store.id).maybeSingle(),
+    supabase.from("shopify_payment_gateway_daily").select("gateway").eq("store_id", store.id)
+      .order("payment_date", { ascending: false }).limit(1000),
+  ]);
+  if (settingsResult.error || gatewayResult.error) return NextResponse.json({ error: settingsResult.error?.message || gatewayResult.error?.message }, { status: 500 });
+  return NextResponse.json({ currency: store.currency, canEdit: ["owner", "admin"].includes(membership.role),
+    rules: data ?? [], settings: settingsResult.data, gateways: [...new Set((gatewayResult.data ?? []).map((row) => row.gateway).filter(isExternalProcessor))].sort() });
+}
+
+export async function PUT(request: Request) {
+  const result = await context();
+  if (result.error) return result.error;
+  const { supabase, membership, store } = result;
+  if (!["owner", "admin"].includes(membership.role)) return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
+  const input = await request.json().catch(() => null) as { planOverride?: string | null; defaultPercentageRate?: string | number; defaultFixedFee?: string | number; surchargeRateOverride?: string | number | null } | null;
+  const planOverride = input?.planOverride || null;
+  const percentage = String(input?.defaultPercentageRate ?? "2");
+  const fixed = String(input?.defaultFixedFee ?? (store.currency === "GBP" ? "0.23" : "0.25"));
+  const surcharge = input?.surchargeRateOverride === "" || input?.surchargeRateOverride == null ? null : String(input.surchargeRateOverride);
+  if (planOverride && !["Basic", "Grow", "Advanced", "Plus"].includes(planOverride)) return NextResponse.json({ error: "Select a supported Shopify plan" }, { status: 400 });
+  if (!ratePattern.test(percentage) || !moneyPattern.test(fixed) || (surcharge !== null && !ratePattern.test(surcharge))) return NextResponse.json({ error: "Use valid non-negative rates and fee amounts" }, { status: 400 });
+  const { data: existing, error: readError } = await supabase.from("payment_fee_estimate_settings").select("store_id").eq("store_id", store.id).maybeSingle();
+  if (readError) return NextResponse.json({ error: readError.message }, { status: 500 });
+  const values = { plan_override: planOverride, default_percentage_rate: percentage, default_fixed_fee: fixed,
+    surcharge_rate_override: surcharge, updated_at: new Date().toISOString() };
+  const save = existing ? await supabase.from("payment_fee_estimate_settings").update(values).eq("store_id", store.id)
+    : await supabase.from("payment_fee_estimate_settings").insert({ ...values, organization_id: membership.organization_id, store_id: store.id });
+  if (save.error) return NextResponse.json({ error: save.error.message }, { status: 500 });
+  return NextResponse.json({ saved: true });
 }
 
 export async function POST(request: Request) {
