@@ -3,6 +3,7 @@ import { inflateRawSync } from "node:zlib";
 
 import { getSupabasePublicEnvironment } from "@/lib/env";
 import { shopifyGraph } from "@/lib/shopify/graphql";
+import { resolveShopifyDailyFees } from "@/lib/analytics/shopify-fees";
 
 type Store = { id: string; organization_id: string; shopify_domain?: string | null; currency: string };
 type ShopifyQlRow = Record<string, string | number | null>;
@@ -67,17 +68,32 @@ export async function refreshShopifyReporting(supabase: SupabaseClient, store: S
   if (acquisition?.shopifyqlQuery.parseErrors[0]) console.warn("Shopify acquisition query was skipped", { message: acquisition.shopifyqlQuery.parseErrors[0] });
   const fees = await run(query("fees", "shopify_payments_processing_fees, foreign_exchange_fees, managed_markets_fees, international_fees"))
     .catch(() => null);
-  const feesByDate = new Map((fees?.shopifyqlQuery.tableData?.rows ?? []).flatMap((row) => {
+  const feeParseError = fees?.shopifyqlQuery.parseErrors?.[0];
+  if (feeParseError) console.warn("Shopify fee report was skipped", { message: feeParseError });
+  const feesByDate = new Map((feeParseError ? [] : fees?.shopifyqlQuery.tableData?.rows ?? []).flatMap((row) => {
     const day = typeof row.day === "string" ? row.day.slice(0, 10) : "";
     return /^\d{4}-\d{2}-\d{2}$/.test(day) ? [[day, row] as const] : [];
   }));
+  const salesRows = sales.shopifyqlQuery.tableData?.rows ?? [];
+  const salesDates = salesRows.flatMap((row) => {
+    const day = typeof row.day === "string" ? row.day.slice(0, 10) : "";
+    return /^\d{4}-\d{2}-\d{2}$/.test(day) ? [day] : [];
+  });
+  const existingFeesByDate = new Map<string, Record<string, string | number | null>>();
+  if (salesDates.length) {
+    const { data: existingFeeRows, error: existingFeeError } = await supabase
+      .from("shopify_sales_daily")
+      .select("sales_date,shopify_payments_processing_fees,foreign_exchange_fees,managed_markets_fees,international_fees,total_payment_fees")
+      .eq("store_id", store.id)
+      .in("sales_date", salesDates);
+    if (existingFeeError) throw new Error(existingFeeError.message);
+    for (const row of existingFeeRows ?? []) existingFeesByDate.set(row.sales_date, row);
+  }
   const now = new Date().toISOString();
-  const rows = (sales.shopifyqlQuery.tableData?.rows ?? []).flatMap((row) => {
+  const rows = salesRows.flatMap((row) => {
     const day = typeof row.day === "string" ? row.day.slice(0, 10) : "";
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return [];
-    const fee = feesByDate.get(day);
-    const processing = numeric(fee?.shopify_payments_processing_fees);
-    const international = numeric(fee?.international_fees);
+    const fee = resolveShopifyDailyFees(feesByDate.get(day) ?? null, existingFeesByDate.get(day) ?? null);
     return [{
       organization_id: store.organization_id, store_id: store.id, sales_date: day,
       gross_sales: numeric(row.gross_sales), discounts: numeric(row.discounts), sales_reversals: numeric(row.sales_reversals),
@@ -86,9 +102,7 @@ export async function refreshShopifyReporting(supabase: SupabaseClient, store: S
       net_items_sold: Math.trunc(numeric(row.net_items_sold)), cost_of_goods_sold: numeric(row.cost_of_goods_sold),
       gross_profit: numeric(row.gross_profit), net_sales_with_cost_recorded: numeric(row.net_sales_with_cost_recorded),
       net_sales_without_cost_recorded: numeric(row.net_sales_without_cost_recorded),
-      shopify_payments_processing_fees: processing, foreign_exchange_fees: numeric(fee?.foreign_exchange_fees),
-      managed_markets_fees: numeric(fee?.managed_markets_fees), international_fees: international,
-      total_payment_fees: processing + international, currency: store.currency, synced_at: now,
+      ...fee, currency: store.currency, synced_at: now,
     }];
   });
   for (let index = 0; index < rows.length; index += 500) {

@@ -164,7 +164,7 @@ function Trend({ positive = true, children }: { positive?: boolean; children: Re
 
 type FinanceTrendPoint = {
   label: string; start: string; end: string; revenue: number; profit: number; complete: boolean;
-  cogs: number; metaMarketing: number; googleMarketing: number; bingMarketing: number; paymentFees: number; shipping: number; operating: number;
+  cogs: number; metaMarketing: number; googleMarketing: number; bingMarketing: number; paymentFees: number; paymentFeesAvailable: boolean; shipping: number; operating: number;
 };
 
 function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrendPoint[]; formatter: Intl.NumberFormat; onOpen: (point: FinanceTrendPoint) => void }) {
@@ -232,7 +232,7 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
       <polyline points={line} className="finance-profit-line"/>
       {points.map((point,index) => <circle key={point.start} cx={left+step*index+step/2} cy={y(point.profit)} r={hovered===index?5:3.5} className="finance-profit-dot"/>)}
     </svg>
-    {active ? <div className="finance-tooltip"><strong>{active.label}</strong><span>Revenue <b>{formatter.format(active.revenue)}</b></span><span>COGS <b>-{formatter.format(active.cogs)}</b></span><span>Facebook ads <b>-{formatter.format(active.metaMarketing)}</b></span><span>Google Ads <b>-{formatter.format(active.googleMarketing)}</b></span><span>Microsoft Ads <b>-{formatter.format(active.bingMarketing)}</b></span><span>Payment fees <b>-{formatter.format(active.paymentFees)}</b></span><span>Shipping & handling <b>-{formatter.format(active.shipping)}</b></span><span>Operating costs <b>-{formatter.format(active.operating)}</b></span><span className="tooltip-profit">{active.complete ? "Net profit" : "Provisional profit"} <b>{formatter.format(active.profit)}</b></span></div> : null}
+    {active ? <div className="finance-tooltip"><strong>{active.label}</strong><span>Revenue <b>{formatter.format(active.revenue)}</b></span><span>COGS <b>-{formatter.format(active.cogs)}</b></span><span>Facebook ads <b>-{formatter.format(active.metaMarketing)}</b></span><span>Google Ads <b>-{formatter.format(active.googleMarketing)}</b></span><span>Microsoft Ads <b>-{formatter.format(active.bingMarketing)}</b></span><span>Payment fees <b>{active.paymentFeesAvailable ? `-${formatter.format(active.paymentFees)}` : "Not available"}</b></span><span>Shipping & handling <b>-{formatter.format(active.shipping)}</b></span><span>Operating costs <b>-{formatter.format(active.operating)}</b></span><span className="tooltip-profit">{active.complete ? "Net profit" : "Provisional profit"} <b>{formatter.format(active.profit)}</b></span></div> : null}
   </div>;
 }
 
@@ -458,6 +458,7 @@ function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId?: stri
       googleMarketing: data.metrics.googleMarketingSpend,
       bingMarketing: data.metrics.bingMarketingSpend,
       paymentFees: data.metrics.transactionFees,
+      paymentFeesAvailable: data.availability.transactionFees,
       shipping: data.metrics.merchantShippingCosts + data.metrics.handlingCosts,
       operating: data.metrics.operatingExpenses,
     };

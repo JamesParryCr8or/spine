@@ -4,10 +4,10 @@ import { requireWorkspace } from "@/lib/workspace/server";
 import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 import { costKey, monetary, resolveEffectiveCost, type EffectiveCost } from "@/lib/analytics/effective-cost";
-import { estimatedTransactionFee, selectEffectivePaymentFeeRule, type EffectivePaymentFeeRule, type ShopifyTransactionFee } from "@/lib/analytics/transaction-fees";
+import { estimatedTransactionFee, reconcileDailyTransactionFees, selectEffectivePaymentFeeRule, type EffectivePaymentFeeRule, type ShopifyTransactionFee } from "@/lib/analytics/transaction-fees";
 import { allocatePeriodCost, operatingCostBucket } from "@/lib/analytics/cost-allocation";
 import { selectEffectiveShippingCost, summarizeShippingCoverage, type ProductShippingCost, type ShippingCoverage } from "@/lib/analytics/shipping-cost";
-import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
+import { reportingDateKey, reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { calculateProfitAndLoss } from "@/lib/analytics/profit-and-loss";
 import { createReportingClient, refreshMicrosoftAdsReporting, refreshReportingData } from "@/lib/analytics/reporting-refresh";
 
@@ -225,26 +225,36 @@ export async function GET(request: Request) {
     : importedRefunds;
   const paymentFeeRules = ((paymentFeeRuleResult.data ?? []) as PaymentFeeRuleRow[]).map((rule): EffectivePaymentFeeRule => ({ gateway: rule.gateway, currency: rule.currency, effectiveFrom: rule.effective_from, effectiveTo: rule.effective_to, percentageRate: monetary(rule.percentage_rate), fixedFee: monetary(rule.fixed_fee), taxRate: monetary(rule.tax_rate), minimumFee: monetary(rule.minimum_fee) }));
   let actualFees = 0;
-  let estimatedFees = 0;
+  const actualFeesByDate: Record<string, number> = {};
+  const estimatedFeesByDate: Record<string, number> = {};
   for (const transaction of transactions) {
     if (transaction.status !== "SUCCESS") continue;
     const occurredAt = transaction.processed_at_shopify ?? transaction.created_at_shopify;
     const transactionRate = resolveDatedExchangeRate(exchangeRates, transaction.currency, store.currency, occurredAt);
     if (!transactionRate) continue;
+    const feeDate = reportingDateKey(occurredAt, store.timezone || "UTC");
     const actualFee = monetary(transaction.fee_amount) + monetary(transaction.fee_tax);
-    if (actualFee > 0) actualFees += convertDatedAmount(actualFee, transactionRate, store.currency);
+    if (actualFee > 0) {
+      const convertedFee = convertDatedAmount(actualFee, transactionRate, store.currency);
+      actualFees += convertedFee;
+      actualFeesByDate[feeDate] = (actualFeesByDate[feeDate] ?? 0) + convertedFee;
+    }
     else {
       const rule = selectEffectivePaymentFeeRule(paymentFeeRules, transaction.gateway, store.currency, occurredAt);
-      if (rule) estimatedFees += estimatedTransactionFee(convertDatedAmount(monetary(transaction.amount), transactionRate, store.currency), rule);
+      if (rule) {
+        const estimate = estimatedTransactionFee(convertDatedAmount(monetary(transaction.amount), transactionRate, store.currency), rule);
+        estimatedFeesByDate[feeDate] = (estimatedFeesByDate[feeDate] ?? 0) + estimate;
+      }
     }
   }
-  const shopifyReportedFees = shopifyDaily.reduce((total, day) => total + monetary(day.total_payment_fees), 0);
+  const reportedFeesByDate = Object.fromEntries(shopifyDaily.map((day) => [day.sales_date, monetary(day.total_payment_fees)]));
   const salesDays = shopifyDaily.filter((day) => day.orders > 0);
   const reportedFeeDays = salesDays.filter((day) => monetary(day.total_payment_fees) > 0);
-  const transactionFees = (shopifyReportedFees > 0 ? shopifyReportedFees : actualFees) + estimatedFees;
+  const transactionFees = reconcileDailyTransactionFees(reportedFeesByDate, actualFeesByDate, estimatedFeesByDate);
   const transactionFeesAvailable = transactionFees > 0;
   const transactionFeesComplete = salesDays.length > 0
-    ? reportedFeeDays.length === salesDays.length || (reportedFeeDays.length === 0 && actualFees > 0 && transactions.length > 0)
+    ? salesDays.every((day) => monetary(day.total_payment_fees) > 0 || (actualFeesByDate[day.sales_date] ?? 0) > 0)
+      || (reportedFeeDays.length === 0 && actualFees > 0 && transactions.length > 0)
     : transactionFeesAvailable;
   const orderDates = includedOrders.flatMap((order) => order.processed_at ? [order.processed_at.slice(0, 10)] : []);
   const reportDates = shopifyDaily.length ? shopifyDaily.map((day) => day.sales_date) : orderDates;

@@ -30,6 +30,18 @@ export function actualTransactionFees(transactions: ShopifyTransactionFee[], rep
     .reduce((total, transaction) => total + monetary(transaction.fee_amount) + monetary(transaction.fee_tax), 0);
 }
 
+/** Prefer Shopify's daily fee report, filling only unreported days from transactions. */
+export function reconcileDailyTransactionFees(
+  reported: Record<string, number>,
+  actual: Record<string, number>,
+  estimated: Record<string, number> = {},
+) {
+  const dates = new Set([...Object.keys(reported), ...Object.keys(actual), ...Object.keys(estimated)]);
+  let total = 0;
+  for (const date of dates) total += (reported[date] > 0 ? reported[date] : actual[date] ?? 0) + (estimated[date] ?? 0);
+  return total;
+}
+
 export function estimatedTransactionFee(transactionAmount: number, rule: PaymentFeeRule) {
   if (!Number.isFinite(transactionAmount) || transactionAmount <= 0) return 0;
   const percentageRate = Number.isFinite(rule.percentageRate) ? Math.max(rule.percentageRate, 0) : 0;

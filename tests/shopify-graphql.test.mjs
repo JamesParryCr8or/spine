@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { shopifyGraph } from '../lib/shopify/graphql.ts';
 import { costKey, monetary, resolveEffectiveCost } from '../lib/analytics/effective-cost.ts';
-import { actualTransactionFees, estimatedTransactionFee, selectEffectivePaymentFeeRule } from '../lib/analytics/transaction-fees.ts';
+import { actualTransactionFees, estimatedTransactionFee, reconcileDailyTransactionFees, selectEffectivePaymentFeeRule } from '../lib/analytics/transaction-fees.ts';
+import { resolveShopifyDailyFees } from '../lib/analytics/shopify-fees.ts';
 import { allocatePeriodCost, operatingCostBucket } from '../lib/analytics/cost-allocation.ts';
 import { selectEffectiveShippingCost, summarizeShippingCoverage } from '../lib/analytics/shipping-cost.ts';
 import { calculateAcquisitionMetrics } from '../lib/analytics/acquisition.ts';
@@ -273,6 +274,30 @@ test('currency conversion rounds once in the target currency and rejects mixed t
 test('golden store fixture produces the manually reconciled P&L', () => {
   const actual = calculateProfitAndLoss(goldenStore.input);
   for (const [key, expected] of Object.entries(goldenStore.expected)) assert.equal(actual[key], expected, key);
+});
+
+test('daily Shopify fee totals take priority while transaction fees fill missing days', () => {
+  assert.equal(reconcileDailyTransactionFees(
+    { '2026-07-01': 8, '2026-07-02': 0 },
+    { '2026-07-01': 7, '2026-07-02': 3, '2026-07-03': 2 },
+    { '2026-07-02': 1 },
+  ), 14);
+});
+
+test('Shopify reporting refresh preserves imported payment fees when fee report omits a day', () => {
+  assert.deepEqual(resolveShopifyDailyFees(null, {
+    shopify_payments_processing_fees: '12.40', foreign_exchange_fees: '1.10',
+    managed_markets_fees: '0.50', international_fees: '2.00', total_payment_fees: '14.40',
+  }), {
+    shopify_payments_processing_fees: 12.4, foreign_exchange_fees: 1.1,
+    managed_markets_fees: 0.5, international_fees: 2, total_payment_fees: 14.4,
+  });
+  assert.deepEqual(resolveShopifyDailyFees({ shopify_payments_processing_fees: '8.00', international_fees: '1.25' }, {
+    shopify_payments_processing_fees: '12.40', international_fees: '2.00', total_payment_fees: '14.40',
+  }), {
+    shopify_payments_processing_fees: 8, foreign_exchange_fees: 0,
+    managed_markets_fees: 0, international_fees: 1.25, total_payment_fees: 9.25,
+  });
 });
 
 test('UTM normalization handles aliases, case, whitespace, and missing values', () => {
