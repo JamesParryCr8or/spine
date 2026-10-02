@@ -157,7 +157,8 @@ const utms = [
   ["(direct)", "(none)", "—", "£51,420", "84", "£612", "—"],
 ];
 
-function Trend({ positive = true, children }: { positive?: boolean; children: React.ReactNode }) {
+function Trend({ positive = true, neutral = false, children }: { positive?: boolean; neutral?: boolean; children: React.ReactNode }) {
+  if (neutral) return <span className="trend" style={{ color: "#6655bf", background: "#f1efff" }}><Info />{children}</span>;
   const Icon = positive ? ArrowUpRight : ArrowDownRight;
   return <span className={positive ? "trend up" : "trend down"}><Icon />{children}</span>;
 }
@@ -431,6 +432,10 @@ function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId?: stri
   const moneyDelta = (current: number | null, previous: number | null | undefined, fallback: string, lowerIsBetter = false) => comparisonDelta(current, previous, (value) => formatter.format(value), fallback, lowerIsBetter);
   const countDelta = (current: number, previous: number | undefined, fallback: string) => comparisonDelta(current, previous, (value) => Math.round(value).toLocaleString(), fallback);
   const ratioDelta = (current: number | null, previous: number | null | undefined, fallback: string, lowerIsBetter = false) => comparisonDelta(current, previous, (value) => `${value.toFixed(2)}x`, fallback, lowerIsBetter);
+  const displayedNetProfit = pnlSummary?.hasData ? pnlSummary.metrics.netProfit ?? pnlSummary.metrics.profitAfterMarketingSpend : null;
+  const comparisonNetProfit = pnlComparison?.hasData ? pnlComparison.metrics.netProfit ?? pnlComparison.metrics.profitAfterMarketingSpend : null;
+  const netProfitIsProvisional = displayedNetProfit !== null && !pnlSummary?.availability.netProfit;
+  const netProfitDelta = moneyDelta(displayedNetProfit, comparisonNetProfit, "After known costs");
   const liveMetrics = liveData ? [
     { label: "Net sales", value: formatter.format(liveData.metrics.netSales), ...moneyDelta(liveData.metrics.netSales, comparisonData?.metrics.netSales, "Live Shopify data"), hint: `${liveData.metrics.orders.toLocaleString()} orders` },
     { label: "Orders", value: liveData.metrics.orders.toLocaleString(), ...countDelta(liveData.metrics.orders, comparisonData?.metrics.orders, "Imported Shopify orders"), hint: `${liveData.metrics.unitsSold.toLocaleString()} units sold` },
@@ -446,7 +451,7 @@ function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId?: stri
     { label: "Postage cost", value: pnlSummary?.availability.shippingCosts ? formatter.format(pnlSummary.metrics.merchantShippingCosts) : "—", ...moneyDelta(pnlSummary?.availability.shippingCosts ? pnlSummary.metrics.merchantShippingCosts : null, pnlComparison?.availability.shippingCosts ? pnlComparison.metrics.merchantShippingCosts : null, "Delivery and product shipping costs", true), hint: pnlSummary?.availability.shippingCosts ? "Product overrides and store postage" : "Complete postage costs" },
     { label: "Warehouse fulfilment", value: pnlSummary?.availability.handlingCosts ? formatter.format(pnlSummary.metrics.handlingCosts) : "—", ...moneyDelta(pnlSummary?.availability.handlingCosts ? pnlSummary.metrics.handlingCosts : null, pnlComparison?.availability.handlingCosts ? pnlComparison.metrics.handlingCosts : null, "Fulfilment cost by order or unit", true), hint: pnlSummary?.availability.handlingCosts ? "Store fulfilment default applied" : "Set fulfilment cost" },
     { label: "Contribution margin", value: pnlSummary?.availability.marketingSpend && pnlSummary.availability.shippingCosts && pnlSummary.availability.handlingCosts ? formatter.format(pnlSummary.metrics.contributionMargin) : "—", ...moneyDelta(pnlSummary?.availability.marketingSpend && pnlSummary.availability.shippingCosts && pnlSummary.availability.handlingCosts ? pnlSummary.metrics.contributionMargin : null, pnlComparison?.availability.marketingSpend && pnlComparison.availability.shippingCosts && pnlComparison.availability.handlingCosts ? pnlComparison.metrics.contributionMargin : null, "After variable direct costs"), hint: pnlSummary?.availability.shippingCosts && pnlSummary?.availability.handlingCosts ? "Shipping and handling included" : "Complete shipping and handling costs" },
-    { label: "Net profit", value: pnlSummary?.availability.netProfit && pnlSummary.metrics.netProfit !== null ? formatter.format(pnlSummary.metrics.netProfit) : "—", ...moneyDelta(pnlSummary?.availability.netProfit ? pnlSummary.metrics.netProfit : null, pnlComparison?.availability.netProfit ? pnlComparison.metrics.netProfit : null, "After known operating costs"), hint: pnlSummary?.availability.netProfit ? `${pnlSummary.metrics.netMargin === null ? "—" : `${(pnlSummary.metrics.netMargin * 100).toFixed(1)}%`} net margin` : "Complete cost coverage" },
+    { label: "Net profit", value: displayedNetProfit !== null ? formatter.format(displayedNetProfit) : "—", ...netProfitDelta, delta: netProfitIsProvisional ? "Provisional" : netProfitDelta.delta, hint: pnlSummary?.availability.netProfit ? `${pnlSummary.metrics.netMargin === null ? "—" : `${(pnlSummary.metrics.netMargin * 100).toFixed(1)}%`} net margin` : pnlSummary?.hasData ? "Known costs only · coverage incomplete" : "P&L data unavailable" },
   ] : demoMetrics;
   const trendSeries: FinanceTrendPoint[] = trendData.map(({ period, data }) => {
     const reportRevenue = data.metrics.netProductSales - data.metrics.refunds;
@@ -561,7 +566,7 @@ function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId?: stri
     <section className="metric-grid">{liveMetrics.map((metric) => <button type="button" className="metric-card drilldown-card" key={metric.label} onClick={() => onDrilldown(metricReport(metric.label), drilldownRange)} aria-label={`Open ${metric.label} details`}>
       <div className="metric-head"><span>{metric.label}</span><ExternalLink /></div>
       <strong>{metric.value}</strong>
-      <div className="metric-foot"><Trend positive={metric.positive}>{metric.delta}</Trend><span>{metric.hint}</span></div>
+      <div className="metric-foot"><Trend positive={metric.positive} neutral={metric.label === "Net profit" && netProfitIsProvisional}>{metric.delta}</Trend><span>{metric.hint}</span></div>
     </button>)}</section>
     <section className="dashboard-grid">
       <article className="panel chart-panel finance-chart-panel" style={{ order: 0 }}>
