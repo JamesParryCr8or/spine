@@ -67,23 +67,28 @@ export async function GET(request: Request) {
     }
   }
 
-  let dailyQuery = supabase
-    .from("shopify_sales_daily")
-    .select("sales_date,gross_sales,discounts,sales_reversals,net_sales,shipping_charges,taxes,total_sales,orders,net_items_sold,total_payment_fees,cost_of_goods_sold,net_sales_without_cost_recorded")
-    .eq("store_id", store.id)
-    .order("sales_date", { ascending: true });
-  if (fromDate) dailyQuery = dailyQuery.gte("sales_date", fromDate);
-  if (toDate) dailyQuery = dailyQuery.lte("sales_date", toDate);
-  const { data: dailyData, error: dailyError } = await dailyQuery;
-  if (dailyError) return NextResponse.json({ error: dailyError.message }, { status: 500 });
-  const shopifyDaily = (dailyData ?? []) as ShopifyDaily[];
+  const pageSize = 1000;
+  const shopifyDaily: ShopifyDaily[] = [];
+  for (let offset = 0; ; offset += pageSize) {
+    let dailyQuery = supabase
+      .from("shopify_sales_daily")
+      .select("sales_date,gross_sales,discounts,sales_reversals,net_sales,shipping_charges,taxes,total_sales,orders,net_items_sold,total_payment_fees,cost_of_goods_sold,net_sales_without_cost_recorded")
+      .eq("store_id", store.id)
+      .order("sales_date", { ascending: true });
+    if (fromDate) dailyQuery = dailyQuery.gte("sales_date", fromDate);
+    if (toDate) dailyQuery = dailyQuery.lte("sales_date", toDate);
+    const { data, error } = await dailyQuery.range(offset, offset + pageSize - 1);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const page = (data ?? []) as ShopifyDaily[];
+    shopifyDaily.push(...page);
+    if (page.length < pageSize) break;
+  }
 
   const { data: exchangeRateRows, error: exchangeRateError } = await supabase.from("exchange_rates").select("base_currency,quote_currency,rate,effective_date").eq("store_id", store.id).eq("quote_currency", store.currency).order("effective_date", { ascending: true });
   if (exchangeRateError) return NextResponse.json({ error: exchangeRateError.message }, { status: 500 });
   const exchangeRates = (exchangeRateRows ?? []) as DatedExchangeRate[];
   const includedOrders: Order[] = [];
   const currencyCoverage = createCurrencyCoverage(store.currency);
-  const pageSize = 1000;
   for (let from = 0; ; from += pageSize) {
     let query = supabase
       .from("shopify_orders")

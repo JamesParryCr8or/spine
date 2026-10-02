@@ -65,14 +65,20 @@ export async function GET(request: Request) {
     }
   }
 
-  let dailyQuery = supabase.from("shopify_sales_daily")
-    .select("sales_date,gross_sales,discounts,net_sales,shipping_charges,orders,net_items_sold")
-    .eq("store_id", store.id).order("sales_date", { ascending: true });
-  if (fromDate) dailyQuery = dailyQuery.gte("sales_date", fromDate);
-  if (toDate) dailyQuery = dailyQuery.lte("sales_date", toDate);
-  const { data: dailyRowsData, error: dailyRowsError } = await dailyQuery;
-  if (dailyRowsError) return NextResponse.json({ error: dailyRowsError.message }, { status: 500 });
-  const dailyRows = (dailyRowsData ?? []) as ShopifyDaily[];
+  const pageSize = 1000;
+  const dailyRows: ShopifyDaily[] = [];
+  for (let offset = 0; ; offset += pageSize) {
+    let dailyQuery = supabase.from("shopify_sales_daily")
+      .select("sales_date,gross_sales,discounts,net_sales,shipping_charges,orders,net_items_sold")
+      .eq("store_id", store.id).order("sales_date", { ascending: true });
+    if (fromDate) dailyQuery = dailyQuery.gte("sales_date", fromDate);
+    if (toDate) dailyQuery = dailyQuery.lte("sales_date", toDate);
+    const { data, error } = await dailyQuery.range(offset, offset + pageSize - 1);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const page = (data ?? []) as ShopifyDaily[];
+    dailyRows.push(...page);
+    if (page.length < pageSize) break;
+  }
   const timezone = store.timezone || "UTC";
 
   if (dailyRows.length) {
@@ -137,7 +143,6 @@ export async function GET(request: Request) {
   const dateRange = fromDate && toDate ? reportingRangeToUtc(fromDate, toDate, timezone) : null;
   const orders: Order[] = [];
   const currencyCoverage = createCurrencyCoverage(store.currency);
-  const pageSize = 1000;
   for (let from = 0; ; from += pageSize) {
     let query = supabase
       .from("shopify_orders")
