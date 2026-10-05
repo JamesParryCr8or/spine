@@ -3,14 +3,29 @@ import { Geist } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
 
-const defaultUrl = process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}`
-  : "http://localhost:3000";
+const siteUrl = "https://spine-nine-orpin.vercel.app";
+const description =
+  "Know what your store really earns. Spine brings Shopify sales, ad spend, product costs and profit into one clear view, so you can grow with confidence.";
+const socialImage = "/opengraph-image.png?v=2026-10-05";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(defaultUrl),
+  metadataBase: new URL(siteUrl),
   title: "Spine — The backbone of your business",
-  description: "Spine is the backbone of your business: Shopify analytics and profitability reporting.",
+  description,
+  openGraph: {
+    type: "website",
+    url: siteUrl,
+    siteName: "Spine",
+    title: "Spine — The backbone of your business",
+    description,
+    images: [{ url: socialImage, width: 1200, height: 630, alt: "Spine — The backbone of your business" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Spine — The backbone of your business",
+    description,
+    images: [socialImage],
+  },
 };
 
 const geistSans = Geist({
