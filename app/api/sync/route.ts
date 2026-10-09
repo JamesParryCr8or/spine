@@ -21,7 +21,8 @@ export async function POST() {
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
   const { from, to } = rollingSyncWindow();
-  const outcome = await runReportingSyncForStore(createReportingClient(), store, from, to, "manual");
+  // Orders import for up to 55s of the 90s budget; anything left resumes on the next run.
+  const outcome = await runReportingSyncForStore(createReportingClient(), store, from, to, "manual", Date.now() + 55_000);
   if (outcome.status === "failed") return NextResponse.json({ error: outcome.error }, { status: 500 });
   return NextResponse.json({ window: { from, to }, outcome });
 }

@@ -15,6 +15,7 @@ type ReportingRun = {
 const reportingSources = [
   { source: "shopify", provider: "shopify", label: "Shopify sales" },
   { source: "shopify_payments", provider: "shopify", label: "Payment fees" },
+  { source: "shopify_orders", provider: "shopify", label: "Shopify orders" },
   { source: "meta", provider: "meta", label: "Meta" },
   { source: "google_ads", provider: "google_ads", label: "Google Ads" },
   { source: "bing_ads", provider: "bing_ads", label: "Microsoft Ads" },

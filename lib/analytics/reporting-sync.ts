@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { refreshReportingData, type ReportingSourceResult } from "./reporting-refresh";
 import { syncGoHighLevelOpportunities } from "./gohighlevel-sync";
+import { runShopifyImport } from "../shopify/import";
 
 export { rollingSyncWindow } from "./reporting-sync-window";
 
@@ -17,6 +18,40 @@ async function goHighLevelResult(reportingClient: SupabaseClient, store: Store):
     return [{ source: "gohighlevel", status: "rejected", message: result.error }];
   } catch (error) {
     return [{ source: "gohighlevel", status: "rejected", message: error instanceof Error ? error.message : "Unknown error" }];
+  }
+}
+
+/**
+ * Ecommerce stores with Shopify connected also pull new and updated orders
+ * (and, at most daily, the catalogue) into the order-level tables that COGS,
+ * fees, UTMs and customers read. Stops between order pages at `deadline` and
+ * resumes from the saved cursor next time. No deadline means no import.
+ */
+async function shopifyOrdersResult(reportingClient: SupabaseClient, store: Store, deadline: number | undefined): Promise<ReportingSourceResult[]> {
+  if (!deadline || store.business_model === "lead_generation" || !store.shopify_domain) return [];
+  const { data: connection, error: connectionError } = await reportingClient.from("data_connections").select("status").eq("store_id", store.id).eq("provider", "shopify").maybeSingle();
+  if (connectionError) return [{ source: "shopify_orders", status: "rejected", message: connectionError.message }];
+  if (connection?.status !== "connected") return [];
+  try {
+    const { data: token, error: tokenError } = await reportingClient.rpc("read_connection_secret_for_server", { requested_store_id: store.id, connection_provider: "shopify" });
+    if (tokenError || typeof token !== "string" || !token) return [{ source: "shopify_orders", status: "rejected", message: tokenError?.message ?? "No Shopify token is available" }];
+    const result = await runShopifyImport({
+      db: reportingClient,
+      store,
+      shopDomain: store.shopify_domain,
+      accessToken: token,
+      shopCurrency: store.currency,
+      createdBy: null,
+      trigger: "cron",
+      includeDailyReport: false,
+      catalogue: "daily",
+      deadline,
+    });
+    if (result.status === "busy") return [{ source: "shopify_orders", status: "fulfilled", message: "Another Shopify import was already running" }];
+    if (result.status === "paused") return [{ source: "shopify_orders", status: "fulfilled", message: "Paused at the time limit; continues on the next run" }];
+    return [{ source: "shopify_orders", status: "fulfilled" }];
+  } catch (error) {
+    return [{ source: "shopify_orders", status: "rejected", message: error instanceof Error ? error.message : "Unknown error" }];
   }
 }
 
@@ -50,6 +85,8 @@ export async function runReportingSyncForStore(
   from: string,
   to: string,
   trigger: "cron" | "manual",
+  /** When set, also runs the Shopify order import until this epoch-ms deadline. */
+  shopifyImportDeadline?: number,
 ): Promise<ReportingSyncOutcome> {
   const { data: run, error: insertError } = await reportingClient
     .from("reporting_sync_runs")
@@ -62,11 +99,12 @@ export async function runReportingSyncForStore(
     return { storeId: store.id, status: "failed", error: insertError.message };
   }
   try {
-    const [reportingResults, ghlResults] = await Promise.all([
+    const [reportingResults, ghlResults, shopifyResults] = await Promise.all([
       refreshReportingData(reportingClient, store, from, to),
       goHighLevelResult(reportingClient, store),
+      shopifyOrdersResult(reportingClient, store, shopifyImportDeadline),
     ]);
-    const results = [...reportingResults, ...ghlResults];
+    const results = [...reportingResults, ...ghlResults, ...shopifyResults];
     await reportingClient.from("reporting_sync_runs").update({ status: "completed", results, completed_at: new Date().toISOString() }).eq("id", run.id);
     return { storeId: store.id, status: "completed", results };
   } catch (error) {
