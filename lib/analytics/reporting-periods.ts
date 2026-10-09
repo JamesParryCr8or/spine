@@ -35,3 +35,17 @@ export function reportingPeriods(start: string, end: string, granularity: Report
   }
   return periods.slice(-Math.max(limit, 1));
 }
+
+export function pagedReportingPeriods(start: string, end: string, granularity: ReportingGranularity, page: number, pageSize = 12) {
+  const allPeriods = reportingPeriods(start, end, granularity, Number.MAX_SAFE_INTEGER);
+  const size = Math.max(1, Math.trunc(pageSize));
+  const pageCount = Math.ceil(allPeriods.length / size);
+  const currentPage = Math.min(Math.max(0, Math.trunc(page)), Math.max(0, pageCount - 1));
+  const endIndex = allPeriods.length - currentPage * size;
+  return {
+    periods: allPeriods.slice(Math.max(0, endIndex - size), endIndex),
+    page: currentPage,
+    pageCount,
+    totalPeriods: allPeriods.length,
+  };
+}

@@ -155,7 +155,6 @@ export function LoginForm({
           </Button>
         </div>
         <div className="auth-signup">New to Spine? <Link href={`/auth/sign-up?next=${encodeURIComponent(next)}`}>Create an account</Link></div>
-        <a className="auth-demo-link" href="/api/demo">Explore the demo first <ArrowRight /></a>
       </form>
     </div>
   );

@@ -6,6 +6,8 @@ import { convertDatedAmount, resolveDatedExchangeRate, type DatedExchangeRate } 
 import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
 import { bucketRepeatOrderGaps } from "@/lib/analytics/repeat-order-gaps";
 import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
+import { selectAllPages } from "@/lib/supabase/select-all";
+import { selectOrdersByProcessedAt } from "@/lib/supabase/select-orders";
 
 type Order = {
   id: string;
@@ -20,6 +22,17 @@ type Order = {
 type OrderLine = { order_id: string; product_gid: string | null; sku: string | null; title: string; current_quantity: number };
 
 const money = (value: string | null | undefined) => Number(value ?? 0);
+const chunks = <T,>(items: T[], size: number) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, index * size + size));
+
+/**
+ * Merges one page from each order-id chunk's query into the single page
+ * shape selectAllPages() expects, surfacing the first chunk error if any.
+ */
+function mergeChunkPages<T>(chunkPages: Array<{ data: T[] | null; error: { message: string } | null }>) {
+  const error = chunkPages.find((page) => page.error)?.error ?? null;
+  if (error) return { data: null, error };
+  return { data: chunkPages.flatMap((page) => page.data ?? []), error: null };
+}
 
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
@@ -38,7 +51,7 @@ export async function GET(request: Request) {
   const orders: Order[] = [];
   const currencyCoverage = createCurrencyCoverage(store.currency);
   const pageSize = 1000;
-  for (let from = 0; ; from += pageSize) {
+  const { rows: validOrders, error: ordersError } = await selectOrdersByProcessedAt<Omit<Order, "exchange_rate">>((cursor, limit) => {
     let query = supabase
       .from("shopify_orders")
       .select("id,customer_id,processed_at,net_product_sales,shipping_revenue,currency,country_code")
@@ -48,28 +61,25 @@ export async function GET(request: Request) {
       .not("processed_at", "is", null);
     if (fromDate) query = query.gte("processed_at", reportingRangeToUtc(fromDate, fromDate, store.timezone || "UTC").start);
     if (toDate) query = query.lt("processed_at", reportingRangeToUtc(toDate, toDate, store.timezone || "UTC").endExclusive);
-    const { data, error } = await query.order("processed_at", { ascending: true }).range(from, from + pageSize - 1);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    const page = (data ?? []) as Array<Omit<Order, "exchange_rate">>;
-    for (const order of page) {
-      const exchangeRate = resolveDatedExchangeRate(exchangeRates, order.currency, store.currency, order.processed_at ?? "");
-      if (currencyCoverage.include(order.currency, exchangeRate)) orders.push({ ...order, exchange_rate: exchangeRate ?? 1 });
-    }
-    if (page.length < pageSize) break;
+    if (cursor) query = query.or(`processed_at.gt.${cursor.processedAt},and(processed_at.eq.${cursor.processedAt},id.gt.${cursor.id})`);
+    return query.order("processed_at", { ascending: true }).order("id", { ascending: true }).limit(limit);
+  }, pageSize);
+  if (ordersError) return NextResponse.json({ error: ordersError }, { status: 500 });
+  for (const order of validOrders) {
+    const exchangeRate = resolveDatedExchangeRate(exchangeRates, order.currency, store.currency, order.processed_at ?? "");
+    if (currencyCoverage.include(order.currency, exchangeRate)) orders.push({ ...order, exchange_rate: exchangeRate ?? 1 });
   }
   const ordersByCustomer = new Map<string, Order[]>();
   const locationTotals = new Map<string, { orders: number; sales: number; customers: Set<string> }>();
   const latestCountryByCustomer = new Map<string, string>();
-  const classificationOrders: Array<{ id: string; customerId: string | null; processedAt: string | null }> = [];
-  for (let from = 0; ; from += pageSize) {
+  const { rows: classificationRows, error: classificationError } = await selectOrdersByProcessedAt<{ id: string; customer_id: string | null; processed_at: string | null }>((cursor, limit) => {
     let historyQuery = supabase.from("shopify_orders").select("id,customer_id,processed_at").eq("store_id", store.id).eq("test", false).is("cancelled_at", null).not("processed_at", "is", null);
     if (toDate) historyQuery = historyQuery.lt("processed_at", reportingRangeToUtc(toDate, toDate, store.timezone || "UTC").endExclusive);
-    const { data, error } = await historyQuery.order("processed_at", { ascending: true }).range(from, from + pageSize - 1);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    const page = data ?? [];
-    classificationOrders.push(...page.map((order) => ({ id: order.id, customerId: order.customer_id, processedAt: order.processed_at })));
-    if (page.length < pageSize) break;
-  }
+    if (cursor) historyQuery = historyQuery.or(`processed_at.gt.${cursor.processedAt},and(processed_at.eq.${cursor.processedAt},id.gt.${cursor.id})`);
+    return historyQuery.order("processed_at", { ascending: true }).order("id", { ascending: true }).limit(limit);
+  }, pageSize);
+  if (classificationError) return NextResponse.json({ error: classificationError }, { status: 500 });
+  const classificationOrders = classificationRows.map((order) => ({ id: order.id, customerId: order.customer_id, processedAt: order.processed_at }));
   const customerClasses = classifyCustomerOrders(classificationOrders);
   let guestOrders = 0;
   let guestSales = 0;
@@ -163,13 +173,11 @@ export async function GET(request: Request) {
     return first && second ? [(Date.parse(second) - Date.parse(first)) / (24 * 60 * 60 * 1000)] : [];
   });
   const identifiedOrders = newCustomerOrders + repeatCustomerOrders;
-  const orderLines: OrderLine[] = [];
   const analysedOrderIds = orders.map((order) => order.id);
-  for (let from = 0; from < analysedOrderIds.length; from += 500) {
-    const { data, error } = await supabase.from("shopify_order_lines").select("order_id,product_gid,sku,title,current_quantity").in("order_id", analysedOrderIds.slice(from, from + 500));
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    orderLines.push(...(data ?? []) as OrderLine[]);
-  }
+  const analysedOrderIdChunks = chunks(analysedOrderIds, 500);
+  const orderLinesResult = await selectAllPages<OrderLine>((range) => Promise.all(analysedOrderIdChunks.map((ids) => supabase.from("shopify_order_lines").select("order_id,product_gid,sku,title,current_quantity").in("order_id", ids).order("id", { ascending: true }).range(range.from, range.to))).then(mergeChunkPages));
+  if (orderLinesResult.error) return NextResponse.json({ error: orderLinesResult.error }, { status: 500 });
+  const orderLines = orderLinesResult.rows;
   const linesByOrder = new Map<string, OrderLine[]>();
   for (const line of orderLines) linesByOrder.set(line.order_id, [...(linesByOrder.get(line.order_id) ?? []), line]);
   const repurchaseWindows = [30, 60, 90, 180, 365].map((days) => {

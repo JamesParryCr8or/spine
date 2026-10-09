@@ -10,7 +10,8 @@ import { allocatePeriodCost, operatingCostBucket } from "@/lib/analytics/cost-al
 import { selectEffectiveShippingCost, summarizeShippingCoverage, type ProductShippingCost, type ShippingCoverage } from "@/lib/analytics/shipping-cost";
 import { reportingDateKey, reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { calculateProfitAndLoss } from "@/lib/analytics/profit-and-loss";
-import { createReportingClient, refreshMicrosoftAdsReporting, refreshReportingData, refreshShopifyPaymentGateways } from "@/lib/analytics/reporting-refresh";
+import { selectAllPages } from "@/lib/supabase/select-all";
+import { selectOrdersByProcessedAt } from "@/lib/supabase/select-orders";
 
 export const maxDuration = 60;
 
@@ -39,6 +40,16 @@ const earlierDate = (left: string, right: string) => left < right ? left : right
 const chunks = <T,>(items: T[], size: number) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, index * size + size));
 
 /**
+ * Merges one page from each order-id chunk's query into the single page
+ * shape selectAllPages() expects, surfacing the first chunk error if any.
+ */
+function mergeChunkPages<T>(chunkPages: Array<{ data: T[] | null; error: { message: string } | null }>) {
+  const error = chunkPages.find((page) => page.error)?.error ?? null;
+  if (error) return { data: null, error };
+  return { data: chunkPages.flatMap((page) => page.data ?? []), error: null };
+}
+
+/**
  * P&L contains every imported valid Shopify order. Fees are only included
  * when Shopify supplied actual transaction-fee records. Effective gateway
  * rules estimate fees only for successful transactions without an actual fee.
@@ -57,17 +68,6 @@ export async function GET(request: Request) {
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
   const dateRange = fromDate && toDate ? reportingRangeToUtc(fromDate, toDate, store.timezone || "UTC") : null;
 
-  if (fromDate && toDate && params.get("refresh") !== "0") {
-    try {
-      await refreshReportingData(supabase, store, fromDate, toDate);
-    } catch (error) {
-      console.warn("Reporting refresh was skipped; returning saved report data", {
-        source: "pnl",
-        message: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
-  }
-
   const pageSize = 1000;
   const shopifyDaily: ShopifyDaily[] = [];
   for (let offset = 0; ; offset += pageSize) {
@@ -85,21 +85,13 @@ export async function GET(request: Request) {
     if (page.length < pageSize) break;
   }
 
-  if (!fromDate && !toDate && shopifyDaily.length && params.get("refresh") !== "0") {
-    try {
-      await refreshShopifyPaymentGateways(createReportingClient(), store,
-        shopifyDaily[0].sales_date, shopifyDaily[shopifyDaily.length - 1].sales_date);
-    } catch (error) {
-      console.warn("Shopify gateway report refresh was skipped", { message: error instanceof Error ? error.message : "Unknown error" });
-    }
-  }
 
   const { data: exchangeRateRows, error: exchangeRateError } = await supabase.from("exchange_rates").select("base_currency,quote_currency,rate,effective_date").eq("store_id", store.id).eq("quote_currency", store.currency).order("effective_date", { ascending: true });
   if (exchangeRateError) return NextResponse.json({ error: exchangeRateError.message }, { status: 500 });
   const exchangeRates = (exchangeRateRows ?? []) as DatedExchangeRate[];
   const includedOrders: Order[] = [];
   const currencyCoverage = createCurrencyCoverage(store.currency);
-  for (let from = 0; ; from += pageSize) {
+  const { rows: validOrders, error: ordersError } = await selectOrdersByProcessedAt<Omit<Order, "exchange_rate">>((cursor, limit) => {
     let query = supabase
       .from("shopify_orders")
       .select("id,processed_at,gross_sales,discounts,net_product_sales,shipping_revenue,tax,duties,total_sales,currency")
@@ -112,47 +104,48 @@ export async function GET(request: Request) {
       if (fromDate) query = query.gte("processed_at", reportingRangeToUtc(fromDate, fromDate, store.timezone || "UTC").start);
       if (toDate) query = query.lt("processed_at", reportingRangeToUtc(toDate, toDate, store.timezone || "UTC").endExclusive);
     }
-    const { data, error } = await query.order("processed_at", { ascending: true }).range(from, from + pageSize - 1);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    const page = (data ?? []) as Array<Omit<Order, "exchange_rate">>;
-    for (const order of page) {
-      const exchangeRate = resolveDatedExchangeRate(exchangeRates, order.currency, store.currency, order.processed_at ?? "");
-      if (currencyCoverage.include(order.currency, exchangeRate)) includedOrders.push({ ...order, exchange_rate: exchangeRate ?? 1 });
-    }
-    if (page.length < pageSize) break;
+    if (cursor) query = query.or(`processed_at.gt.${cursor.processedAt},and(processed_at.eq.${cursor.processedAt},id.gt.${cursor.id})`);
+    return query.order("processed_at", { ascending: true }).order("id", { ascending: true }).limit(limit);
+  }, pageSize);
+  if (ordersError) return NextResponse.json({ error: ordersError }, { status: 500 });
+  for (const order of validOrders) {
+    const exchangeRate = resolveDatedExchangeRate(exchangeRates, order.currency, store.currency, order.processed_at ?? "");
+    if (currencyCoverage.include(order.currency, exchangeRate)) includedOrders.push({ ...order, exchange_rate: exchangeRate ?? 1 });
   }
   const orderIds = includedOrders.map((order) => order.id);
   const orderChunks = chunks(orderIds, 500);
 
-  const [lineResults, refundResults, transactionResults, variantResult, costResult, operatingCostResult, paymentFeeRuleResult, productShippingCostResult, storeCostDefaultResult, estimateSettingsResult] = await Promise.all([
-    Promise.all(orderChunks.map((ids) => supabase.from("shopify_order_lines").select("order_id,variant_gid,sku,current_quantity,net_sales").in("order_id", ids))),
-    Promise.all(orderChunks.map((ids) => supabase.from("shopify_refunds").select("order_id,total_refunded").in("order_id", ids))),
-    Promise.all(orderChunks.map((ids) => supabase.from("shopify_transactions").select("order_id,fee_amount,fee_tax,currency,status,gateway,amount,processed_at_shopify,created_at_shopify").in("order_id", ids))),
-    supabase.from("shopify_variants").select("id,shopify_gid,sku,shopify_unit_cost").eq("store_id", store.id),
-    supabase.from("product_costs").select("variant_id,sku,amount,effective_from,effective_to,source").eq("store_id", store.id),
-    supabase.from("custom_costs").select("name,category,amount,currency,cadence,allocation_basis,effective_from,effective_to").eq("store_id", store.id),
-    supabase.from("payment_fee_rules").select("gateway,percentage_rate,fixed_fee,tax_rate,minimum_fee,currency,effective_from,effective_to").eq("store_id", store.id),
-    supabase.from("product_shipping_costs").select("id,variant_id,sku,amount,allocation_basis,currency,effective_from,effective_to").eq("store_id", store.id),
+  const [lineResult, refundResult, transactionResult, variantResult, costResult, operatingCostResult, paymentFeeRuleResult, productShippingCostResult, storeCostDefaultResult, estimateSettingsResult] = await Promise.all([
+    selectAllPages<Line>((range) => Promise.all(orderChunks.map((ids) => supabase.from("shopify_order_lines").select("order_id,variant_gid,sku,current_quantity,net_sales").in("order_id", ids).order("id", { ascending: true }).range(range.from, range.to))).then(mergeChunkPages)),
+    selectAllPages<Refund>((range) => Promise.all(orderChunks.map((ids) => supabase.from("shopify_refunds").select("order_id,total_refunded").in("order_id", ids).order("id", { ascending: true }).range(range.from, range.to))).then(mergeChunkPages)),
+    selectAllPages<Transaction>((range) => Promise.all(orderChunks.map((ids) => supabase.from("shopify_transactions").select("order_id,fee_amount,fee_tax,currency,status,gateway,amount,processed_at_shopify,created_at_shopify").in("order_id", ids).order("id", { ascending: true }).range(range.from, range.to))).then(mergeChunkPages)),
+    selectAllPages<Variant>((range) => supabase.from("shopify_variants").select("id,shopify_gid,sku,shopify_unit_cost").eq("store_id", store.id).order("id", { ascending: true }).range(range.from, range.to)),
+    selectAllPages<EffectiveCost>((range) => supabase.from("product_costs").select("variant_id,sku,amount,effective_from,effective_to,source").eq("store_id", store.id).order("id", { ascending: true }).range(range.from, range.to)),
+    selectAllPages<CustomCost>((range) => supabase.from("custom_costs").select("name,category,amount,currency,cadence,allocation_basis,effective_from,effective_to").eq("store_id", store.id).order("id", { ascending: true }).range(range.from, range.to)),
+    selectAllPages<PaymentFeeRuleRow>((range) => supabase.from("payment_fee_rules").select("gateway,percentage_rate,fixed_fee,tax_rate,minimum_fee,currency,effective_from,effective_to").eq("store_id", store.id).order("id", { ascending: true }).range(range.from, range.to)),
+    selectAllPages<ProductShippingCostRow>((range) => supabase.from("product_shipping_costs").select("id,variant_id,sku,amount,allocation_basis,currency,effective_from,effective_to").eq("store_id", store.id).order("id", { ascending: true }).range(range.from, range.to)),
     supabase.from("store_cost_defaults").select("fulfilment_amount,fulfilment_basis,postage_amount,postage_basis,default_cogs_percent,currency").eq("store_id", store.id).maybeSingle(),
     supabase.from("payment_fee_estimate_settings").select("shopify_plan,plan_override,default_percentage_rate,default_fixed_fee,surcharge_rate_override").eq("store_id", store.id).maybeSingle(),
   ]);
-  const allResults = [...lineResults, ...refundResults, ...transactionResults, variantResult, costResult, operatingCostResult, paymentFeeRuleResult, productShippingCostResult, storeCostDefaultResult, estimateSettingsResult];
-  const fetchError = allResults.find((result) => result.error)?.error;
-  if (fetchError) return NextResponse.json({ error: fetchError.message }, { status: 500 });
-  const lines = lineResults.flatMap((result) => result.data ?? []) as Line[];
-  const refundsRows = refundResults.flatMap((result) => result.data ?? []) as Refund[];
-  const transactions = transactionResults.flatMap((result) => result.data ?? []) as Transaction[];
+  const pagedResults = [lineResult, refundResult, transactionResult, variantResult, costResult, operatingCostResult, paymentFeeRuleResult, productShippingCostResult];
+  const pagedError = pagedResults.find((result) => result.error)?.error;
+  if (pagedError) return NextResponse.json({ error: pagedError }, { status: 500 });
+  if (storeCostDefaultResult.error) return NextResponse.json({ error: storeCostDefaultResult.error.message }, { status: 500 });
+  if (estimateSettingsResult.error) return NextResponse.json({ error: estimateSettingsResult.error.message }, { status: 500 });
+  const lines = lineResult.rows;
+  const refundsRows = refundResult.rows;
+  const transactions = transactionResult.rows;
 
-  const variantsByGid = new Map(((variantResult.data ?? []) as Variant[]).map((variant) => [variant.shopify_gid, variant]));
-  const variantsBySku = new Map(((variantResult.data ?? []) as Variant[]).filter((variant) => variant.sku).map((variant) => [variant.sku!.trim().toLowerCase(), variant]));
+  const variantsByGid = new Map(variantResult.rows.map((variant) => [variant.shopify_gid, variant]));
+  const variantsBySku = new Map(variantResult.rows.filter((variant) => variant.sku).map((variant) => [variant.sku!.trim().toLowerCase(), variant]));
   const costsByKey = new Map<string, EffectiveCost[]>();
-  for (const cost of (costResult.data ?? []) as EffectiveCost[]) {
+  for (const cost of costResult.rows) {
     const key = costKey(cost);
     if (key) costsByKey.set(key, [...(costsByKey.get(key) ?? []), cost]);
   }
   const ordersById = new Map(includedOrders.map((order) => [order.id, order]));
   const shippingCostsByKey = new Map<string, ProductShippingCost[]>();
-  for (const cost of (productShippingCostResult.data ?? []) as ProductShippingCostRow[]) {
+  for (const cost of productShippingCostResult.rows) {
     if (cost.currency !== store.currency) continue;
     const key = costKey(cost);
     if (key) shippingCostsByKey.set(key, [...(shippingCostsByKey.get(key) ?? []), cost]);
@@ -239,7 +232,7 @@ export async function GET(request: Request) {
   const refunds = shopifyDaily.length
     ? shopifyDaily.reduce((total, day) => total + Math.abs(monetary(day.sales_reversals)), 0)
     : importedRefunds;
-  const paymentFeeRules = ((paymentFeeRuleResult.data ?? []) as PaymentFeeRuleRow[]).map((rule): EffectivePaymentFeeRule => ({ gateway: rule.gateway, currency: rule.currency, effectiveFrom: rule.effective_from, effectiveTo: rule.effective_to, percentageRate: monetary(rule.percentage_rate), fixedFee: monetary(rule.fixed_fee), taxRate: monetary(rule.tax_rate), minimumFee: monetary(rule.minimum_fee) }));
+  const paymentFeeRules = paymentFeeRuleResult.rows.map((rule): EffectivePaymentFeeRule => ({ gateway: rule.gateway, currency: rule.currency, effectiveFrom: rule.effective_from, effectiveTo: rule.effective_to, percentageRate: monetary(rule.percentage_rate), fixedFee: monetary(rule.fixed_fee), taxRate: monetary(rule.tax_rate), minimumFee: monetary(rule.minimum_fee) }));
   const gatewayPaymentDays: GatewayPaymentDay[] = [];
   for (let offset = 0; ; offset += pageSize) {
     let query = supabase.from("shopify_payment_gateway_daily")
@@ -293,17 +286,6 @@ export async function GET(request: Request) {
   const rangeStart = reportDates.length ? reportDates.reduce((first, date) => date < first ? date : first) : null;
   const rangeEnd = reportDates.length ? reportDates.reduce((last, date) => date > last ? date : last) : null;
 
-  // "All imported data" has no URL dates. Refresh Microsoft spend using the
-  // actual imported sales window before reading the marketing rows below.
-  if (!fromDate && !toDate && rangeStart && rangeEnd && params.get("refresh") !== "0") {
-    try {
-      await refreshMicrosoftAdsReporting(createReportingClient(), store, rangeStart, rangeEnd);
-    } catch (error) {
-      console.warn("Microsoft Advertising refresh failed", {
-        message: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
-  }
   const metaInsights: MetaInsight[] = [];
   const googleInsights: GoogleInsight[] = [];
   const bingInsights: Array<{ insight_date: string; spend: string; currency: string }> = [];
@@ -339,7 +321,7 @@ export async function GET(request: Request) {
   let shippingCostsAvailable = Boolean(usableStoreCostDefault);
   let handlingCostsAvailable = Boolean(usableStoreCostDefault);
   let unallocatedOperatingCosts = 0;
-  for (const cost of (operatingCostResult.data ?? []) as CustomCost[]) {
+  for (const cost of operatingCostResult.rows) {
     if (!rangeStart || !rangeEnd || cost.currency !== store.currency) {
       unallocatedOperatingCosts += 1;
       continue;
@@ -374,7 +356,7 @@ export async function GET(request: Request) {
     else if (cost.allocation_basis === "fixed") fixedOperatingExpenses += allocated;
     else variableOperatingExpenses += allocated;
   }
-  const defaultShippingCosts = ((operatingCostResult.data ?? []) as CustomCost[]).filter((cost) => cost.category === "fulfilment" && cost.currency === store.currency);
+  const defaultShippingCosts = operatingCostResult.rows.filter((cost) => cost.category === "fulfilment" && cost.currency === store.currency);
   const shippingCoverage = summarizeShippingCoverage(lines.map((line): ShippingCoverage => {
     if (shippingRuleByLine.has(line)) return "override";
     const orderDate = ordersById.get(line.order_id)?.processed_at?.slice(0, 10);

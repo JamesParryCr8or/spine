@@ -391,8 +391,11 @@ export async function refreshMicrosoftAdsReporting(supabase: SupabaseClient, sto
   }
 }
 
-export async function refreshReportingData(_supabase: SupabaseClient, store: Store, from: string, to: string) {
+export type ReportingSourceResult = { source: string; status: "fulfilled" | "rejected"; message?: string };
+
+export async function refreshReportingData(_supabase: SupabaseClient, store: Store, from: string, to: string): Promise<ReportingSourceResult[]> {
   const reportingClient = createReportingClient();
+  const sources = ["shopify", "shopify_payments", "meta", "google_ads", "bing_ads"];
   const results = await Promise.allSettled([
     refreshShopifyReporting(reportingClient, store, from, to),
     refreshShopifyPaymentGateways(reportingClient, store, from, to),
@@ -400,8 +403,13 @@ export async function refreshReportingData(_supabase: SupabaseClient, store: Sto
     refreshGoogle(reportingClient, store, from, to),
     refreshMicrosoftAdsReporting(reportingClient, store, from, to),
   ]);
-  results.forEach((result, index) => {
-    if (result.status === "rejected") console.error("Reporting refresh failed", { source: ["shopify", "shopify_payments", "meta", "google_ads", "bing_ads"][index], message: result.reason instanceof Error ? result.reason.message : "Unknown error" });
+  return results.map((result, index) => {
+    if (result.status === "rejected") {
+      const message = result.reason instanceof Error ? result.reason.message : "Unknown error";
+      console.error("Reporting refresh failed", { source: sources[index], message });
+      return { source: sources[index], status: "rejected" as const, message };
+    }
+    return { source: sources[index], status: "fulfilled" as const };
   });
 }
 
