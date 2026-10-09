@@ -65,25 +65,27 @@ Already solid: 98/98 tests pass, and CI runs typecheck, lint, test and build. Ev
   - The plan copy contradicts itself ("detected: Grow" vs "Automatic (Basic until detected)"). Once a plan is detected, label the option "Automatic (<plan>, detected)".
   - Add a live example under the form: "A £50.00 payment through <gateway> ≈ £x.xx in fees", computed from the rate, fixed fee and plan surcharge.
 
-- [ ] **0.3 [Haiku] Hide the top-bar date picker where it does nothing.**
+- [x] **0.3 [Haiku] Hide the top-bar date picker where it does nothing.**
   In `AnalyticsApp()` (`components/analytics-app.tsx` ~L2610, search for `global-date-picker`), render it only when `businessModel === "lead_generation"`. Task 2.2 replaces it with one global period control.
 
-- [ ] **0.4 [Haiku] Tidy the sidebar sub-items.**
+- [x] **0.4 [Haiku] Tidy the sidebar sub-items.**
   Long labels ("Repurchase rates", "Time between orders", "New versus repeat sales") wrap onto two centred lines. `<button>` centres text by default, and `.nav-item` has a fixed `height:42px`.
   - In `app/globals.css`, make `.nav-item` and `.nav-sub-item` left-aligned and single-line with ellipsis, using `min-height` and a fixed icon column.
   - Shorten the labels ("Repurchase", "Order gaps", "New vs repeat", "Top customers", "Countries") and keep the full name in `title`.
 
-- [ ] **0.5 [Sonnet] Check whether the 1,000-row cap is truncating financial data, and fix it if so.**
+- [x] **0.5 [Sonnet] Check whether the 1,000-row cap is truncating financial data, and fix it if so.**
   - Check the API "Max rows" setting in the Supabase dashboard.
   - For the busiest month, write a script that compares rows returned against `count: "exact"` for:
     - the chunked `.in("order_id", ids)` reads (`app/api/analytics/pnl/route.ts:128-130`, `products/route.ts:76-78`, `utm/route.ts:75-76`, `orders/route.ts:80-83`, `customers/route.ts:169`);
     - the unpaged per-store `shopify_variants` and `product_costs` reads (`pnl/route.ts:131-132`).
   - If anything is capped, add a `selectAll()` helper that pages with `.range()` and use it in those places. This is a stop-gap until 4.1.
 
-- [ ] **0.6 [Haiku] Remove demo mode.**
+  *Done (9 Oct 2026):* no Supabase service-role credentials were available in this environment to check the live "Max rows" setting or compare against `count: "exact"`, so this was fixed defensively instead: added `lib/supabase/select-all.ts` (`selectAllPages`) and applied it to every unpaged per-store read and every order-id-chunked read across `pnl`, `products`, `utm`, `orders` and `customers` routes, each with a deterministic `.order("id")` so repeated `.range()` calls can't skip or duplicate rows. Confirm the dashboard setting when you have access, but the fix holds regardless of its value.
+
+- [x] **0.6 [Haiku] Remove demo mode.**
   `/api/demo` sets a `cr8or-demo` cookie that skips the login redirect (`app/api/demo/route.ts`, `lib/supabase/proxy.ts:50`, `app/protected/layout.tsx:9`). The data APIs still require a real session, so demo visitors only ever saw the fake numbers removed in 0.1. Delete the route and both checks. If you want a real demo later, seed a read-only demo workspace instead.
 
-- [ ] **0.7 [Haiku] Repo hygiene.**
+- [x] **0.7 [Haiku] Repo hygiene.**
   - Add `.codex-email-build/`, `.email-verify-2/` and `.npm-cache/` to `.gitignore`.
   - Delete the unused starter files after confirming nothing imports them: `components/tutorial/`, `hero.tsx`, `deploy-button.tsx`, `next-logo.tsx`, `supabase-logo.tsx`, `env-var-warning.tsx`, `theme-switcher.tsx`, `auth-button.tsx`.
   - The app CSS is light-only, so set `forcedTheme="light"` on `ThemeProvider` in `app/layout.tsx` until 5.1 adds dark tokens.
