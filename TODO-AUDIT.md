@@ -46,7 +46,7 @@ Already solid: 98/98 tests pass, and CI runs typecheck, lint, test and build. Ev
 
 > Commit your in-progress P&L paging work first (`analytics-app.tsx`, `globals.css`, `reporting-periods.ts`, `pnl-period-navigation.css`, `tests/shopify-graphql.test.mjs`). That keeps these edits in separate commits, and the split in Phase 2 would conflict with it otherwise.
 
-- [ ] **0.1 [Sonnet] Replace fake numbers with loading, error and empty states.**
+- [x] **0.1 [Sonnet] Replace fake numbers with loading, error and empty states.**
   In `components/analytics-app.tsx`, delete `months`, `revenue`, `profit` and `spend` (L141–144; check they're unused), `demoMetrics` (L146) and `utms` (L153). Remove the fallbacks at L456 (Overview), L818/L849 (`demoRows`, P&L) and L1180 (UTM).
   - Add `components/ui/skeleton.tsx` with a shimmer that respects `prefers-reduced-motion`.
   - Each panel goes from skeleton to data. On failure it shows an error with Retry; with no data, an empty state with the next action (Connect Shopify or Run sync).
@@ -54,6 +54,12 @@ Already solid: 98/98 tests pass, and CI runs typecheck, lint, test and build. Ev
   - Use grep and line ranges; don't read the whole file.
 
   *Done when:* `grep -rE "demoMetrics|demoRows|utms" components` finds nothing, and with the APIs returning 500 no £ figure appears anywhere.
+
+  *Done (9 Oct 2026):* removed all five fabricated fallbacks (`demoMetrics`, `demoRows`, `utms`, plus two more found during the fix — `summary`'s and `coreMetrics`'s fallback arrays in `ProfitLoss()` and `UTMAnalysis()`) and the now-dead `months`/`revenue`/`profit`/`spend` arrays. Added `components/ui/skeleton.tsx` (`Skeleton`, `StatCardSkeleton`, `TableRowSkeleton`) with a shimmer that falls back to a static fill under `prefers-reduced-motion`. Overview, ProfitLoss and UTMAnalysis each got a `loadError`/`retryToken` pair: a failed or non-OK fetch sets `loadError`, rendered as a `.panel-error` block with a Retry button that re-runs the fetch; while loading, KPI grids and the P&L table render skeletons instead of blank or fabricated content. `Expenses()` now gates the payment-estimate form and the operating-costs table behind `initialLoading` so the `2%` / `£0.23` defaults never render before the real settings response (or confirmed absence of one) arrives.
+  - Found in the process, not previously tracked: `npm run lint` already fails on `main`/this branch independent of this session (9 pre-existing `react-hooks/set-state-in-effect` errors from a recent `eslint-config-next@16.3.5` rule addition — confirmed via `git stash` back to the session's starting commit). This session's new effects add 3 more instances of the same pattern. Tracked as new task **0.1b** below rather than fixed inline, since untangling each effect is its own piece of work.
+
+- [ ] **0.1b [Sonnet] Fix the `react-hooks/set-state-in-effect` lint errors.**
+  `npm run lint` currently reports 12 errors from this rule (`components/analytics-app.tsx:343,465,698,721,785,1103,1718,2556,2570`, plus `components/shopify-customer-report.tsx:47`), all pre-existing or added alongside 0.1's loading-state effects. CI's lint step (`.github/workflows/ci.yml`) will fail until these are resolved. Move each flagged `setState` call out of the effect body: compute the initial value in `useState`'s initializer where possible, or move the call into the event handler that triggers the effect's dependency change instead of the effect itself.
 
 - [ ] **0.2 [Sonnet] Fix the Expenses screen.**
   This covers `Expenses()` in `components/analytics-app.tsx` (~L1530–1633) and these selectors in `app/globals.css`:
