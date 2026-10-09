@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchCachedJson } from "@/lib/analytics/client-response-cache";
 import type { ReactNode } from "react";
-import { ArrowDownRight, BarChart3, CalendarClock, CircleDollarSign, RefreshCw, Users } from "lucide-react";
+import { BarChart3, CalendarClock, CircleDollarSign, RefreshCw, Users } from "lucide-react";
+import { PanelState } from "@/components/ui/panel-state";
 
 type LeadView = "Pipeline outcomes" | "Stage ageing" | "Lead sources" | "Sales team" | "Forecast" | "Lost reasons" | "Follow-ups";
 type Range = { from: string; to: string; label: string };
@@ -156,7 +157,7 @@ export function LeadReportPage({ view, range }: { view: LeadView; range: Range }
   return <section className="lead-overview lead-report-page">
     <div className="lead-overview-heading"><div><span className="eyebrow">GOHIGHLEVEL DEEP DIVE</span><h2>{view}</h2><p>{data?.pipelineName ? `${data.pipelineName} · ` : ""}{range.label}</p></div><button className="filter-button" onClick={()=>setRevision(x=>x+1)} disabled={loading}><RefreshCw className={loading?"spin":""}/>{loading?"Loading…":"Refresh"}</button></div>
     {error?<div className="connection-error" role="alert">{error}</div>:null}
-    {loading?<div className="panel lead-overview-loading"><RefreshCw className="spin"/><strong>Loading GoHighLevel report…</strong></div>:content}
+    {loading?<section className="panel"><PanelState status="loading" lines={5} message="Loading GoHighLevel report…"/></section>:content}
     <p className="lead-report-note">Opportunity outcomes, stage and values are a current GoHighLevel snapshot. The selected date range filters creation cohorts and spend periods where relevant; it does not reconstruct historical stage changes.</p>
   </section>;
 }

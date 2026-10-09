@@ -7,7 +7,6 @@ type Props = {
   paths: JourneyPath[];
   countsByDepth: Array<{ depth: number; customers: number }>;
 };
-type Node = { name: string; count: number; y: number; height: number; incoming: number; outgoing: number };
 const colors = ["#7660ed", "#25a8da", "#ed8d64", "#25b59b", "#ce75d6", "#d4ad41", "#617ebd", "#de7297"];
 const orderNames = ["", "First", "Second", "Third", "Fourth", "Fifth", "Sixth"];
 const shortName = (name: string) => name.length > 25 ? name.slice(0, 24) + "…" : name;

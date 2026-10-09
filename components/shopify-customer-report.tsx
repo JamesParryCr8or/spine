@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useResetOnChange } from "@/lib/use-reset-on-change";
 import { CustomerGeography } from "@/components/customer-geography";
+import { PanelState } from "@/components/ui/panel-state";
 
 type SalesPeriod = { period: string; newOrders: number; newSales: number; repeatOrders: number; repeatSales: number };
 type TopCustomer = { id: string; name: string; country: string; orders: number; sales: number };
@@ -86,7 +87,7 @@ export function ShopifyCustomerReport({ focus }: { focus: "sales" | "customers" 
       </select></label> : null}
     </section>
     {error ? <div className="connection-notice"><div><strong>{error}</strong><span>Check the Shopify connection and reporting dates, then try again.</span></div></div> : null}
-    {loading ? <div className="data-loading">Loading current Shopify report…</div> : report ? <section className="panel report-panel">
+    {loading ? <PanelState status="loading" message="Loading current Shopify report…"/> : report ? <section className="panel report-panel">
       <div className="panel-head"><div><span className="eyebrow">SHOPIFY REPORTS</span><h2>{title}</h2><span className="report-note">From {range.from} to {range.to} · queried from Shopify for this period.</span></div></div>
       {focus === "sales" ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Period</th><th>New orders</th><th>New-customer sales</th><th>Repeat orders</th><th>Repeat sales</th></tr></thead><tbody>
         {report.periods?.length ? report.periods.map((row) => <tr key={row.period}><td>{periodLabel(row.period, groupBy)}</td><td>{count.format(row.newOrders)}</td><td><strong>{money.format(row.newSales)}</strong></td><td>{count.format(row.repeatOrders)}</td><td><strong>{money.format(row.repeatSales)}</strong></td></tr>) : <tr><td colSpan={5} className="empty-row">No Shopify sales data in this period.</td></tr>}

@@ -199,10 +199,10 @@ Already solid: 98/98 tests pass, and CI runs typecheck, lint, test and build. Ev
 
   *Done when:* a second visit to Overview or P&L renders from cache in under 100 ms, then refreshes.
 
-- [ ] **3.2 [Sonnet] Shared loading, error and empty components.**
+- [x] **3.2 [Sonnet] Shared loading, error and empty components.** *Done together with 3.3 (Opus, 9 Oct 2026):* `<Skeleton>`, `<StatCardSkeleton>` and `<TableRowSkeleton>` already existed from Phase 0 (`components/ui/skeleton.tsx`); added `<PanelState status="loading | error | empty">` (`components/ui/panel-state.tsx`) — loading is shimmer lines plus a muted caption, error is the existing `.panel-error` frame with an optional Retry, empty is a dashed explanatory box.
   Build `<Skeleton>`, `<PanelState status="loading | error | empty">`, and KPI-card and table-row skeletons. Apply them to Overview, P&L and Expenses as the reference pattern, replacing the 18 plain "Loading…" strings.
 
-- [ ] **3.3 [Haiku] Roll the 3.2 pattern out to the remaining screens.**
+- [x] **3.3 [Haiku] Roll the 3.2 pattern out to the remaining screens.** *Done (Opus, 9 Oct 2026):* every plain "Loading …" line is now a `<PanelState status="loading">` — Overview, P&L (×3), UTM (×3), Customers, Sales, Products, Reports (×2), Settings (×2), Costs audit history, Leads, Team, the Shopify customer reports and both GoHighLevel pages; the Sales order table shows skeleton rows instead of a "Loading orders…" row. The three hand-written error blocks with Retry (Overview, P&L, UTM) now use `<PanelState status="error">`. Button labels that say "Loading accounts…" while a button is busy were left alone. Empty states were not rewritten — each screen's existing `connection-notice` copy is specific and correct; `status="empty"` is there for new screens.
   Do two or three screens per session, copying the 3.2 examples exactly: Sales, Products, Customers (with its sub-reports), UTM, Costs, Connections, Reports, Settings, Team and the lead-gen pages.
 
 - [ ] **3.4 [Haiku] Prefetch on hover and when idle.**

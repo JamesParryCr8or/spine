@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDownRight, BarChart3, CircleDollarSign, RefreshCw, Target, Users } from "lucide-react";
 import { LeadRevenueSummary } from "./lead-revenue-summary";
 import { fetchCachedJson } from "@/lib/analytics/client-response-cache";
+import { PanelState } from "@/components/ui/panel-state";
 
 type PipelinePayload = {
   currency?: string;
@@ -149,7 +150,7 @@ export function LeadOverview({ range, onOpenConnections, onOpenLeads }: LeadOver
 
     {!loading && data?.pipelineId && <section className="panel lead-funnel-config"><div><span className="eyebrow">FUNNEL STAGE MAPPING</span><p>Choose the GHL stage that represents each milestone. Later-stage opportunities count as having reached earlier milestones.</p></div><div className="lead-funnel-selects">{(["leadStageId", "bookedCallStageId", "purchaseStageId"] as const).map((key, index) => <label key={key}>{["Lead stage", "Booked call stage", "Purchase stage"][index]}<select value={funnelStages[key]} disabled={savingFunnel || savingPipeline} onChange={(event) => setFunnelStages((current) => ({ ...current, [key]: event.target.value }))}><option value="">Choose a stage</option>{(data.stages ?? []).map((stage) => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select></label>)}</div><button className="primary" disabled={savingFunnel || !funnelStages.leadStageId || !funnelStages.bookedCallStageId || !funnelStages.purchaseStageId} onClick={() => void saveFunnelStages()}>{savingFunnel ? "Saving…" : "Save funnel"}</button></section>}
 
-    {loading && <div className="panel lead-overview-loading"><RefreshCw className="spin"/><strong>Loading your GoHighLevel sales pipeline…</strong></div>}
+    {loading && <section className="panel"><PanelState status="loading" lines={5} message="Loading your GoHighLevel sales pipeline…"/></section>}
     {!loading && data?.pipelineId && totals && <>
       <div className="lead-overview-kpis">
         <article className="metric-card lead-kpi-spend"><div className="metric-label"><i className="lead-kpi-dot meta"/>Meta ad spend</div><strong>{currency(totals.metaSpend)}</strong><div className="metric-foot">{range.label}</div></article>

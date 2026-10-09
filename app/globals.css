@@ -451,3 +451,10 @@ button { cursor:pointer; }
 
 /* Per-source reporting freshness chips (topbar freshness card) */
 .source-chips{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 0;padding:0;list-style:none;max-width:340px}.source-chip{display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:700;color:#4b5263;background:#f3f4f8;border-radius:999px;padding:2px 7px 2px 5px;cursor:default}.source-chip span{width:6px;height:6px;border-radius:50%;background:#19c68b}.source-chip.failed{color:#a1291f;background:#fdeceb}.source-chip.failed span{background:#e0473b}.source-chip.pending span{background:#c3c8d4}
+
+/* Shared panel states (components/ui/panel-state.tsx) */
+.panel-state.loading{display:grid;gap:9px;padding:16px;margin-bottom:14px;border:1px solid #eef0f6;border-radius:10px;background:#fff}
+.panel-state-caption{font-size:11px;font-weight:600;color:#8a92a4;margin-top:2px}
+.panel-state.empty{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;margin-bottom:14px;border:1px dashed #dfe3ee;border-radius:10px;background:#fafbfd;color:#5c6478;font-size:12px}
+.panel-state.empty svg{width:16px;flex:0 0 auto;margin-top:1px;color:#8a92a4}
+.panel-state.empty strong{display:block;font-size:12px;color:#17213a;margin-bottom:3px}
