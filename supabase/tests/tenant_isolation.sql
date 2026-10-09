@@ -201,7 +201,8 @@ values (
   'viewer'
 );
 
-set local role authenticated;
+-- private is revoked from authenticated (supabase/setup.sql), so call the helper
+-- as the owner role. auth.uid() still reads the claim set here.
 select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000b2', true);
 do $$
 declare
