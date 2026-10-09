@@ -193,10 +193,11 @@ with ungranted as (
 )
 select set_config('test.ungranted_store_id', (select id::text from ungranted), true);
 
-insert into public.store_memberships (store_id, user_id, role)
+insert into public.store_memberships (store_id, user_id, email, role)
 values (
   current_setting('test.granted_store_id')::uuid,
   '00000000-0000-4000-8000-0000000000b2',
+  'rls-member-b@example.invalid',
   'viewer'
 );
 
