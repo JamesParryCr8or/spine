@@ -6,6 +6,7 @@ import { normalizeAttribution } from "@/lib/analytics/utm-attribution";
 import { requireWorkspace } from "@/lib/workspace/server";
 import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
+import { selectAllPages } from "@/lib/supabase/select-all";
 
 type Order = { id: string; customer_id: string | null; net_product_sales: string; processed_at: string | null; currency: string; country_code: string | null; exchange_rate: number };
 type Line = { order_id: string; title: string; variant_title: string | null; variant_gid: string | null; sku: string | null; current_quantity: number };
@@ -18,6 +19,16 @@ type CustomSpend = { spend_date: string; source: string; medium: string; campaig
 type Diagnostic = { orders: number; sales: number };
 
 const chunks = <T,>(items: T[], size: number) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, index * size + size));
+
+/**
+ * Merges one page from each order-id chunk's query into the single page
+ * shape selectAllPages() expects, surfacing the first chunk error if any.
+ */
+function mergeChunkPages<T>(chunkPages: Array<{ data: T[] | null; error: { message: string } | null }>) {
+  const error = chunkPages.find((page) => page.error)?.error ?? null;
+  if (error) return { data: null, error };
+  return { data: chunkPages.flatMap((page) => page.data ?? []), error: null };
+}
 const cleanLandingPage = (value: string | null) => value?.trim() || "Unknown";
 const trendPeriodKey = (value: string, timeZone: string, groupBy: string) => {
   const parts = new Intl.DateTimeFormat("en-GB", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(value));
@@ -71,15 +82,15 @@ export async function GET(request: Request) {
   }
 
   const orderChunks = chunks(orderRows.map((order) => order.id), 500);
-  const [lineResults, refundResults, variantResult, costResult] = await Promise.all([
-    Promise.all(orderChunks.map((ids) => supabase.from("shopify_order_lines").select("order_id,title,variant_title,variant_gid,sku,current_quantity").in("order_id", ids))),
-    Promise.all(orderChunks.map((ids) => supabase.from("shopify_refunds").select("order_id,total_refunded").in("order_id", ids))),
-    supabase.from("shopify_variants").select("id,shopify_gid,sku,shopify_unit_cost").eq("store_id", store.id),
-    supabase.from("product_costs").select("variant_id,sku,amount,effective_from,effective_to,source").eq("store_id", store.id),
+  const [lineResult, refundResult, variantResult, costResult] = await Promise.all([
+    selectAllPages<Line>((range) => Promise.all(orderChunks.map((ids) => supabase.from("shopify_order_lines").select("order_id,title,variant_title,variant_gid,sku,current_quantity").in("order_id", ids).order("id", { ascending: true }).range(range.from, range.to))).then(mergeChunkPages)),
+    selectAllPages<Refund>((range) => Promise.all(orderChunks.map((ids) => supabase.from("shopify_refunds").select("order_id,total_refunded").in("order_id", ids).order("id", { ascending: true }).range(range.from, range.to))).then(mergeChunkPages)),
+    selectAllPages<Variant>((range) => supabase.from("shopify_variants").select("id,shopify_gid,sku,shopify_unit_cost").eq("store_id", store.id).order("id", { ascending: true }).range(range.from, range.to)),
+    selectAllPages<EffectiveCost>((range) => supabase.from("product_costs").select("variant_id,sku,amount,effective_from,effective_to,source").eq("store_id", store.id).order("id", { ascending: true }).range(range.from, range.to)),
   ]);
-  const relatedError = [...lineResults, ...refundResults, variantResult, costResult].find((result) => result.error)?.error;
-  if (relatedError) return NextResponse.json({ error: relatedError.message }, { status: 500 });
-  const lines = lineResults.flatMap((result) => result.data ?? []) as Line[];
+  const relatedError = [lineResult, refundResult, variantResult, costResult].find((result) => result.error)?.error;
+  if (relatedError) return NextResponse.json({ error: relatedError }, { status: 500 });
+  const lines = lineResult.rows;
   const orderProducts = new Map<string, Set<string>>();
   for (const line of lines) {
     const label = line.variant_title ? `${line.title} · ${line.variant_title}` : line.title;
@@ -88,17 +99,17 @@ export async function GET(request: Request) {
   }
   const orderById = new Map(orderRows.map((order) => [order.id, order]));
   const refundsByOrder = new Map<string, number>();
-  for (const refund of refundResults.flatMap((result) => result.data ?? []) as Refund[]) {
+  for (const refund of refundResult.rows) {
     const order = orderById.get(refund.order_id);
     if (!order) continue;
     const amount = convertDatedAmount(monetary(refund.total_refunded), order.exchange_rate, store.currency);
     refundsByOrder.set(refund.order_id, (refundsByOrder.get(refund.order_id) ?? 0) + amount);
   }
-  const variants = (variantResult.data ?? []) as Variant[];
+  const variants = variantResult.rows;
   const variantsByGid = new Map(variants.map((variant) => [variant.shopify_gid, variant]));
   const variantsBySku = new Map(variants.filter((variant) => variant.sku).map((variant) => [variant.sku!.trim().toLowerCase(), variant]));
   const costsByKey = new Map<string, EffectiveCost[]>();
-  for (const cost of (costResult.data ?? []) as EffectiveCost[]) {
+  for (const cost of costResult.rows) {
     const key = costKey(cost);
     if (key) costsByKey.set(key, [...(costsByKey.get(key) ?? []), cost]);
   }

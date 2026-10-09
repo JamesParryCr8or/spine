@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { reportingDateKey, reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { costKey, monetary, resolveEffectiveCost, type EffectiveCost } from "@/lib/analytics/effective-cost";
 import { requireWorkspace } from "@/lib/workspace/server";
+import { selectAllPages } from "@/lib/supabase/select-all";
 
 type OrderRow = {
   id: string; customer_id: string | null; order_name: string; processed_at: string | null;
@@ -30,6 +31,18 @@ function addBreakdown(map: Map<string, BreakdownRow>, label: string, orderId: st
 
 function sorted(map: Map<string, BreakdownRow>, chronological = false) {
   return [...map.values()].sort((left, right) => chronological ? left.label.localeCompare(right.label) : right.sales - left.sales);
+}
+
+const chunks = <T,>(items: T[], size: number) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, index * size + size));
+
+/**
+ * Merges one page from each order-id chunk's query into the single page
+ * shape selectAllPages() expects, surfacing the first chunk error if any.
+ */
+function mergeChunkPages<T>(chunkPages: Array<{ data: T[] | null; error: { message: string } | null }>) {
+  const error = chunkPages.find((page) => page.error)?.error ?? null;
+  if (error) return { data: null, error };
+  return { data: chunkPages.flatMap((page) => page.data ?? []), error: null };
 }
 
 export async function GET(request: Request) {
@@ -70,25 +83,23 @@ export async function GET(request: Request) {
   }
 
   const orderIds = orderRows.map((order) => order.id);
-  const refundRows: Array<{ order_id: string; total_refunded: string | number }> = [];
-  const lineRows: Array<{ order_id: string; title: string; variant_title: string | null; variant_gid: string | null; sku: string | null; current_quantity: number; net_sales: string | number }> = [];
-  const attributionRows: Array<{ order_id: string; customer_order_index: number | null }> = [];
-  const transactionRows: Array<{ order_id: string; status: string; fee_amount: string | number; fee_tax: string | number }> = [];
-  for (let index = 0; index < orderIds.length; index += 200) {
-    const ids = orderIds.slice(index, index + 200);
-    const [refundResult, lineResult, attributionResult, transactionResult] = await Promise.all([
-      supabase.from("shopify_refunds").select("order_id,total_refunded").in("order_id", ids),
-      supabase.from("shopify_order_lines").select("order_id,title,variant_title,variant_gid,sku,current_quantity,net_sales").in("order_id", ids),
-      supabase.from("shopify_order_attribution").select("order_id,customer_order_index").eq("attribution_model", "last_touch").in("order_id", ids),
-      supabase.from("shopify_transactions").select("order_id,status,fee_amount,fee_tax").in("order_id", ids),
-    ]);
-    const error = refundResult.error ?? lineResult.error ?? attributionResult.error ?? transactionResult.error;
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    refundRows.push(...(refundResult.data ?? []));
-    lineRows.push(...(lineResult.data ?? []));
-    attributionRows.push(...(attributionResult.data ?? []));
-    transactionRows.push(...(transactionResult.data ?? []));
-  }
+  const orderIdChunks = chunks(orderIds, 200);
+  type RefundRow = { order_id: string; total_refunded: string | number };
+  type OrderLineRow = { order_id: string; title: string; variant_title: string | null; variant_gid: string | null; sku: string | null; current_quantity: number; net_sales: string | number };
+  type AttributionRow = { order_id: string; customer_order_index: number | null };
+  type TransactionRow = { order_id: string; status: string; fee_amount: string | number; fee_tax: string | number };
+  const [refundResult, lineResult, attributionResult, transactionResult] = await Promise.all([
+    selectAllPages<RefundRow>((range) => Promise.all(orderIdChunks.map((ids) => supabase.from("shopify_refunds").select("order_id,total_refunded").in("order_id", ids).order("id", { ascending: true }).range(range.from, range.to))).then(mergeChunkPages)),
+    selectAllPages<OrderLineRow>((range) => Promise.all(orderIdChunks.map((ids) => supabase.from("shopify_order_lines").select("order_id,title,variant_title,variant_gid,sku,current_quantity,net_sales").in("order_id", ids).order("id", { ascending: true }).range(range.from, range.to))).then(mergeChunkPages)),
+    selectAllPages<AttributionRow>((range) => Promise.all(orderIdChunks.map((ids) => supabase.from("shopify_order_attribution").select("order_id,customer_order_index").eq("attribution_model", "last_touch").in("order_id", ids).order("id", { ascending: true }).range(range.from, range.to))).then(mergeChunkPages)),
+    selectAllPages<TransactionRow>((range) => Promise.all(orderIdChunks.map((ids) => supabase.from("shopify_transactions").select("order_id,status,fee_amount,fee_tax").in("order_id", ids).order("id", { ascending: true }).range(range.from, range.to))).then(mergeChunkPages)),
+  ]);
+  const pagedError = [refundResult, lineResult, attributionResult, transactionResult].find((result) => result.error)?.error;
+  if (pagedError) return NextResponse.json({ error: pagedError }, { status: 500 });
+  const refundRows = refundResult.rows;
+  const lineRows = lineResult.rows;
+  const attributionRows = attributionResult.rows;
+  const transactionRows = transactionResult.rows;
 
   const refundsByOrder = new Map<string, number>();
   for (const refund of refundRows) refundsByOrder.set(refund.order_id, (refundsByOrder.get(refund.order_id) ?? 0) + Number(refund.total_refunded));

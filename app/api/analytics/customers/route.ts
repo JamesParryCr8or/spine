@@ -6,6 +6,7 @@ import { convertDatedAmount, resolveDatedExchangeRate, type DatedExchangeRate } 
 import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
 import { bucketRepeatOrderGaps } from "@/lib/analytics/repeat-order-gaps";
 import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
+import { selectAllPages } from "@/lib/supabase/select-all";
 
 type Order = {
   id: string;
@@ -20,6 +21,17 @@ type Order = {
 type OrderLine = { order_id: string; product_gid: string | null; sku: string | null; title: string; current_quantity: number };
 
 const money = (value: string | null | undefined) => Number(value ?? 0);
+const chunks = <T,>(items: T[], size: number) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, index * size + size));
+
+/**
+ * Merges one page from each order-id chunk's query into the single page
+ * shape selectAllPages() expects, surfacing the first chunk error if any.
+ */
+function mergeChunkPages<T>(chunkPages: Array<{ data: T[] | null; error: { message: string } | null }>) {
+  const error = chunkPages.find((page) => page.error)?.error ?? null;
+  if (error) return { data: null, error };
+  return { data: chunkPages.flatMap((page) => page.data ?? []), error: null };
+}
 
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
@@ -163,13 +175,11 @@ export async function GET(request: Request) {
     return first && second ? [(Date.parse(second) - Date.parse(first)) / (24 * 60 * 60 * 1000)] : [];
   });
   const identifiedOrders = newCustomerOrders + repeatCustomerOrders;
-  const orderLines: OrderLine[] = [];
   const analysedOrderIds = orders.map((order) => order.id);
-  for (let from = 0; from < analysedOrderIds.length; from += 500) {
-    const { data, error } = await supabase.from("shopify_order_lines").select("order_id,product_gid,sku,title,current_quantity").in("order_id", analysedOrderIds.slice(from, from + 500));
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    orderLines.push(...(data ?? []) as OrderLine[]);
-  }
+  const analysedOrderIdChunks = chunks(analysedOrderIds, 500);
+  const orderLinesResult = await selectAllPages<OrderLine>((range) => Promise.all(analysedOrderIdChunks.map((ids) => supabase.from("shopify_order_lines").select("order_id,product_gid,sku,title,current_quantity").in("order_id", ids).order("id", { ascending: true }).range(range.from, range.to))).then(mergeChunkPages));
+  if (orderLinesResult.error) return NextResponse.json({ error: orderLinesResult.error }, { status: 500 });
+  const orderLines = orderLinesResult.rows;
   const linesByOrder = new Map<string, OrderLine[]>();
   for (const line of orderLines) linesByOrder.set(line.order_id, [...(linesByOrder.get(line.order_id) ?? []), line]);
   const repurchaseWindows = [30, 60, 90, 180, 365].map((days) => {
