@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createReportingClient } from "@/lib/analytics/reporting-refresh";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 type Store = { id: string; name: string; currency: string; timezone: string | null };
 type SalesDay = { sales_date: string; net_sales: string; gross_profit: string; orders: number };
@@ -73,7 +73,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Set GHL_WEEKLY_REPORT_WEBHOOK_URL to an HTTPS GoHighLevel webhook" }, { status: 503 });
   }
 
-  const supabase = createReportingClient();
+  const supabase = createAdminClient();
   const { data: storeData, error: storesError } = await supabase.from("stores").select("id,name,currency,timezone");
   if (storesError) return NextResponse.json({ error: storesError.message }, { status: 500 });
 

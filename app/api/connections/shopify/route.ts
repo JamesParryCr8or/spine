@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { createReportingClient } from "@/lib/analytics/reporting-refresh";
 
 import { requireWorkspace } from "@/lib/workspace/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -67,7 +66,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null) as { shopDomain?: string; accessToken?: string } | null;
   const suppliedToken = body?.accessToken?.trim();
   const shopDomain = normalizeShopDomain(suppliedToken ? body?.shopDomain ?? "" : store.shopify_domain ?? "");
-  const savedSecret = suppliedToken ? null : await createReportingClient().rpc("read_connection_secret_for_server", { requested_store_id: store.id, connection_provider: "shopify" });
+  const savedSecret = suppliedToken ? null : await createAdminClient().rpc("read_connection_secret_for_server", { requested_store_id: store.id, connection_provider: "shopify" });
   const accessToken = suppliedToken || (typeof savedSecret?.data === "string" ? savedSecret.data : "");
   if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shopDomain)) return NextResponse.json({ error: "Use your-store.myshopify.com" }, { status: 400 });
   if (!accessToken) return NextResponse.json({ error: "Shopify token is unavailable. Reconnect the store." }, { status: 409 });
@@ -97,7 +96,7 @@ export async function POST(request: Request) {
       catalogue: "always",
     });
     if (result.status === "busy") {
-      return NextResponse.json({ error: "A Shopify import is already running. Leave this page open and refresh the dashboard in a few minutes." }, { status: 409 });
+      return NextResponse.json({ error: "A Shopify import is already running. Leave this page open and refresh the dashboard in a few minutes." }, { status: 429, headers: { "Retry-After": "120" } });
     }
     return NextResponse.json({ connection: { provider: "shopify", status: "connected", external_account_id: shopData.shop.id, external_account_name: shopData.shop.name, granted_scopes: [...grantedScopes].sort() }, resumed: result.resumed, sync: { mode: result.mode, windowStart: result.windowStart, windowEnd: result.windowEnd, ...result.counts } });
   } catch (error) {

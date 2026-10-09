@@ -89,3 +89,18 @@ test("selects an invited store when the organization cookie is stale", () => {
     store: stores[2],
   });
 });
+
+test("a member of one store never gets a sibling store in the same organization", () => {
+  const invitedMembership = { organizationId: "org-a", storeId: "store-a-1", role: "analyst" };
+  for (const requestedStoreId of ["store-a-2", "store-b-1", null]) {
+    assert.deepEqual(selectActiveWorkspace({
+      memberships: [invitedMembership],
+      stores,
+      requestedOrganizationId: "org-a",
+      requestedStoreId,
+    }), {
+      membership: invitedMembership,
+      store: stores[0],
+    }, `requested ${requestedStoreId}`);
+  }
+});

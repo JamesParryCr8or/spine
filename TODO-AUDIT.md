@@ -343,7 +343,7 @@ Already solid: 98/98 tests pass, and CI runs typecheck, lint, test and build. Ev
 
 ## Phase 8: Security and correctness
 
-- [ ] **8.1 [Sonnet] One server-only service-role client.**
+- [x] **8.1 [Sonnet] One server-only service-role client.** *Done (Opus, 9 Oct 2026):* `lib/supabase/admin.ts` (`createAdminClient`, now `import "server-only"`) is the only one. `createReportingClient` was deleted and its 11 callers switched; the inline clients in `leads/pipeline`, `gohighlevel/pipelines` and `lib/revenue/server.ts` now use it too. Audit of what remains: connection-secret reads (`read_connection_secret_for_server`), the two cron jobs, writes on behalf of store-scoped `connector` members, team/invitation management, and the reporting refresh — all legitimately need it. The one plain tenant read, `shopify_acquisition_daily` in `overview/route.ts`, now goes through the user's client (the table has a member SELECT policy). `lib/revenue/server.ts` still falls back to the service-role key as an HMAC signing key when `REVENUE_OAUTH_STATE_SECRET` is unset — not a client, but worth setting that variable so the two secrets are separate.
   There are three today: `lib/supabase/admin.ts`, `createReportingClient` in `lib/analytics/reporting-refresh.ts:16`, and an inline one in `app/api/analytics/leads/pipeline/route.ts`.
   - Keep one, with `import "server-only"`.
   - Audit every use; for example, `overview/route.ts:91` reads tenant data with the service role.
@@ -354,10 +354,10 @@ Already solid: 98/98 tests pass, and CI runs typecheck, lint, test and build. Ev
   - Relabel the L124 figure "Profit after ads", or compute true net profit from 4.1.
   - Convert spend in other currencies instead of dropping it.
 
-- [ ] **8.3 [Sonnet] Tenant-isolation tests for store-scoped members.**
+- [~] **8.3 [Sonnet] Tenant-isolation tests for store-scoped members.** *Written, not yet run (Opus, 9 Oct 2026):* new `supabase/tests/store_scope_isolation.sql` seeds the same rows into two stores of one organization (orders, daily sales, custom costs, product costs, payment-fee rules), invites a user to one store only, and asserts they read their store's rows and none of the sibling's — then that a store `viewer` can't read order-level data. Covers the RLS side every `/api/analytics/*` and `/api/costs/*` route relies on. The app side (a store member can never *select* a sibling store) is covered by a new case in `tests/workspace-selection.test.mjs`. **Run the SQL file in the Supabase SQL editor to finish this.**
   Cover every `/api/analytics/*` and `/api/costs/*` route. A member of store A must never see store B, even within the same organisation.
 
-- [ ] **8.4 [Sonnet] Rate-limit expensive endpoints.**
+- [x] **8.4 [Sonnet] Rate-limit expensive endpoints.** *Done (Opus, 9 Oct 2026) — needs `20261009130000_store_job_locks.sql` applied:* new `withStoreJobLock(job, ttl, handler)` (`lib/workspace/job-lock.ts`) backed by `try_acquire_job_lock` / `release_job_lock` and a `private.store_job_locks` table; locks expire after the route's `maxDuration` so a crashed function can't wedge a store. Wraps the Shopify fee import, GoHighLevel sync, Meta import and Stripe sync. The two jobs that already had locks now answer collisions with 429 + `Retry-After` instead of 200/409: "Sync now" (`reporting_sync_runs`) and Shopify connect (`sync_runs`). Until the migration is applied the wrapper runs unlocked (fails open on `PGRST202`) rather than breaking those routes. There are no server-side exports to lock — CSV/XLSX exports are built in the browser.
   For sync, imports and exports, allow one in-flight job per store and source (reusing the 1.1 lock). Reject extras with 429 and `Retry-After`.
 
 ## Phase 9: Release safety

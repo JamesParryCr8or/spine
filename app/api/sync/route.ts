@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireWorkspace } from "@/lib/workspace/server";
-import { createReportingClient } from "@/lib/analytics/reporting-refresh";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { rollingSyncWindow, runReportingSyncForStore } from "@/lib/analytics/reporting-sync";
 
 export const maxDuration = 90;
@@ -22,7 +22,10 @@ export async function POST() {
 
   const { from, to } = rollingSyncWindow();
   // Orders import for up to 55s of the 90s budget; anything left resumes on the next run.
-  const outcome = await runReportingSyncForStore(createReportingClient(), store, from, to, "manual", Date.now() + 55_000);
+  const outcome = await runReportingSyncForStore(createAdminClient(), store, from, to, "manual", Date.now() + 55_000);
   if (outcome.status === "failed") return NextResponse.json({ error: outcome.error }, { status: 500 });
+  if (outcome.status === "skipped") {
+    return NextResponse.json({ error: "A sync is already running for this store. Try again when it finishes." }, { status: 429, headers: { "Retry-After": "60" } });
+  }
   return NextResponse.json({ window: { from, to }, outcome });
 }

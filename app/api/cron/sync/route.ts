@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createReportingClient } from "@/lib/analytics/reporting-refresh";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { rollingSyncWindow, runReportingSyncForStore } from "@/lib/analytics/reporting-sync";
 
 export const maxDuration = 300;
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
   // Leave headroom under maxDuration (300s) for the in-flight order page and
   // the final run updates; each store's Shopify import gets at most 120s of it.
   const overallDeadline = Date.now() + 240_000;
-  const supabase = createReportingClient();
+  const supabase = createAdminClient();
   const { data: storeRows, error: storesError } = await supabase.from("stores").select("id,organization_id,shopify_domain,currency,business_model");
   if (storesError) return NextResponse.json({ error: storesError.message }, { status: 500 });
 

@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { requireWorkspace } from "@/lib/workspace/server";
+import { withStoreJobLock } from "@/lib/workspace/job-lock";
 import { readCredential } from "@/lib/revenue/server";
 import { stripeEntries, type StripeRecord } from "@/lib/revenue/stripe";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-export async function POST(request: Request) {
+export const POST = withStoreJobLock("stripe_sync", 300, handlePost);
+
+async function handlePost(request: Request) {
   const w = await requireWorkspace(); if (!w.ok) return w.response;
   if (!w.store || !["owner", "admin", "connector"].includes(w.membership.role)) return NextResponse.json({ error: "Owner or admin access required" }, { status: 403 });
   try {

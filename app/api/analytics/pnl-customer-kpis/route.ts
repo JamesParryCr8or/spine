@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { reportingPeriods, type ReportingGranularity } from "@/lib/analytics/reporting-periods";
-import { createReportingClient } from "@/lib/analytics/reporting-refresh";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { shopifyGraph } from "@/lib/shopify/graphql";
 import { requireWorkspace } from "@/lib/workspace/server";
 
@@ -49,7 +49,7 @@ export async function GET(request: Request) {
   if (!workspace.ok) return workspace.response;
   const { store } = workspace;
   if (!store?.shopify_domain) return NextResponse.json({ error: "Connect Shopify to load customer KPIs." }, { status: 409 });
-  const { data: token, error: secretError } = await createReportingClient().rpc("read_connection_secret_for_server", {
+  const { data: token, error: secretError } = await createAdminClient().rpc("read_connection_secret_for_server", {
     requested_store_id: store.id,
     connection_provider: "shopify",
   });

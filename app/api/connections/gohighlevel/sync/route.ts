@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 
 import { requireWorkspace } from "@/lib/workspace/server";
-import { createReportingClient } from "@/lib/analytics/reporting-refresh";
+import { withStoreJobLock } from "@/lib/workspace/job-lock";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { syncGoHighLevelOpportunities } from "@/lib/analytics/gohighlevel-sync";
 
 export const maxDuration = 60;
 
-export async function POST() {
+export const POST = withStoreJobLock("gohighlevel_sync", maxDuration, handlePost);
+
+async function handlePost() {
   const workspace = await requireWorkspace();
   if (!workspace.ok) return workspace.response;
   if (!workspace.store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
@@ -14,7 +17,7 @@ export async function POST() {
 
   let secretClient;
   try {
-    secretClient = createReportingClient();
+    secretClient = createAdminClient();
   } catch {
     return NextResponse.json({ error: "GoHighLevel sync is not configured on the server" }, { status: 500 });
   }

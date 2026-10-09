@@ -75,7 +75,7 @@ export type ReportingSyncOutcome =
  * freshness UI and for diagnosing a store whose data keeps going stale.
  *
  * `reportingClient` must be a service-role client (see
- * createReportingClient() in reporting-refresh.ts) - this writes to
+ * createAdminClient() in lib/supabase/admin.ts) - this writes to
  * reporting_sync_runs and refreshes data across every store, which a
  * request-scoped, RLS-bound user client cannot do.
  */
