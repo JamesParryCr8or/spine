@@ -349,7 +349,7 @@ Already solid: 98/98 tests pass, and CI runs typecheck, lint, test and build. Ev
   - Audit every use; for example, `overview/route.ts:91` reads tenant data with the service role.
   - Move plain reads to the user's client so RLS applies.
 
-- [ ] **8.2 [Sonnet] Fix the weekly report.**
+- [x] **8.2 [Sonnet] Fix the weekly report.** *Done (Opus, 9 Oct 2026) — needs `20261009140000_weekly_report_settings.sql` applied, and **the report now sends nothing until you opt a store in** (Settings → Weekly report):* new `weekly_report_settings` table (owner/admin-only RLS, since a webhook URL is a write credential), `GET/PUT /api/settings/weekly-report`, and a panel in Settings. The cron sends only to opted-in stores, each to its own webhook or `GHL_WEEKLY_REPORT_WEBHOOK_URL` if it has none. Figures now come from the P&L engine (1.3) instead of `gross_profit − same-currency ad spend`: ad spend in other currencies is converted with dated rates instead of dropped, and the profit figure is true net profit when every cost is known, labelled "Profit after known costs" otherwise (same rule as the P&L screen) — no need to wait for 4.1. Payload field names are unchanged so existing GoHighLevel workflow mappings keep working; `profitLabel` and `netProfitComplete` were added.
   - Before any outside business is onboarded, give each store its own opt-in destination (a settings table plus UI). Today one global webhook receives every store in every organisation.
   - Relabel the L124 figure "Profit after ads", or compute true net profit from 4.1.
   - Convert spend in other currencies instead of dropping it.
