@@ -45,3 +45,6 @@ next-env.d.ts
 /.kilo/
 /legacy-apps-script/
 /supabase/.temp/
+/.codex-email-build/
+/.email-verify-2/
+/.npm-cache/
