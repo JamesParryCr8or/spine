@@ -47,7 +47,6 @@ export async function updateSession(request: NextRequest) {
   // with the Supabase client, your users may be randomly logged out.
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims;
-  const hasDemoAccess = request.cookies.get("cr8or-demo")?.value === "1";
   // The invitation preview is public by design. The handler validates the
   // one-time invitation token and returns JSON; redirecting it to the login
   // page turns that JSON response into HTML and breaks the invite flow.
@@ -56,9 +55,7 @@ export async function updateSession(request: NextRequest) {
   if (
     request.nextUrl.pathname !== "/" &&
     !user &&
-    !hasDemoAccess &&
     !isInviteApi &&
-    !request.nextUrl.pathname.startsWith("/api/demo") &&
     !request.nextUrl.pathname.startsWith("/login") &&
     !request.nextUrl.pathname.startsWith("/auth") &&
     !request.nextUrl.pathname.startsWith("/invite/")
