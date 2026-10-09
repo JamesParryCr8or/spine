@@ -6,7 +6,7 @@ import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExcha
 import { calculateAcquisitionMetrics } from "@/lib/analytics/acquisition";
 import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
 import { reportingDateKey, reportingMonthKey, reportingRangeToUtc } from "@/lib/analytics/reporting-range";
-import { createReportingClient, refreshReportingData } from "@/lib/analytics/reporting-refresh";
+import { createReportingClient } from "@/lib/analytics/reporting-refresh";
 
 export const maxDuration = 60;
 
@@ -53,17 +53,6 @@ export async function GET(request: Request) {
   const { supabase, store } = workspace;
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
   const reportingSupabase = createReportingClient();
-
-  if (fromDate && toDate) {
-    try {
-      await refreshReportingData(supabase, store, fromDate, toDate);
-    } catch (error) {
-      console.warn("Reporting refresh was skipped; returning saved report data", {
-        source: "overview",
-        message: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
-  }
 
   const pageSize = 1000;
   const dailyRows: ShopifyDaily[] = [];

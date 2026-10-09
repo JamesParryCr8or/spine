@@ -10,7 +10,6 @@ import { allocatePeriodCost, operatingCostBucket } from "@/lib/analytics/cost-al
 import { selectEffectiveShippingCost, summarizeShippingCoverage, type ProductShippingCost, type ShippingCoverage } from "@/lib/analytics/shipping-cost";
 import { reportingDateKey, reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { calculateProfitAndLoss } from "@/lib/analytics/profit-and-loss";
-import { createReportingClient, refreshMicrosoftAdsReporting, refreshReportingData, refreshShopifyPaymentGateways } from "@/lib/analytics/reporting-refresh";
 import { selectAllPages } from "@/lib/supabase/select-all";
 
 export const maxDuration = 60;
@@ -68,17 +67,6 @@ export async function GET(request: Request) {
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
   const dateRange = fromDate && toDate ? reportingRangeToUtc(fromDate, toDate, store.timezone || "UTC") : null;
 
-  if (fromDate && toDate && params.get("refresh") !== "0") {
-    try {
-      await refreshReportingData(supabase, store, fromDate, toDate);
-    } catch (error) {
-      console.warn("Reporting refresh was skipped; returning saved report data", {
-        source: "pnl",
-        message: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
-  }
-
   const pageSize = 1000;
   const shopifyDaily: ShopifyDaily[] = [];
   for (let offset = 0; ; offset += pageSize) {
@@ -96,14 +84,6 @@ export async function GET(request: Request) {
     if (page.length < pageSize) break;
   }
 
-  if (!fromDate && !toDate && shopifyDaily.length && params.get("refresh") !== "0") {
-    try {
-      await refreshShopifyPaymentGateways(createReportingClient(), store,
-        shopifyDaily[0].sales_date, shopifyDaily[shopifyDaily.length - 1].sales_date);
-    } catch (error) {
-      console.warn("Shopify gateway report refresh was skipped", { message: error instanceof Error ? error.message : "Unknown error" });
-    }
-  }
 
   const { data: exchangeRateRows, error: exchangeRateError } = await supabase.from("exchange_rates").select("base_currency,quote_currency,rate,effective_date").eq("store_id", store.id).eq("quote_currency", store.currency).order("effective_date", { ascending: true });
   if (exchangeRateError) return NextResponse.json({ error: exchangeRateError.message }, { status: 500 });
@@ -306,17 +286,6 @@ export async function GET(request: Request) {
   const rangeStart = reportDates.length ? reportDates.reduce((first, date) => date < first ? date : first) : null;
   const rangeEnd = reportDates.length ? reportDates.reduce((last, date) => date > last ? date : last) : null;
 
-  // "All imported data" has no URL dates. Refresh Microsoft spend using the
-  // actual imported sales window before reading the marketing rows below.
-  if (!fromDate && !toDate && rangeStart && rangeEnd && params.get("refresh") !== "0") {
-    try {
-      await refreshMicrosoftAdsReporting(createReportingClient(), store, rangeStart, rangeEnd);
-    } catch (error) {
-      console.warn("Microsoft Advertising refresh failed", {
-        message: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
-  }
   const metaInsights: MetaInsight[] = [];
   const googleInsights: GoogleInsight[] = [];
   const bingInsights: Array<{ insight_date: string; spend: string; currency: string }> = [];
