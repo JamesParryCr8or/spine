@@ -177,5 +177,52 @@ begin
 end
 $$;
 
+-- Store-scoped member: readable_store_ids() must return only the store that was
+-- explicitly granted, never a sibling store in the same organization.
+reset role;
+with granted as (
+  insert into public.stores (organization_id, name)
+  values (current_setting('test.owner_org_id')::uuid, 'RLS scoped store granted')
+  returning id
+)
+select set_config('test.granted_store_id', (select id::text from granted), true);
+with ungranted as (
+  insert into public.stores (organization_id, name)
+  values (current_setting('test.owner_org_id')::uuid, 'RLS scoped store ungranted')
+  returning id
+)
+select set_config('test.ungranted_store_id', (select id::text from ungranted), true);
+
+insert into public.store_memberships (store_id, user_id, email, role)
+values (
+  current_setting('test.granted_store_id')::uuid,
+  '00000000-0000-4000-8000-0000000000b2',
+  'rls-member-b@example.invalid',
+  'viewer'
+);
+
+-- private is revoked from authenticated (supabase/setup.sql), so call the helper
+-- as the owner role. auth.uid() still reads the claim set here.
+select set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-0000000000b2', true);
+do $$
+declare
+  visible_count integer;
+begin
+  select count(*) into visible_count
+  from private.readable_store_ids() as store_id
+  where store_id = current_setting('test.granted_store_id')::uuid;
+  if visible_count <> 1 then
+    raise exception 'Store-scoped member cannot read their granted store';
+  end if;
+
+  select count(*) into visible_count
+  from private.readable_store_ids() as store_id
+  where store_id = current_setting('test.ungranted_store_id')::uuid;
+  if visible_count <> 0 then
+    raise exception 'Store-scoped member can read a store they were not granted';
+  end if;
+end
+$$;
+
 reset role;
 rollback;
