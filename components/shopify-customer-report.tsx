@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
 import { CustomerGeography } from "@/components/customer-geography";
 
 type SalesPeriod = { period: string; newOrders: number; newSales: number; repeatOrders: number; repeatSales: number };
@@ -41,15 +42,14 @@ export function ShopifyCustomerReport({ focus }: { focus: "sales" | "customers" 
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  useResetOnChange(`${focus}|${range.from}|${range.to}|${groupBy}`, () => {
+    const invalid = !range.from || !range.to || range.from > range.to;
+    setError(invalid ? "Select a valid start and end date." : "");
+    setLoading(!invalid);
+  });
   useEffect(() => {
     const controller = new AbortController();
-    if (!range.from || !range.to || range.from > range.to) {
-      setError("Select a valid start and end date.");
-      setLoading(false);
-      return () => controller.abort();
-    }
-    setLoading(true);
-    setError("");
+    if (!range.from || !range.to || range.from > range.to) return () => controller.abort();
     const params = new URLSearchParams({ focus: focus === "geography" ? "customers" : focus, from: range.from, to: range.to, groupBy });
     fetch(`/api/analytics/shopify-customer-reports?${params}`, { signal: controller.signal })
       .then(async (response) => {

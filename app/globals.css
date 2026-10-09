@@ -448,3 +448,6 @@ button { cursor:pointer; }
 @media(max-width:900px){.lead-funnel-config{grid-template-columns:1fr}.lead-funnel-selects{grid-template-columns:repeat(3,minmax(0,1fr))}.lead-funnel-config>.primary{justify-self:start}}
 @media(max-width:560px){.lead-funnel-selects{grid-template-columns:1fr}.lead-funnel-config{padding:14px}}
 
+
+/* Per-source reporting freshness chips (topbar freshness card) */
+.source-chips{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 0;padding:0;list-style:none;max-width:340px}.source-chip{display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:700;color:#4b5263;background:#f3f4f8;border-radius:999px;padding:2px 7px 2px 5px;cursor:default}.source-chip span{width:6px;height:6px;border-radius:50%;background:#19c68b}.source-chip.failed{color:#a1291f;background:#fdeceb}.source-chip.failed span{background:#e0473b}.source-chip.pending span{background:#c3c8d4}
