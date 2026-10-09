@@ -28,23 +28,45 @@ type Store = {
   business_model: "ecommerce" | "lead_generation";
 };
 
-export async function requireWorkspace(options: WorkspaceOptions = {}) {
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  const userId = claims?.claims?.sub;
-  if (!userId) {
+type WorkspaceContextResult =
+  | { ok: true; memberships: WorkspaceMembership[]; stores: Store[] }
+  | { ok: false; response: NextResponse };
+
+type WorkspaceContextRpc = {
+  memberships: { organization_id: string; role: WorkspaceRole; store_id: string | null }[];
+  stores: Store[];
+};
+
+/**
+ * One round trip via get_workspace_context(). Falls back to the original
+ * three queries when the RPC is missing (migration not applied yet), so
+ * deploying ahead of the migration does not take every API route down.
+ * Remove the fallback once 20261009100000_get_workspace_context.sql is live.
+ */
+async function loadWorkspaceContext(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+): Promise<WorkspaceContextResult> {
+  const { data, error } = await supabase.rpc("get_workspace_context");
+  if (!error && data) {
+    const context = data as WorkspaceContextRpc;
     return {
-      ok: false as const,
-      response: NextResponse.json({ error: "Authentication required" }, { status: 401 }),
+      ok: true,
+      memberships: context.memberships.map((membership) => ({
+        organizationId: membership.organization_id,
+        role: membership.role,
+        storeId: membership.store_id,
+      })),
+      stores: context.stores,
     };
   }
 
   const [{ data: membershipRows, error: membershipError }, { data: storeMembershipRows, error: storeMembershipError }] = await Promise.all([
     supabase
-    .from("organization_members")
-    .select("organization_id,role,created_at")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: true }),
+      .from("organization_members")
+      .select("organization_id,role,created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true }),
     supabase
       .from("store_memberships")
       .select("store_id,role,created_at,stores!inner(organization_id)")
@@ -54,12 +76,12 @@ export async function requireWorkspace(options: WorkspaceOptions = {}) {
 
   if (membershipError || storeMembershipError) {
     return {
-      ok: false as const,
+      ok: false,
       response: NextResponse.json({ error: membershipError?.message ?? storeMembershipError?.message }, { status: 500 }),
     };
   }
 
-  const memberships = [
+  const memberships: WorkspaceMembership[] = [
     ...(membershipRows ?? []).map((membership) => ({
       organizationId: membership.organization_id,
       role: membership.role as WorkspaceRole,
@@ -73,13 +95,10 @@ export async function requireWorkspace(options: WorkspaceOptions = {}) {
         storeId: membership.store_id,
       };
     }),
-  ] satisfies WorkspaceMembership[];
+  ];
 
   if (!memberships.length) {
-    return {
-      ok: false as const,
-      response: NextResponse.json({ error: "No workspace is configured" }, { status: 403 }),
-    };
+    return { ok: true, memberships, stores: [] };
   }
 
   const organizationIds = [...new Set(memberships.map((membership) => membership.organizationId))];
@@ -90,13 +109,36 @@ export async function requireWorkspace(options: WorkspaceOptions = {}) {
     .order("created_at", { ascending: true });
 
   if (storeError) {
+    return { ok: false, response: NextResponse.json({ error: storeError.message }, { status: 500 }) };
+  }
+
+  return { ok: true, memberships, stores: (storeRows ?? []) as Store[] };
+}
+
+export async function requireWorkspace(options: WorkspaceOptions = {}) {
+  const supabase = await createClient();
+  const { data: claims } = await supabase.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) {
     return {
       ok: false as const,
-      response: NextResponse.json({ error: storeError.message }, { status: 500 }),
+      response: NextResponse.json({ error: "Authentication required" }, { status: 401 }),
     };
   }
 
-  const stores = (storeRows ?? []) as Store[];
+  const context = await loadWorkspaceContext(supabase, userId);
+  if (!context.ok) {
+    return { ok: false as const, response: context.response };
+  }
+  const { memberships, stores } = context;
+
+  if (!memberships.length) {
+    return {
+      ok: false as const,
+      response: NextResponse.json({ error: "No workspace is configured" }, { status: 403 }),
+    };
+  }
+
   const cookieStore = await cookies();
   const requestedOrganizationId =
     options.organizationId ?? cookieStore.get(activeOrganizationCookie)?.value ?? null;
@@ -155,4 +197,3 @@ export async function requireWorkspace(options: WorkspaceOptions = {}) {
     store,
   };
 }
-
