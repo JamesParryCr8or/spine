@@ -12,6 +12,7 @@ import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { selectAllPages } from "@/lib/supabase/select-all";
+import { selectOrdersByProcessedAt } from "@/lib/supabase/select-orders";
 
 type Order = { id: string; processed_at: string | null; currency: string; exchange_rate: number };
 type Line = { order_id: string; shopify_gid: string; variant_gid: string | null; sku: string | null; title: string; variant_title: string | null; current_quantity: number; net_sales: string; discounts: string };
@@ -61,7 +62,7 @@ export async function GET(request: Request) {
   const orderRows: Order[] = [];
   const currencyCoverage = createCurrencyCoverage(store.currency);
   const pageSize = 1000;
-  for (let from = 0; ; from += pageSize) {
+  const { rows: validOrders, error: ordersError } = await selectOrdersByProcessedAt<Omit<Order, "exchange_rate">>((cursor, limit) => {
     let query = supabase
       .from("shopify_orders")
       .select("id,processed_at,currency")
@@ -71,14 +72,13 @@ export async function GET(request: Request) {
       .not("processed_at", "is", null);
     if (fromDate) query = query.gte("processed_at", reportingRangeToUtc(fromDate, fromDate, store.timezone || "UTC").start);
     if (toDate) query = query.lt("processed_at", reportingRangeToUtc(toDate, toDate, store.timezone || "UTC").endExclusive);
-    const { data, error } = await query.order("processed_at", { ascending: true }).range(from, from + pageSize - 1);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    const page = (data ?? []) as Array<Omit<Order, "exchange_rate">>;
-    for (const order of page) {
-      const exchangeRate = resolveDatedExchangeRate(exchangeRates, order.currency, store.currency, order.processed_at ?? "");
-      if (currencyCoverage.include(order.currency, exchangeRate)) orderRows.push({ ...order, exchange_rate: exchangeRate ?? 1 });
-    }
-    if (page.length < pageSize) break;
+    if (cursor) query = query.or(`processed_at.gt.${cursor.processedAt},and(processed_at.eq.${cursor.processedAt},id.gt.${cursor.id})`);
+    return query.order("processed_at", { ascending: true }).order("id", { ascending: true }).limit(limit);
+  }, pageSize);
+  if (ordersError) return NextResponse.json({ error: ordersError }, { status: 500 });
+  for (const order of validOrders) {
+    const exchangeRate = resolveDatedExchangeRate(exchangeRates, order.currency, store.currency, order.processed_at ?? "");
+    if (currencyCoverage.include(order.currency, exchangeRate)) orderRows.push({ ...order, exchange_rate: exchangeRate ?? 1 });
   }
   const orderIds = orderRows.map((order) => order.id);
   const orderChunks = chunks(orderIds, 500);

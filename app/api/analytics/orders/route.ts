@@ -4,6 +4,7 @@ import { reportingDateKey, reportingRangeToUtc } from "@/lib/analytics/reporting
 import { costKey, monetary, resolveEffectiveCost, type EffectiveCost } from "@/lib/analytics/effective-cost";
 import { requireWorkspace } from "@/lib/workspace/server";
 import { selectAllPages } from "@/lib/supabase/select-all";
+import { selectOrdersByProcessedAt } from "@/lib/supabase/select-orders";
 
 type OrderRow = {
   id: string; customer_id: string | null; order_name: string; processed_at: string | null;
@@ -65,22 +66,27 @@ export async function GET(request: Request) {
     }
   }
 
-  const orderRows: OrderRow[] = [];
   const pageSize = 1000;
-  for (let offset = 0; ; offset += pageSize) {
+  const { rows: orderRows, error: ordersError } = await selectOrdersByProcessedAt<OrderRow>((cursor, limit) => {
     let query = supabase
       .from("shopify_orders")
       .select("id,customer_id,order_name,processed_at,financial_status,fulfillment_status,source_name,country_code,discount_codes,net_product_sales,shipping_revenue,total_sales,currency")
       .eq("store_id", store.id)
       .eq("currency", store.currency)
-      .eq("test", false);
+      .eq("test", false)
+      // Not filtered by every other analytics route's .is("cancelled_at", null) -
+      // this order listing shows cancelled orders too. Newly required here:
+      // orders without a processed_at (e.g. still a draft) can't be keyset-
+      // paginated on it, so they're excluded - previously OFFSET paging
+      // would have listed them (sorted last, since Postgres orders nulls
+      // last by default descending); every other order-listing route in
+      // this codebase already excludes them.
+      .not("processed_at", "is", null);
     if (utcRange) query = query.gte("processed_at", utcRange.start).lt("processed_at", utcRange.endExclusive);
-    const { data, error } = await query.order("processed_at", { ascending: false }).range(offset, offset + pageSize - 1);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    const page = (data ?? []) as OrderRow[];
-    orderRows.push(...page);
-    if (page.length < pageSize) break;
-  }
+    if (cursor) query = query.or(`processed_at.lt.${cursor.processedAt},and(processed_at.eq.${cursor.processedAt},id.lt.${cursor.id})`);
+    return query.order("processed_at", { ascending: false }).order("id", { ascending: false }).limit(limit);
+  }, pageSize);
+  if (ordersError) return NextResponse.json({ error: ordersError }, { status: 500 });
 
   const orderIds = orderRows.map((order) => order.id);
   const orderIdChunks = chunks(orderIds, 200);

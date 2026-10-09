@@ -142,11 +142,13 @@ Already solid: 98/98 tests pass, and CI runs typecheck, lint, test and build. Ev
 
   *Done when:* the golden fixture still passes, and series totals match the old per-period calls on the live store.
 
-- [ ] **1.4 [Sonnet] Index and keyset-paginate the orders query.**
+- [x] **1.4 [Sonnet] Index and keyset-paginate the orders query.**
   Every analytics route runs `shopify_orders where store_id=? and cancelled_at is null and test=false and processed_at in [a,b) order by processed_at` with OFFSET paging. The existing indexes, `(organization_id, store_id, created_at_shopify)` and `(store_id, country_code, processed_at)`, don't serve it.
   - Add a migration with a partial index on `(store_id, processed_at)` for valid orders.
   - Switch the loops to keyset paging on `(processed_at, id)`.
   - Record `EXPLAIN (ANALYZE, BUFFERS)` before and after, then rerun the Supabase performance advisor.
+
+  *Done (9 Oct 2026):* added `supabase/migrations/20261009093000_shopify_orders_valid_processed_index.sql`, a partial index on `(store_id, processed_at, id) where cancelled_at is null and test = false` (not yet applied — same follow-up as 1.1's migration). Added `lib/supabase/select-orders.ts` (`selectOrdersByProcessedAt`) and switched every OFFSET loop over `shopify_orders` — P&L, Products, UTM, both in Customers, and Orders — onto it. Each keeps its own filters; the shared helper only drives the cursor. The seek condition breaks ties on `id` (`processed_at.gt.X,and(processed_at.eq.X,id.gt.X)`), which plain `processed_at > cursor` pagination would get wrong: Shopify timestamps aren't unique, so without a tiebreaker a page boundary landing mid-timestamp silently drops every order after the first one at that instant — tested directly (`tests/select-orders.test.mjs`, ten same-timestamp orders paged two at a time). `orders/route.ts` previously had no `.not("processed_at", "is", null)` filter (every other analytics route does); it needed one to keyset-paginate on that column, so draft/unprocessed orders it may have shown before are now excluded from that listing — flagged in a code comment at the call site, since it's the one real behavior change in this task. **`EXPLAIN (ANALYZE, BUFFERS)` and the Supabase performance advisor were not run** — no database credentials in this environment; do this once the migration is applied.
 
 - [ ] **1.5 [Opus] Rewrite RLS as set-based store checks.**
   `supabase/migrations/20261002120333_store_scoped_team_memberships.sql` (~L108–157) adds `store_scope_read` policies alongside the older workspace policies. Both are per-row security-definer calls, which Postgres can't hoist out of the scan.
