@@ -5,7 +5,7 @@ import { rollingSyncWindow, runReportingSyncForStore } from "@/lib/analytics/rep
 
 export const maxDuration = 300;
 
-type Store = { id: string; organization_id: string; shopify_domain: string | null; currency: string };
+type Store = { id: string; organization_id: string; shopify_domain: string | null; currency: string; business_model: string | null };
 
 /**
  * Scheduled reporting refresh (see vercel.json "crons"). Keeps the P&L and
@@ -25,7 +25,7 @@ export async function GET(request: Request) {
   }
 
   const supabase = createReportingClient();
-  const { data: storeRows, error: storesError } = await supabase.from("stores").select("id,organization_id,shopify_domain,currency");
+  const { data: storeRows, error: storesError } = await supabase.from("stores").select("id,organization_id,shopify_domain,currency,business_model");
   if (storesError) return NextResponse.json({ error: storesError.message }, { status: 500 });
 
   const { from, to } = rollingSyncWindow();

@@ -1,10 +1,24 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { refreshReportingData, type ReportingSourceResult } from "./reporting-refresh";
+import { syncGoHighLevelOpportunities } from "./gohighlevel-sync";
 
 export { rollingSyncWindow } from "./reporting-sync-window";
 
-type Store = { id: string; organization_id: string; shopify_domain?: string | null; currency: string };
+type Store = { id: string; organization_id: string; shopify_domain?: string | null; currency: string; business_model?: string | null };
+
+/** Lead-generation stores also refresh GoHighLevel; a store with no GHL set up is left out of the results. */
+async function goHighLevelResult(reportingClient: SupabaseClient, store: Store): Promise<ReportingSourceResult[]> {
+  if (store.business_model !== "lead_generation") return [];
+  try {
+    const result = await syncGoHighLevelOpportunities(reportingClient, reportingClient, store);
+    if (result.ok) return [{ source: "gohighlevel", status: "fulfilled" }];
+    if (result.notConfigured) return [];
+    return [{ source: "gohighlevel", status: "rejected", message: result.error }];
+  } catch (error) {
+    return [{ source: "gohighlevel", status: "rejected", message: error instanceof Error ? error.message : "Unknown error" }];
+  }
+}
 
 export type ReportingSyncOutcome =
   | { storeId: string; status: "completed"; results: ReportingSourceResult[] }
@@ -48,7 +62,11 @@ export async function runReportingSyncForStore(
     return { storeId: store.id, status: "failed", error: insertError.message };
   }
   try {
-    const results = await refreshReportingData(reportingClient, store, from, to);
+    const [reportingResults, ghlResults] = await Promise.all([
+      refreshReportingData(reportingClient, store, from, to),
+      goHighLevelResult(reportingClient, store),
+    ]);
+    const results = [...reportingResults, ...ghlResults];
     await reportingClient.from("reporting_sync_runs").update({ status: "completed", results, completed_at: new Date().toISOString() }).eq("id", run.id);
     return { storeId: store.id, status: "completed", results };
   } catch (error) {
