@@ -391,19 +391,14 @@ function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId?: stri
       const dailyDays = Math.floor((Date.parse(periodEnd + "T00:00:00Z") - Date.parse(periodStart + "T00:00:00Z")) / 86400000) + 1;
       const periods = reportingPeriods(periodStart, periodEnd, granularity, granularity === "daily" ? Math.max(dailyDays, 1) : 60);
       setTrendLoading(true);
-      void (async () => {
-        const results: Array<PnlPeriodData | null> = [];
-        for (let index = 0; index < periods.length; index += 12) {
-          const batch = await Promise.all(periods.slice(index, index + 12).map(async (period) => {
-            if (period.start === pnlSummary.period?.start && period.end === pnlSummary.period?.end) return { period, data: pnlSummary };
-            const response = await fetch("/api/analytics/pnl?from=" + period.start + "&to=" + period.end + "&refresh=0", { signal: controller.signal });
-            return response.ok ? { period, data: await response.json() as PnlData } : null;
-          }));
+      fetchPnlSeries(periods, controller.signal)
+        .then((series) => {
           if (controller.signal.aborted) return;
-          results.push(...batch);
-          setTrendData(results.filter((result): result is PnlPeriodData => result !== null));
-        }
-      })()
+          setTrendData(periods.flatMap((period): PnlPeriodData[] => {
+            const data = series.get(pnlSeriesKey(period));
+            return data ? [{ period, data }] : [];
+          }));
+        })
         .catch((error) => { if (error instanceof Error && error.name !== "AbortError") setTrendData([]); })
         .finally(() => { if (!controller.signal.aborted) setTrendLoading(false); });
     }, 0);
@@ -598,6 +593,25 @@ type PnlData = {
   period: { start: string; end: string } | null;
 };
 type PnlPeriodData = { period: ReportingPeriod; data: PnlData };
+
+const pnlSeriesKey = (period: { start: string; end: string }) => `${period.start}_${period.end}`;
+
+/**
+ * Many P&L periods via /api/analytics/pnl/series, keyed by pnlSeriesKey().
+ * Adjacent periods share one server-side load; 120 per request keeps a
+ * year of daily periods to a few requests.
+ */
+async function fetchPnlSeries(periods: Array<{ start: string; end: string }>, signal?: AbortSignal) {
+  const results = new Map<string, PnlData>();
+  for (let index = 0; index < periods.length; index += 120) {
+    const batch = periods.slice(index, index + 120).map(pnlSeriesKey).join(",");
+    const response = await fetch(`/api/analytics/pnl/series?periods=${batch}`, { signal });
+    if (!response.ok) throw new Error("P&L series could not be loaded");
+    const payload = await response.json() as { periods: Array<{ start: string; end: string; data: PnlData }> };
+    for (const period of payload.periods) results.set(pnlSeriesKey(period), period.data);
+  }
+  return results;
+}
 type PnlRow = { section: string; label: string; value: (data: PnlData) => number | string };
 
 const pnlRowDescriptions: Record<string, string> = {
@@ -727,10 +741,6 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
     const url = `/api/analytics/pnl${params.size ? `?${params}` : ""}`;
     fetchCachedJson<PnlData>(url, { force: true })
       .then(async (payload: PnlData) => {
-        // A full-period request may import newly available payment-gateway days.
-        // Discard period responses calculated before that import so the monthly
-        // fee rows and profit figures agree with the full-period total.
-        invalidateCachedJson("/api/analytics/pnl?from=");
         setPnl(payload); setComparison(null); setYearComparison(null);
         finishReportRun(payload ? "completed" : "failed", payload?.metrics.orders ?? null);
         if (!payload?.period) return;
@@ -742,12 +752,12 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
         const date = (value: Date) => value.toISOString().slice(0, 10);
         const previousYearStart = new Date(start); previousYearStart.setUTCFullYear(previousYearStart.getUTCFullYear() - 1);
         const previousYearEnd = new Date(end); previousYearEnd.setUTCFullYear(previousYearEnd.getUTCFullYear() - 1);
-        const [previousPayload, previousYearPayload] = await Promise.all([
-          fetchCachedJson<PnlData>(`/api/analytics/pnl?from=${date(previousStart)}&to=${date(previousEnd)}&refresh=0`, { force: true }),
-          fetchCachedJson<PnlData>(`/api/analytics/pnl?from=${date(previousYearStart)}&to=${date(previousYearEnd)}&refresh=0`, { force: true }),
-        ]);
-        setComparison(previousPayload);
-        setYearComparison(previousYearPayload);
+        const previousPeriod = { start: date(previousStart), end: date(previousEnd) };
+        const previousYear = { start: date(previousYearStart), end: date(previousYearEnd) };
+        // A failed comparison leaves the main P&L on screen without deltas.
+        const series = await fetchPnlSeries([previousPeriod, previousYear]).catch(() => null);
+        setComparison(series?.get(pnlSeriesKey(previousPeriod)) ?? null);
+        setYearComparison(series?.get(pnlSeriesKey(previousYear)) ?? null);
       })
       .catch(() => { setPnl(null); setComparison(null); setYearComparison(null); setLoadError(true); finishReportRun("failed", null, "Profit and loss data could not be loaded"); })
       .finally(() => setLoading(false));
@@ -774,11 +784,14 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
       if (!pnl?.period || !pnl.hasData) { setPeriodData([]); return; }
       const { periods } = pagedReportingPeriods(pnl.period.start, pnl.period.end, granularity, periodPage);
       setPeriodLoading(true);
-      Promise.all(periods.map(async (period) => {
-        if (period.start === pnl.period?.start && period.end === pnl.period?.end) return { period, data: pnl };
-        const data = await fetchCachedJson<PnlData>("/api/analytics/pnl?from=" + period.start + "&to=" + period.end + "&refresh=0", { force: true });
-        return { period, data };
-      })).then((results) => setPeriodData(results.filter((result): result is PnlPeriodData => result !== null))).catch((error) => { if (error instanceof Error && error.name !== "AbortError") setPeriodData([]); }).finally(() => { if (!controller.signal.aborted) setPeriodLoading(false); });
+      fetchPnlSeries(periods, controller.signal)
+        .then((series) => {
+          if (controller.signal.aborted) return;
+          setPeriodData(periods.flatMap((period): PnlPeriodData[] => {
+            const data = series.get(pnlSeriesKey(period));
+            return data ? [{ period, data }] : [];
+          }));
+        }).catch((error) => { if (error instanceof Error && error.name !== "AbortError") setPeriodData([]); }).finally(() => { if (!controller.signal.aborted) setPeriodLoading(false); });
     }, 0);
     return () => { window.clearTimeout(timeout); controller.abort(); };
   }, [granularity, periodPage, pnl]);
@@ -1139,19 +1152,16 @@ function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: string; init
       setTrendLoading(true);
       Promise.all([
         fetch(`/api/analytics/utm?${comparisonParams}`, { signal: controller.signal }).then(async (response) => response.ok ? response.json() as Promise<UtmData> : null),
-        Promise.all(currentPeriods.map(async (period) => {
-          const response = await fetch(`/api/analytics/pnl?from=${period.start}&to=${period.end}`, { signal: controller.signal });
-          if (!response.ok) return { label: period.label, value: 0 };
-          const payload = await response.json() as PnlData;
-          return { label: period.label, value: payload.metrics.netProfit ?? payload.metrics.profitAfterMarketingSpend };
-        })),
-        Promise.all(previousPeriods.map(async (period) => {
-          const response = await fetch(`/api/analytics/pnl?from=${period.start}&to=${period.end}`, { signal: controller.signal });
-          if (!response.ok) return { label: period.label, value: 0 };
-          const payload = await response.json() as PnlData;
-          return { label: period.label, value: payload.metrics.netProfit ?? payload.metrics.profitAfterMarketingSpend };
-        })),
-      ]).then(([comparison, currentProfit, previousProfit]) => { setComparisonData(comparison); setProfitTrends({ current: currentProfit, previous: previousProfit }); }).catch((error) => { if (error instanceof Error && error.name !== "AbortError") { setComparisonData(null); setProfitTrends({ current: [], previous: [] }); } }).finally(() => { if (!controller.signal.aborted) setTrendLoading(false); });
+        // One request for both lines. A failure clears the chart rather than
+        // drawing missing periods as zero profit.
+        fetchPnlSeries([...currentPeriods, ...previousPeriods], controller.signal).then((series) => {
+          const profit = (periods: typeof currentPeriods) => periods.flatMap((period) => {
+            const payload = series.get(pnlSeriesKey(period));
+            return payload ? [{ label: period.label, value: payload.metrics.netProfit ?? payload.metrics.profitAfterMarketingSpend }] : [];
+          });
+          return [profit(currentPeriods), profit(previousPeriods)] as const;
+        }),
+      ]).then(([comparison, [currentProfit, previousProfit]]) => { setComparisonData(comparison); setProfitTrends({ current: currentProfit, previous: previousProfit }); }).catch((error) => { if (error instanceof Error && error.name !== "AbortError") { setComparisonData(null); setProfitTrends({ current: [], previous: [] }); } }).finally(() => { if (!controller.signal.aborted) setTrendLoading(false); });
     }, 0);
     return () => { window.clearTimeout(timeout); controller.abort(); };
   }, [attributionModel, comparisonMode, country, product, groupBy, data?.period?.start, data?.period?.end]);
