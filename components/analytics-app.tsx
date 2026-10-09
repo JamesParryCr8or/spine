@@ -5,6 +5,8 @@ import Image from "next/image";
 import "./pnl-period-navigation.css";
 import { ShopifyCustomerReport } from "@/components/shopify-customer-report";
 import { Skeleton, StatCardSkeleton, TableRowSkeleton } from "@/components/ui/skeleton";
+import { estimatedTransactionFee } from "@/lib/analytics/transaction-fees";
+import { shopifyThirdPartyRate } from "@/lib/analytics/external-payment-fees";
 import { ProductJourneyChart } from "@/components/product-journey-chart";
 import { LeadOverview } from "@/components/lead-overview";
 import { LeadReportPage } from "@/components/lead-report-page";
@@ -1529,6 +1531,8 @@ function Expenses() {
   const [paymentSettings, setPaymentSettings] = useState<PaymentFeeSettings | null>(null);
   const [paymentGateways, setPaymentGateways] = useState<string[]>([]);
   const [estimateForm, setEstimateForm] = useState({ planOverride: "", defaultPercentageRate: "", defaultFixedFee: "", surchargeRateOverride: "" });
+  const [loadedEstimateForm, setLoadedEstimateForm] = useState(estimateForm);
+  const [estimateStatus, setEstimateStatus] = useState("");
   const [currency, setCurrency] = useState("GBP");
   const [canEdit, setCanEdit] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -1547,9 +1551,11 @@ function Expenses() {
     setPaymentRules(feePayload.rules ?? []);
     setPaymentSettings(feePayload.settings ?? null);
     setPaymentGateways(feePayload.gateways ?? []);
-    setEstimateForm({ planOverride: feePayload.settings?.plan_override ?? "", defaultPercentageRate: String(feePayload.settings?.default_percentage_rate ?? 2),
+    const loadedEstimate = { planOverride: feePayload.settings?.plan_override ?? "", defaultPercentageRate: String(feePayload.settings?.default_percentage_rate ?? 2),
       defaultFixedFee: String(feePayload.settings?.default_fixed_fee ?? (feePayload.currency === "GBP" ? 0.23 : 0.25)),
-      surchargeRateOverride: feePayload.settings?.surcharge_rate_override == null ? "" : String(feePayload.settings.surcharge_rate_override) });
+      surchargeRateOverride: feePayload.settings?.surcharge_rate_override == null ? "" : String(feePayload.settings.surcharge_rate_override) };
+    setEstimateForm(loadedEstimate);
+    setLoadedEstimateForm(loadedEstimate);
     setCurrency(costPayload.currency ?? feePayload.currency ?? "GBP");
     setCanEdit(Boolean(costPayload.canEdit && feePayload.canEdit));
   }).catch((reason) => setError(reason instanceof Error ? reason.message : "Could not load expenses")).finally(() => setInitialLoading(false));
@@ -1585,20 +1591,38 @@ function Expenses() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not delete payment fee rule"); }
   };
   const saveEstimateSettings = async () => {
-    setSaving(true); setError("");
+    setSaving(true); setError(""); setEstimateStatus("");
     try {
       const response = await fetch("/api/costs/payment-fees", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(estimateForm) });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Could not save payment estimate settings");
       invalidateCachedJson("/api/analytics/pnl");
       await load();
+      setEstimateStatus("Saved");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save payment estimate settings"); } finally { setSaving(false); }
   };
+  const updateEstimateForm = (changes: Partial<typeof estimateForm>) => { setEstimateStatus(""); setEstimateForm((current) => ({ ...current, ...changes })); };
+  const openAddPaymentRule = (gateway = "") => {
+    setPaymentForm((current) => ({ ...current, gateway: gateway || current.gateway, percentageRate: estimateForm.defaultPercentageRate || current.percentageRate, fixedFee: estimateForm.defaultFixedFee || current.fixedFee }));
+    setShowAddPaymentRule(true);
+  };
+  const estimateDirty = JSON.stringify(estimateForm) !== JSON.stringify(loadedEstimateForm);
+  const feeExampleGateway = paymentGateways[0] ?? "a processor";
+  const feeExampleRate = Number(estimateForm.defaultPercentageRate);
+  const feeExampleFixed = Number(estimateForm.defaultFixedFee);
+  const feeExamplePlan = estimateForm.planOverride || paymentSettings?.shopify_plan || "Basic";
+  const feeExampleSurchargeRate = estimateForm.surchargeRateOverride !== "" ? Number(estimateForm.surchargeRateOverride) : shopifyThirdPartyRate(feeExamplePlan);
+  const feeExampleAmount = 50;
+  const feeExampleProcessorFee = Number.isFinite(feeExampleRate) && Number.isFinite(feeExampleFixed)
+    ? estimatedTransactionFee(feeExampleAmount, { percentageRate: feeExampleRate, fixedFee: feeExampleFixed, taxRate: 0, minimumFee: 0 })
+    : null;
+  const feeExampleSurcharge = feeExampleSurchargeRate === null ? 0 : feeExampleAmount * feeExampleSurchargeRate / 100;
+  const feeExampleTotal = feeExampleProcessorFee === null ? null : feeExampleProcessorFee + feeExampleSurcharge;
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency, minimumFractionDigits: 2 });
   return <>
     <section className="cost-toolbar">
       <div><span className="eyebrow">COST INPUTS</span><h2>Expenses and payment fees</h2><p>Use effective dates so the P&amp;L applies each cost and gateway rate to the right orders.</p></div>
-      <div className="feature-actions"><button className="primary" disabled={!canEdit} onClick={() => setShowAdd(true)}><Plus/> Add expense</button><button disabled={!canEdit} onClick={() => { setPaymentForm((current) => ({ ...current, percentageRate: estimateForm.defaultPercentageRate || current.percentageRate, fixedFee: estimateForm.defaultFixedFee || current.fixedFee })); setShowAddPaymentRule(true); }}><Plus/> Add processor rate</button></div>
+      <div className="feature-actions"><button className="primary" disabled={!canEdit} onClick={() => setShowAdd(true)}><Plus/> Add expense</button><button disabled={!canEdit} onClick={() => openAddPaymentRule()}><Plus/> Add processor rate</button></div>
     </section>
     {error && <div className="connection-error cost-error">{error}</div>}
     <section className="panel report-panel">
@@ -1607,12 +1631,16 @@ function Expenses() {
     </section>
     <section className="panel report-panel">
       <div className="panel-head"><div><span className="eyebrow">PAYMENT ESTIMATES</span><h2>External processor defaults</h2><p>Successful external payments use these estimates until you set a rate for that processor. The fixed fee applies once per payment, in {currency}. Shopify&apos;s third-party surcharge is estimated separately from the store plan.</p></div></div>
-      {initialLoading ? <div className="cost-form-grid">{Array.from({ length: 4 }, (_, index) => <label className="form-field" key={index}><Skeleton style={{ width: "40%", height: 10 }}/><Skeleton style={{ width: "100%", height: 42, marginTop: 7 }}/></label>)}</div> : <><div className="cost-form-grid"><label className="form-field"><span>Shopify plan {paymentSettings?.shopify_plan ? `(detected: ${paymentSettings.shopify_plan})` : "(Basic until detected)"}</span><select value={estimateForm.planOverride} onChange={(event) => setEstimateForm({ ...estimateForm, planOverride: event.target.value })}><option value="">Automatic (Basic until detected)</option>{["Basic", "Grow", "Advanced", "Plus"].map((plan) => <option key={plan} value={plan}>{plan}</option>)}</select></label><label className="form-field"><span>Default processor rate (%)</span><input inputMode="decimal" value={estimateForm.defaultPercentageRate} onChange={(event) => setEstimateForm({ ...estimateForm, defaultPercentageRate: event.target.value })}/></label><label className="form-field"><span>Default fixed fee per payment ({currency})</span><input inputMode="decimal" value={estimateForm.defaultFixedFee} onChange={(event) => setEstimateForm({ ...estimateForm, defaultFixedFee: event.target.value })}/></label><label className="form-field"><span>Shopify surcharge override (%) <small>Optional</small></span><input inputMode="decimal" value={estimateForm.surchargeRateOverride} onChange={(event) => setEstimateForm({ ...estimateForm, surchargeRateOverride: event.target.value })} placeholder="Use plan rate"/></label></div>
-      <div className="feature-actions"><button className="primary" disabled={!canEdit || saving} onClick={() => void saveEstimateSettings()}>{saving ? "Saving…" : "Save estimate settings"}</button></div></>}
+      {initialLoading ? <div className="panel-body cost-form-grid">{Array.from({ length: 4 }, (_, index) => <label className="form-field" key={index}><Skeleton style={{ width: "40%", height: 10 }}/><Skeleton style={{ width: "100%", height: 42, marginTop: 7 }}/></label>)}</div> : <div className="panel-body"><div className="cost-form-grid"><label className="form-field"><span>Shopify plan</span><select value={estimateForm.planOverride} onChange={(event) => updateEstimateForm({ planOverride: event.target.value })}><option value="">{paymentSettings?.shopify_plan ? `Automatic (${paymentSettings.shopify_plan}, detected)` : "Automatic (Basic until detected)"}</option>{["Basic", "Grow", "Advanced", "Plus"].map((plan) => <option key={plan} value={plan}>{plan}</option>)}</select></label><label className="form-field"><span>Default processor rate (%)</span><input inputMode="decimal" value={estimateForm.defaultPercentageRate} onChange={(event) => updateEstimateForm({ defaultPercentageRate: event.target.value })}/></label><label className="form-field"><span>Default fixed fee per payment ({currency})</span><input inputMode="decimal" value={estimateForm.defaultFixedFee} onChange={(event) => updateEstimateForm({ defaultFixedFee: event.target.value })}/></label><label className="form-field"><span>Shopify surcharge override (%) <small>Optional</small></span><input inputMode="decimal" value={estimateForm.surchargeRateOverride} onChange={(event) => updateEstimateForm({ surchargeRateOverride: event.target.value })} placeholder="Use plan rate"/></label></div>
+      {feeExampleTotal !== null && <div className="fee-example">A {formatter.format(feeExampleAmount)} payment through <strong>{feeExampleGateway}</strong> ≈ <strong>{formatter.format(feeExampleTotal)}</strong> in fees ({formatter.format(feeExampleProcessorFee ?? 0)} processor{feeExampleSurcharge > 0 ? ` + ${formatter.format(feeExampleSurcharge)} Shopify surcharge` : ""}).</div>}
+      <div className="feature-actions">{estimateStatus && !saving && <span className="save-status">{estimateStatus}</span>}<button className="primary" disabled={!canEdit || saving || !estimateDirty} onClick={() => void saveEstimateSettings()}>{saving ? "Saving…" : "Save estimate settings"}</button></div></div>}
     </section>
     <section className="panel report-panel">
       <div className="panel-head"><div><span className="eyebrow">TRANSACTION COSTS</span><h2>Processor-specific rates</h2><p>Override the default for PayPal, Klarna or another gateway. These are estimates; actual Shopify Payments fees stay in their own P&amp;L row.</p></div></div>
-      {paymentGateways.length > 0 && <p className="report-note">Detected gateways: {paymentGateways.join(", ")}</p>}
+      {paymentGateways.length > 0 && <div className="gateway-chip-list">{paymentGateways.map((gateway) => {
+        const configured = paymentRules.some((rule) => rule.gateway.toLowerCase() === gateway.toLowerCase());
+        return <span className="gateway-chip" key={gateway}>{gateway}{configured && <small>Configured</small>}<button type="button" disabled={!canEdit} onClick={() => openAddPaymentRule(gateway)}>{configured ? "Update rate" : "Set rate"}</button></span>;
+      })}</div>}
       {paymentRules.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Gateway</th><th>Rate</th><th>Fixed fee</th><th>Tax</th><th>Minimum</th><th>Effective from</th><th>Effective to</th><th></th></tr></thead><tbody>{paymentRules.map((rule) => <tr key={rule.id}><td><strong>{rule.gateway}</strong><small>{rule.currency}</small></td><td>{Number(rule.percentage_rate).toLocaleString("en-GB")}%</td><td>{formatter.format(Number(rule.fixed_fee))}</td><td>{Number(rule.tax_rate).toLocaleString("en-GB")}%</td><td>{formatter.format(Number(rule.minimum_fee))}</td><td>{rule.effective_from}</td><td>{rule.effective_to || "Ongoing"}</td><td>{canEdit && <button className="icon-button" aria-label={`Delete ${rule.gateway} payment fee rule`} onClick={() => void deletePaymentRule(rule)}><Trash2/></button>}</td></tr>)}</tbody></table></div> : <div className="cost-empty"><CircleDollarSign/><strong>Using store defaults</strong><span>Add a processor-specific rate when its contract differs from the default.</span></div>}
     </section>
     {showAdd && <div className="modal-backdrop"><section className="connection-modal"><button className="modal-close" onClick={() => setShowAdd(false)}><X/></button><div className="modal-brand"><span className="source-logo c"><WalletCards/></span><div><span className="eyebrow">OPERATING COST</span><h2>Add expense</h2></div></div><label className="form-field"><span>Name</span><input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Shopify subscription"/></label><div className="cost-form-grid"><label className="form-field"><span>Category</span><select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>{["software", "agency", "payroll", "warehouse", "rent", "creative", "fulfilment", "handling", "pick_pack", "duties", "other"].map((category) => <option key={category} value={category}>{category.replace("_", " ")}</option>)}</select></label><label className="form-field"><span>{form.allocationBasis === "revenue" ? "Revenue rate (%)" : "Amount"}</span><input inputMode="decimal" value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} placeholder={form.allocationBasis === "revenue" ? "e.g. 2.5" : "0.00"}/></label><label className="form-field"><span>Cadence</span><select value={form.cadence} onChange={(event) => setForm({ ...form, cadence: event.target.value })}>{["one_off", "daily", "weekly", "monthly", "annual"].map((cadence) => <option key={cadence} value={cadence}>{cadence.replace("_", " ")}</option>)}</select></label><label className="form-field"><span>Allocation</span><select value={form.allocationBasis} onChange={(event) => setForm({ ...form, allocationBasis: event.target.value })}>{["fixed", "orders", "units", "revenue"].map((basis) => <option key={basis} value={basis}>{basis}</option>)}</select></label><label className="form-field"><span>Effective from</span><input type="date" value={form.effectiveFrom} onChange={(event) => setForm({ ...form, effectiveFrom: event.target.value })}/></label><label className="form-field"><span>Effective to <small>Optional</small></span><input type="date" value={form.effectiveTo} onChange={(event) => setForm({ ...form, effectiveTo: event.target.value })}/></label></div><label className="form-field"><span>Notes <small>Optional</small></span><input value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="What this cost covers"/></label><p className="modal-intro">{form.allocationBasis === "fixed" ? "Fixed costs are spread across their active date range." : form.allocationBasis === "revenue" ? "Revenue allocation uses the entered percentage of net product sales during the active period." : `This uses the entered amount for every ${form.allocationBasis === "orders" ? "order" : "unit"} during the active period.`}</p><div className="modal-actions"><button onClick={() => setShowAdd(false)}>Cancel</button><button className="primary" disabled={!form.name || !form.amount || saving} onClick={save}>{saving ? "Saving…" : "Save expense"}</button></div></section></div>}

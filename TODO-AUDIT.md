@@ -61,7 +61,7 @@ Already solid: 98/98 tests pass, and CI runs typecheck, lint, test and build. Ev
 - [ ] **0.1b [Sonnet] Fix the `react-hooks/set-state-in-effect` lint errors.**
   `npm run lint` currently reports 12 errors from this rule (`components/analytics-app.tsx:343,465,698,721,785,1103,1718,2556,2570`, plus `components/shopify-customer-report.tsx:47`), all pre-existing or added alongside 0.1's loading-state effects. CI's lint step (`.github/workflows/ci.yml`) will fail until these are resolved. Move each flagged `setState` call out of the effect body: compute the initial value in `useState`'s initializer where possible, or move the call into the event handler that triggers the effect's dependency change instead of the effect itself.
 
-- [ ] **0.2 [Sonnet] Fix the Expenses screen.**
+- [x] **0.2 [Sonnet] Fix the Expenses screen.**
   This covers `Expenses()` in `components/analytics-app.tsx` (~L1530–1633) and these selectors in `app/globals.css`:
   - `.report-panel{padding:0}` leaves `.cost-form-grid` and `.feature-actions` flush against the panel edge. Add a padded panel body.
   - "Save estimate settings" gets no button shape. Give it the standard primary style and right-align it. Disable it until something changes, and confirm with a "Saved" toast.
@@ -70,6 +70,8 @@ Already solid: 98/98 tests pass, and CI runs typecheck, lint, test and build. Ev
   - Show detected gateways as chips, each with a "Set rate" button that opens the processor-rate modal pre-filled.
   - The plan copy contradicts itself ("detected: Grow" vs "Automatic (Basic until detected)"). Once a plan is detected, label the option "Automatic (<plan>, detected)".
   - Add a live example under the form: "A £50.00 payment through <gateway> ≈ £x.xx in fees", computed from the rate, fixed fee and plan surcharge.
+
+  *Done (9 Oct 2026):* added `.panel-body` (padded wrapper for the payment-estimate form), scoped `.report-panel .feature-actions{justify-content:flex-end}` plus a base button-shape rule (it previously had none outside `.cost-toolbar`, which is why "Save estimate settings" rendered as unstyled purple text). Added `.panel-head p` (13px, 70ch max-width), bumped `.form-field` labels to 12px and inputs/selects to 13px globally (shared by every screen, not just Expenses). "Save estimate settings" is disabled until `estimateForm` differs from the last-loaded/saved snapshot, and shows "Saved" next to the button on success. Detected gateways render as chips (`.gateway-chip-list`) with a "Set rate" / "Update rate" button each, reusing a new `openAddPaymentRule(gateway)` helper shared with the toolbar's "Add processor rate" button. The plan `<select>`'s default option now reads "Automatic (Grow, detected)" once Shopify reports a plan. Added a live fee example computed with the same `estimatedTransactionFee`/`shopifyThirdPartyRate` functions the server uses (imported directly, not reimplemented), so the preview can't drift from the real calculation.
 
 - [x] **0.3 [Haiku] Hide the top-bar date picker where it does nothing.**
   In `AnalyticsApp()` (`components/analytics-app.tsx` ~L2610, search for `global-date-picker`), render it only when `businessModel === "lead_generation"`. Task 2.2 replaces it with one global period control.
