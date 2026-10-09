@@ -1,0 +1,25 @@
+.pnl-period-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 0 20px 16px;
+  color: #677187;
+  font-size: 11px;
+}
+
+.pnl-period-navigation button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #dfe3ed;
+  border-radius: 8px;
+  background: #fff;
+  color: #6250d8;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pnl-period-navigation button:disabled {
+  color: #9aa2b2;
+  cursor: default;
+}

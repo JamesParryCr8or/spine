@@ -16,7 +16,7 @@ import { convertCurrency, sumSingleCurrency } from '../lib/analytics/money.ts';
 import { calculateProfitAndLoss } from '../lib/analytics/profit-and-loss.ts';
 import { normalizeAttribution, normalizeUtmSource } from '../lib/analytics/utm-attribution.ts';
 import { shopifySyncWindow, shopifyUpdatedAtQuery } from '../lib/shopify/sync-window.ts';
-import { reportingPeriods } from '../lib/analytics/reporting-periods.ts';
+import { pagedReportingPeriods, reportingPeriods } from '../lib/analytics/reporting-periods.ts';
 import { parseExchangeRate, parseExchangeRateId } from '../lib/settings/exchange-rate-schema.ts';
 import { createCurrencyCoverage } from '../lib/analytics/currency-coverage.ts';
 import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExchangeRate } from '../lib/analytics/exchange-rate.ts';
@@ -342,6 +342,15 @@ test('reporting periods split inclusive ranges across calendar boundaries', () =
 test('reporting periods cap wide daily ranges to the latest visible columns', () => {
   const periods = reportingPeriods('2026-01-01', '2026-02-01', 'daily', 3);
   assert.deepEqual(periods.map((period) => period.start), ['2026-01-30', '2026-01-31', '2026-02-01']);
+});
+
+test('earlier P&L pages expose months included in the full-period total', () => {
+  const latest = pagedReportingPeriods('2024-10-01', '2026-10-02', 'monthly', 0);
+  const earlier = pagedReportingPeriods('2024-10-01', '2026-10-02', 'monthly', 1);
+  assert.equal(latest.periods[0].label, 'Nov 2025');
+  assert.equal(earlier.periods[0].label, 'Nov 2024');
+  assert.ok(earlier.periods.some((period) => period.label === 'Jun 2025'));
+  assert.equal(latest.totalPeriods, 25);
 });
 
 

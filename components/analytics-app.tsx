@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Image from "next/image";
+import "./pnl-period-navigation.css";
 import { ShopifyCustomerReport } from "@/components/shopify-customer-report";
 import { ProductJourneyChart } from "@/components/product-journey-chart";
 import { LeadOverview } from "@/components/lead-overview";
 import { LeadReportPage } from "@/components/lead-report-page";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { reportingPeriods, type ReportingGranularity, type ReportingPeriod } from "@/lib/analytics/reporting-periods";
+import { pagedReportingPeriods, reportingPeriods, type ReportingGranularity, type ReportingPeriod } from "@/lib/analytics/reporting-periods";
 import { buildCampaignUrl } from "@/lib/analytics/utm-builder";
 import { fetchCachedJson, invalidateCachedJson } from "@/lib/analytics/client-response-cache";
 import { calculateProfitPerNewCustomer } from "@/lib/analytics/customer-profit";
@@ -687,6 +688,7 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
   const [datePreset, setDatePreset] = useState<FinanceDatePreset>(initialRange ? "custom" : savedPreset === "all_imported" ? "all_imported" : savedPreset ? "custom" : "last_365_days");
   const [granularity, setGranularity] = useState<ReportingGranularity>("monthly");
   const [periodData, setPeriodData] = useState<PnlPeriodData[]>([]);
+  const [periodPage, setPeriodPage] = useState(0);
   const [periodLoading, setPeriodLoading] = useState(false);
   const [customerPeriods, setCustomerPeriods] = useState<PnlCustomerPeriod[]>([]);
   const [customerPeriodError, setCustomerPeriodError] = useState(false);
@@ -775,7 +777,7 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
     const controller = new AbortController();
     const timeout = window.setTimeout(() => {
       if (!pnl?.period || !pnl.hasData) { setPeriodData([]); return; }
-      const periods = reportingPeriods(pnl.period.start, pnl.period.end, granularity, 12);
+      const { periods } = pagedReportingPeriods(pnl.period.start, pnl.period.end, granularity, periodPage);
       setPeriodLoading(true);
       Promise.all(periods.map(async (period) => {
         if (period.start === pnl.period?.start && period.end === pnl.period?.end) return { period, data: pnl };
@@ -784,7 +786,7 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
       })).then((results) => setPeriodData(results.filter((result): result is PnlPeriodData => result !== null))).catch((error) => { if (error instanceof Error && error.name !== "AbortError") setPeriodData([]); }).finally(() => { if (!controller.signal.aborted) setPeriodLoading(false); });
     }, 0);
     return () => { window.clearTimeout(timeout); controller.abort(); };
-  }, [granularity, pnl]);
+  }, [granularity, periodPage, pnl]);
 
   useEffect(() => {
     if (!pnl?.period || !pnl.hasData) { setCustomerPeriods([]); return; }
@@ -884,7 +886,12 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
     section: "Transaction costs", label: `${gateway} processor estimate`,
     value: (data) => -(data.externalPaymentFees?.byGateway.find((item) => item.gateway === gateway)?.processorFees ?? 0),
   })));
-  const displayPeriods: PnlPeriodData[] = periodData.length ? periodData : pnl?.period ? [{ period: { ...pnl.period, label: pnl.period.start + " to " + pnl.period.end }, data: pnl }] : [];
+  const periodWindow = pnl?.period
+    ? pagedReportingPeriods(pnl.period.start, pnl.period.end, granularity, periodPage)
+    : { periods: [], page: 0, pageCount: 0, totalPeriods: 0 };
+  const pagePeriodsLoaded = periodData.length === periodWindow.periods.length && periodData.every((entry, index) =>
+    entry.period.start === periodWindow.periods[index].start && entry.period.end === periodWindow.periods[index].end);
+  const displayPeriods: PnlPeriodData[] = pagePeriodsLoaded ? periodData : [];
   const displayedColumns = showComparison && comparison?.hasData ? [...displayPeriods, { period: { start: comparison.period?.start ?? "", end: comparison.period?.end ?? "", label: "Previous period" }, data: comparison }] : displayPeriods;
   const chartMaximum = Math.max(...displayPeriods.flatMap(({ data }) => [Math.abs(data.metrics.netProductSales - data.metrics.refunds), Math.abs(data.metrics.grossProfit), Math.abs(data.metrics.netProfit ?? 0)]), 1);
   const summary = pnl ? [
@@ -1001,6 +1008,7 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
 
   const applyPnlDatePreset = (preset: FinanceDatePreset) => {
     setDatePreset(preset);
+    setPeriodPage(0);
     if (preset === "custom") return;
     const range = financeDateRange(preset);
     setLoading(true); setFromDate(range.from); setToDate(range.to);
@@ -1015,9 +1023,9 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
   if (pnl && (viewMode === "table" || viewMode === "chart")) return <>
     <section className="filter-row pnl-period finance-date-controls">
       <label>Period<select aria-label="P&L date period" value={datePreset} onChange={(event) => applyPnlDatePreset(event.target.value as FinanceDatePreset)}><option value="last_7_days">Last 7 days (today)</option><option value="last_7_complete_days">Last 7 complete days</option><option value="last_30_days">Last 30 days (today)</option><option value="last_30_complete_days">Last 30 complete days</option><option value="last_90_days">Last 90 days</option><option value="last_365_days">Last 365 days</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="this_month">This month</option><option value="last_month">Last month</option><option value="all_imported">All imported data</option><option value="custom">Custom dates</option></select></label>
-      <label>From<input type="date" value={fromDate} onChange={(event) => { setDatePreset("custom"); setFromDate(event.target.value); }} /></label>
-      <label>To<input type="date" value={toDate} onChange={(event) => { setDatePreset("custom"); setToDate(event.target.value); }} /></label>
-      <label>Group by<select aria-label="P&L granularity" value={granularity} onChange={(event) => setGranularity(event.target.value as ReportingGranularity)}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></label>
+      <label>From<input type="date" value={fromDate} onChange={(event) => { setDatePreset("custom"); setPeriodPage(0); setFromDate(event.target.value); }} /></label>
+      <label>To<input type="date" value={toDate} onChange={(event) => { setDatePreset("custom"); setPeriodPage(0); setToDate(event.target.value); }} /></label>
+      <label>Group by<select aria-label="P&L granularity" value={granularity} onChange={(event) => { setPeriodPage(0); setGranularity(event.target.value as ReportingGranularity); }}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></label>
       <div className="segmented"><button className={viewMode === "table" ? "active" : ""} onClick={() => setViewMode("table")}>Table</button><button className={viewMode === "chart" ? "active" : ""} onClick={() => setViewMode("chart")}>Chart</button></div>
       <label className="comparison-toggle"><input type="checkbox" checked={showComparison} onChange={(event) => setShowComparison(event.target.checked)}/> Previous period</label>
     </section>
@@ -1029,8 +1037,9 @@ function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey }: { sa
     {pnl.hasData ? <><div className="report-export" style={{ gap: 8, flexWrap: "wrap" }}><button className="export-button" disabled={loading || periodLoading} onClick={() => exportPnl("csv")}><Download/> Export visible P&amp;L CSV</button><button className="export-button" disabled={loading || periodLoading} onClick={() => exportPnl("xlsx")}><Download/> Export visible P&amp;L Excel</button></div><details className="metric-dictionary"><summary>Metric definitions</summary><dl><div><dt>Total sales</dt><dd>Net product sales plus customer shipping revenue. Tax and duties are shown separately.</dd></div><div><dt>Gross profit</dt><dd>Net product sales after refunds, less effective-dated product costs.</dd></div><div><dt>Net profit</dt><dd>Available after marketing, shipping, handling, product-cost, and operating-cost coverage is complete.</dd></div></dl></details></> : null}
     <section className="panel report-panel"><div className="report-summary">{summary.map(([label, value, hint]) => <div key={label}><span>{label}</span><strong>{value}</strong><small>{hint}</small></div>)}</div>
       {viewMode === "chart" && displayPeriods.length ? <div className="pnl-chart"><div className="panel-head"><div><span className="eyebrow">PROFIT TREND</span><h2>Revenue, gross profit, and net profit</h2></div><div className="legend"><span className="blue-dot"/>Net sales <span className="green-dot"/>Gross profit <span className="orange-dot"/>Net profit</div></div><div className="chart-wrap"><div className="y-axis"><span>{formatter.format(chartMaximum)}</span><span>{formatter.format(chartMaximum / 2)}</span><span>{formatter.format(chartMaximum / 4)}</span><span>{formatter.format(0)}</span></div><div className="bar-chart">{displayPeriods.map(({ period, data }) => <div className="bar-group" key={period.start + "-" + period.end}><div className="bars"><i className="revenue" style={{height:(Math.abs(data.metrics.netProductSales - data.metrics.refunds) / chartMaximum * 100) + "%"}}/><i className="profit" style={{height:(Math.abs(data.metrics.grossProfit) / chartMaximum * 100) + "%"}}/><i className="spend" style={{height:(Math.abs(data.metrics.netProfit ?? 0) / chartMaximum * 100) + "%"}}/></div><span>{period.label}</span></div>)}</div></div></div> : null}
-      {viewMode === "table" ? <div className="table-scroll"><table className="data-table pnl-table period-table"><thead><tr><th>Income statement</th>{displayedColumns.map((column, index) => <th key={column.period.start + "-" + column.period.end + "-" + index}>{column.period.label}</th>)}{pnl?.period ? <th className="pnl-period-total">Total for period</th> : null}</tr></thead><tbody>{sections.map((section) => [<tr className="pnl-section" key={section + "-heading"}><td colSpan={displayedColumns.length + (pnl?.period ? 2 : 1)}><button onClick={() => toggleSection(section)}><ChevronDown className={collapsedSections.has(section) ? "collapsed" : ""}/>{section}</button></td></tr>, ...(collapsedSections.has(section) ? [] : pnlRows.filter((row) => row.section === section).map((row) => <tr className={row.label.includes("profit") || row.label.includes("margin") || row.label === "Total sales" || row.label === "Total marketing spend" || row.label === "Total payment fees" || row.label === "Estimated external processor fees" ? "total" : ""} key={section + "-" + row.label}><td><span className="indent"><PnlRowTitle label={row.label}/></span></td>{displayedColumns.map((column, index) => <td key={row.label + "-" + index}>{formatPnlValue(row.value(column.data), "currency", pnl.currency)}</td>)}{pnl?.period ? <td className="pnl-period-total">{formatPnlValue(row.value(pnl), "currency", pnl.currency)}</td> : null}</tr>))])}</tbody></table></div> : null}
-      <div className="table-footer"><span>{periodData.length >= 12 ? "Showing the latest 12 " + granularity + " periods" : displayPeriods.length + " " + granularity + " period" + (displayPeriods.length === 1 ? "" : "s")}</span><span>{showComparison ? "Previous-period overlay on" : "Comparison overlay off"}</span></div>
+      {viewMode === "table" ? <div className="table-scroll"><table className="data-table pnl-table period-table"><thead><tr><th>Income statement</th>{displayedColumns.map((column, index) => <th key={column.period.start + "-" + column.period.end + "-" + index}>{column.period.label}</th>)}{pnl?.period ? <th className="pnl-period-total">Full-period total</th> : null}</tr></thead><tbody>{sections.map((section) => [<tr className="pnl-section" key={section + "-heading"}><td colSpan={displayedColumns.length + (pnl?.period ? 2 : 1)}><button onClick={() => toggleSection(section)}><ChevronDown className={collapsedSections.has(section) ? "collapsed" : ""}/>{section}</button></td></tr>, ...(collapsedSections.has(section) ? [] : pnlRows.filter((row) => row.section === section).map((row) => <tr className={row.label.includes("profit") || row.label.includes("margin") || row.label === "Total sales" || row.label === "Total marketing spend" || row.label === "Total payment fees" || row.label === "Estimated external processor fees" ? "total" : ""} key={section + "-" + row.label}><td><span className="indent"><PnlRowTitle label={row.label}/></span></td>{displayedColumns.map((column, index) => <td key={row.label + "-" + index}>{formatPnlValue(row.value(column.data), "currency", pnl.currency)}</td>)}{pnl?.period ? <td className="pnl-period-total">{formatPnlValue(row.value(pnl), "currency", pnl.currency)}</td> : null}</tr>))])}</tbody></table></div> : null}
+      <div className="table-footer"><span>Showing {periodWindow.periods[0]?.label ?? "—"} to {periodWindow.periods.at(-1)?.label ?? "—"} of {periodWindow.totalPeriods} {granularity} periods. Full-period total covers {pnl.period?.start} to {pnl.period?.end}.</span><span>{showComparison ? "Previous-period overlay on" : "Comparison overlay off"}</span></div>
+      {periodWindow.pageCount > 1 ? <div className="pnl-period-navigation"><button type="button" disabled={periodWindow.page >= periodWindow.pageCount - 1 || periodLoading} onClick={() => setPeriodPage(periodWindow.page + 1)}>← Earlier periods</button><span>Page {periodWindow.page + 1} of {periodWindow.pageCount}</span><button type="button" disabled={periodWindow.page === 0 || periodLoading} onClick={() => setPeriodPage(periodWindow.page - 1)}>Later periods →</button></div> : null}
     </section>
     {pnl.hasData ? <section className="panel report-panel pnl-kpi-panel">
       <div className="panel-head"><div><span className="eyebrow">OPERATING METRICS</span><h2>Margins, acquisition and orders</h2><p>Calculated for the same periods as the income statement.</p></div></div>

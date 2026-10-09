@@ -315,8 +315,11 @@ button { cursor:pointer; }
 /* Keep P&L row names legible when many reporting periods are visible. */
 .pnl-table.period-table{min-width:max-content;table-layout:auto}
 .pnl-table.period-table th:first-child,.pnl-table.period-table tbody tr:not(.pnl-section) td:first-child{
-  min-width:224px;width:224px;max-width:224px;text-align:left;white-space:normal;line-height:1.45
+  position:sticky;left:0;z-index:2;min-width:224px;width:224px;max-width:224px;text-align:left;white-space:normal;line-height:1.45;background:#fff;box-shadow:1px 0 0 var(--line)
 }
+.pnl-table.period-table thead th:first-child{z-index:4;background:#fafbfc}
+.pnl-table.period-table tr.total td:first-child{background:#fafaff}
+.pnl-table.period-table tbody tr:not(.pnl-section):hover td:first-child{background:#fbfbfe}
 .pnl-table.period-table th:not(:first-child),.pnl-table.period-table td:not(:first-child){
   min-width:132px;text-align:right
 }
