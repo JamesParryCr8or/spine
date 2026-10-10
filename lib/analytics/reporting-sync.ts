@@ -44,7 +44,7 @@ async function shopifyOrdersResult(reportingClient: SupabaseClient, store: Store
       createdBy: null,
       trigger,
       includeDailyReport: false,
-      catalogue: "daily",
+      catalogue: trigger === "manual" ? "always" : "daily",
       deadline,
     });
     if (result.status === "busy") return [{ source: "shopify_orders", status: "fulfilled", message: "Another Shopify import was already running" }];
