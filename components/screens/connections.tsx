@@ -92,13 +92,13 @@ export function Connections({ leadGeneration = false, canManage = false }: { lea
       const timeout = window.setTimeout(() => {
         setShowGoogleAdsAccounts(true);
         if (discoveryError) setConnectionError(discoveryError);
-        window.history.replaceState({}, "", "/protected");
+        window.history.replaceState({}, "", "/protected/connections");
       }, 0);
       return () => window.clearTimeout(timeout);
     }
     if (googleAdsQuery.get("bingAds") === "select" || googleAdsQuery.get("bingAdsError")) {
       const discoveryError = googleAdsQuery.get("bingAdsError");
-      const timeout = window.setTimeout(() => { setShowBingAdsAccounts(true); if (discoveryError) setConnectionError(discoveryError); window.history.replaceState({}, "", "/protected"); }, 0);
+      const timeout = window.setTimeout(() => { setShowBingAdsAccounts(true); if (discoveryError) setConnectionError(discoveryError); window.history.replaceState({}, "", "/protected/connections"); }, 0);
       return () => window.clearTimeout(timeout);
     }
     fetch("/api/connections/klaviyo").then((response) => response.ok ? response.json() : null).then((payload) => setKlaviyoConnected(payload?.connection?.status === "connected")).catch(() => undefined);
@@ -125,7 +125,7 @@ export function Connections({ leadGeneration = false, canManage = false }: { lea
       setShowMetaSetup(true);
       if (status === "connected") setMetaSyncResult(`Connected through Facebook${message ? ` to ${message}` : ""}. Your selected spend history has been imported.`);
       else setConnectionError(message || "Facebook could not be connected.");
-      window.history.replaceState({}, "", "/protected");
+      window.history.replaceState({}, "", "/protected/connections");
     }, 0);
     return () => window.clearTimeout(timeout);
   }, []);

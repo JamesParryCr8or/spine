@@ -11,7 +11,7 @@ const callbackUrl = (request: NextRequest) => process.env.META_OAUTH_REDIRECT_UR
   ?? new URL("/api/connections/meta/callback", request.url).toString();
 
 const redirectToApp = (request: NextRequest, status: "connected" | "error", message?: string) => {
-  const url = new URL("/protected", request.url);
+  const url = new URL("/protected/connections", request.url);
   url.searchParams.set("metaOAuth", status);
   if (message) url.searchParams.set(status === "error" ? "metaError" : "metaAccount", message);
   const response = NextResponse.redirect(url);

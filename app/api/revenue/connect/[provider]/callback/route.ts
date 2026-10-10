@@ -16,7 +16,7 @@ export async function GET(request: Request, context: { params: Promise<{ provide
   if (!workspace.ok) return workspace.response;
   if (!workspace.store || workspace.userId !== state.userId || !["owner", "admin", "connector"].includes(workspace.membership.role)) return NextResponse.json({ error: "Connection workspace no longer available" }, { status: 403 });
   const code = url.searchParams.get("code");
-  if (!code || url.searchParams.has("error")) return NextResponse.redirect(new URL("/protected?revenue_connection=cancelled", request.url));
+  if (!code || url.searchParams.has("error")) return NextResponse.redirect(new URL("/protected/connections?revenue_connection=cancelled", request.url));
   try {
     // Authorization codes are single-use. In particular Stripe code exchange must never be retried.
     const response = await fetch(provider === "stripe" ? "https://connect.stripe.com/oauth/token" : "https://oauth2.googleapis.com/token", { method: "POST", body: new URLSearchParams({ grant_type: "authorization_code", code, client_id: config.clientId!, client_secret: config.clientSecret!, redirect_uri: config.redirectUri! }), cache: "no-store", signal: AbortSignal.timeout(20_000) });
@@ -31,7 +31,7 @@ export async function GET(request: Request, context: { params: Promise<{ provide
       if (!token.refresh_token) throw new Error("Google did not grant offline access. Reconnect and accept access.");
       await saveCredential(workspace, provider, { access_token: token.access_token, refresh_token: token.refresh_token }, "google-sheets", "Google Sheets");
     }
-    return NextResponse.redirect(new URL("/protected?revenue_connection=connected", request.url));
+    return NextResponse.redirect(new URL("/protected/connections?revenue_connection=connected", request.url));
   } catch {
     return NextResponse.json({ error: "Connection could not be completed. Use a live Stripe account, or grant Google offline access, then start again from Connections." }, { status: 502 });
   }

@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { PanelState } from "@/components/ui/panel-state";
 import Image from "next/image";
 import "./pnl-period-navigation.css";
 import { ShopifyCustomerReport } from "@/components/shopify-customer-report";
 import { LeadOverview } from "@/components/lead-overview";
 import { LeadReportPage } from "@/components/lead-report-page";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { BarChart3, CalendarDays, ChevronDown, LogOut, Menu, Plus, RefreshCw, ShoppingBag, Table2, X } from "lucide-react";
 import { LeadRevenuePage } from "@/components/lead-revenue";
@@ -30,10 +31,12 @@ const Sales = dynamic(() => import("@/components/screens/sales").then((module) =
 const SettingsView = dynamic(() => import("@/components/screens/settings").then((module) => module.SettingsView), { loading: screenLoading });
 const UTMAnalysis = dynamic(() => import("@/components/screens/utm-analysis").then((module) => module.UTMAnalysis), { loading: screenLoading });
 
-/** URL form of a view: "Profit & Loss" → "profit-loss". */
+/** URL form of a view: "Profit & Loss" → "profit-loss". Overview is the bare /protected. */
 const viewSlug = (view: string) => view.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const viewHref = (view: View) => view === "Overview" ? "/protected" : `/protected/${viewSlug(view)}`;
 const allViews = [...new Set([...ecommerceNav, ...leadGenerationNav].map((item) => item.label))];
 const viewFromSlug = (slug: string | null): View | null => allViews.find((candidate) => viewSlug(candidate) === slug) ?? null;
+const slugFromPath = (pathname: string) => pathname.replace(/^\/protected\/?/, "").split("/")[0] || null;
 
 function Generic({ view }: { view: View }) { return <section className="panel empty-feature"><div className="feature-icon"><BarChart3/></div><span className="eyebrow">COMING INTO FOCUS</span><h2>{view}</h2><p>The product shell is ready. This report will use the same trusted Shopify financial model, filters and export workflow.</p><button className="primary"><Plus/> Create report</button></section>; }
 
@@ -48,21 +51,23 @@ type WorkspaceData = {
   stores: Array<{ id: string; organizationId: string; name: string; currency: string; reportingCurrency: string; timezone: string; businessModel: "ecommerce" | "lead_generation" }>;
 };
 
-export function AnalyticsApp({ initialViewSlug = null }: { initialViewSlug?: string | null }) {
-  const [view, setView] = useState<View>(() => viewFromSlug(initialViewSlug) ?? "Overview");
-  const goTo = useCallback((next: View) => {
-    setView(next);
-    const url = new URL(window.location.href);
-    if (url.searchParams.get("view") === viewSlug(next)) return;
-    url.searchParams.set("view", viewSlug(next));
-    window.history.pushState(null, "", url);
-  }, []);
+/**
+ * The persistent app shell, rendered by app/protected/layout.tsx. The open
+ * screen comes from the URL (/protected/profit-loss), so refresh, back/forward
+ * and shared links work, and the shell's state survives navigation.
+ */
+export function AnalyticsApp() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const slug = slugFromPath(pathname);
+  const view: View = viewFromSlug(slug) ?? "Overview";
+  const goTo = useCallback((next: View) => router.push(viewHref(next)), [router]);
   useEffect(() => {
-    // Back/forward between screens.
-    const restore = () => setView(viewFromSlug(new URLSearchParams(window.location.search).get("view")) ?? "Overview");
-    window.addEventListener("popstate", restore);
-    return () => window.removeEventListener("popstate", restore);
-  }, []);
+    // Unknown slug, or a legacy ?view= link: normalise to the screen's own path.
+    const legacy = new URLSearchParams(window.location.search).get("view");
+    const target = slug && !viewFromSlug(slug) ? "/protected" : !slug && legacy && viewFromSlug(legacy) ? viewHref(viewFromSlug(legacy)!) : null;
+    if (target) router.replace(target);
+  }, [slug, router]);
   const [costSku, setCostSku] = useState<string | null>(null);
   const [pnlPreset, setPnlPreset] = useState<"all_imported" | "latest_30_days" | "latest_90_days" | "latest_365_days">("latest_365_days");
   const [activeReportRun, setActiveReportRun] = useState<{ id: string; view: View } | null>(null);
@@ -80,7 +85,6 @@ export function AnalyticsApp({ initialViewSlug = null }: { initialViewSlug?: str
   const [leadTo, setLeadTo] = useState("");
   const [leadDatePickerOpen, setLeadDatePickerOpen] = useState(false);
   const [leadDateReady, setLeadDateReady] = useState(false);
-  const router = useRouter();
   const activeStore = workspace?.stores.find((store) => store.id === workspace.activeStoreId);
   const activeStoreName = activeStore?.name || freshness?.storeName || "Your store";
   const businessModel = activeStore?.businessModel ?? "ecommerce";
@@ -108,7 +112,10 @@ export function AnalyticsApp({ initialViewSlug = null }: { initialViewSlug?: str
     localStorage.setItem(`spine:lead-period:${activeStore.id}`, JSON.stringify({ preset: leadDatePreset, from: leadFrom, to: leadTo }));
   }, [activeStore?.id, leadDatePreset, leadFrom, leadTo, leadDateReady]);
   const availableNav = businessModel === "lead_generation" ? leadGenerationNav : ecommerceNav;
-  if (view !== "Overview" && !availableNav.some((item) => item.label === view)) setView("Overview");
+  useEffect(() => {
+    // A screen this business model doesn't have (e.g. a shared ecommerce link on a lead-gen brand).
+    if (workspace && view !== "Overview" && !availableNav.some((item) => item.label === view)) router.replace("/protected");
+  }, [workspace, view, availableNav, router]);
   useEffect(() => {
     fetch("/api/workspace")
       .then(async (response) => response.ok ? response.json() as Promise<WorkspaceData> : null)
@@ -171,7 +178,7 @@ export function AnalyticsApp({ initialViewSlug = null }: { initialViewSlug?: str
   const freshnessHeading = !freshness ? "SHOPIFY DATA" : !freshness.connected ? "SHOPIFY NOT CONNECTED" : freshness.latestStatus === "running" || freshness.latestStatus === "paused" ? "IMPORTING SHOPIFY" : freshness.latestStatus === "failed" || freshness.latestStatus === "interrupted" ? "SYNC NEEDS ATTENTION" : freshness.lastSuccessfulSync ? "SHOPIFY SYNCED" : "READY TO SYNC";
   const freshnessDetail = freshness?.latestStatus === "running" ? "Importing your Shopify catalogue and orders" : freshness?.latestStatus === "paused" ? "Continuing in the background each hour" : freshness?.latestStatus === "interrupted" ? "Open Connections to resume the saved import" : freshness?.lastSuccessfulSync ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(freshness.lastSuccessfulSync)) : freshness?.latestStatus === "failed" ? "Open Connections to review the failed sync" : "Open Connections to import Shopify data";
   return <div className="app-shell">
-    <aside className={mobileOpen?"sidebar open":"sidebar"}><div className="brand"><span className="brand-mark"><Image src="/spine-logo.png" alt="" width={34} height={34} priority /></span><span><b>Spine</b><small>The backbone of your business</small></span><button className="mobile-close" onClick={()=>setMobileOpen(false)}><X/></button></div><label className="store-switcher"><span className="store-icon"><ShoppingBag/></span><span><small>STORE</small><b>{switchingStore ? "Switching…" : activeStoreName}</b></span><select aria-label="Active store" value={workspace?.activeStoreId ?? ""} disabled={!workspace || switchingStore || workspace.stores.length < 2} onChange={(event)=>void switchStore(event.target.value)}>{workspace?.stores.map((store)=>{const organization=workspace?.organizations.find((candidate)=>candidate.id===store.organizationId);return <option key={store.id} value={store.id}>{organization && (workspace?.organizations.length ?? 0) > 1 ? `${organization.name} · ` : ""}{store.name}</option>})}</select><ChevronDown/></label><nav>{availableNav.map((item)=>{if(item.subItem&&!customersExpanded)return null;const isCustomers=item.label==="Customers";return <div key={item.label}>{item.section&&<span className="nav-section">{item.section}</span>}<button className={`${view===item.label ? "nav-item active" : "nav-item"}${item.subItem ? " nav-sub-item" : ""}`} title={item.display ? item.label : undefined} onClick={()=>{if(isCustomers)setCustomersExpanded((expanded)=>!expanded);setActiveReportRun(null);setDrilldown(null);goTo(item.label);setMobileOpen(false)}}><item.icon/><span className="nav-label">{item.display ?? item.label}</span>{isCustomers&&<ChevronDown style={{marginLeft:"auto",transform:customersExpanded?"rotate(0deg)":"rotate(-90deg)",transition:"transform .2s"}}/>}</button></div>})}</nav><div className="sidebar-bottom"><button className="nav-item" onClick={logout}><LogOut/><span>Sign out</span></button><div className="user-card"><div>{account.name.slice(0, 2).toUpperCase()}</div><span><b>{account.name}</b><small>{account.email}</small></span></div></div></aside>
+    <aside className={mobileOpen?"sidebar open":"sidebar"}><div className="brand"><span className="brand-mark"><Image src="/spine-logo.png" alt="" width={34} height={34} priority /></span><span><b>Spine</b><small>The backbone of your business</small></span><button className="mobile-close" onClick={()=>setMobileOpen(false)}><X/></button></div><label className="store-switcher"><span className="store-icon"><ShoppingBag/></span><span><small>STORE</small><b>{switchingStore ? "Switching…" : activeStoreName}</b></span><select aria-label="Active store" value={workspace?.activeStoreId ?? ""} disabled={!workspace || switchingStore || workspace.stores.length < 2} onChange={(event)=>void switchStore(event.target.value)}>{workspace?.stores.map((store)=>{const organization=workspace?.organizations.find((candidate)=>candidate.id===store.organizationId);return <option key={store.id} value={store.id}>{organization && (workspace?.organizations.length ?? 0) > 1 ? `${organization.name} · ` : ""}{store.name}</option>})}</select><ChevronDown/></label><nav>{availableNav.map((item)=>{if(item.subItem&&!customersExpanded)return null;const isCustomers=item.label==="Customers";return <div key={item.label}>{item.section&&<span className="nav-section">{item.section}</span>}<Link href={viewHref(item.label)} className={`${view===item.label ? "nav-item active" : "nav-item"}${item.subItem ? " nav-sub-item" : ""}`} title={item.display ? item.label : undefined} aria-current={view===item.label ? "page" : undefined} onClick={()=>{if(isCustomers)setCustomersExpanded((expanded)=>!expanded);setActiveReportRun(null);setDrilldown(null);setMobileOpen(false)}}><item.icon/><span className="nav-label">{item.display ?? item.label}</span>{isCustomers&&<ChevronDown style={{marginLeft:"auto",transform:customersExpanded?"rotate(0deg)":"rotate(-90deg)",transition:"transform .2s"}}/>}</Link></div>})}</nav><div className="sidebar-bottom"><button className="nav-item" onClick={logout}><LogOut/><span>Sign out</span></button><div className="user-card"><div>{account.name.slice(0, 2).toUpperCase()}</div><span><b>{account.name}</b><small>{account.email}</small></span></div></div></aside>
     <main className="main"><header className="topbar"><button className="menu-button" onClick={()=>setMobileOpen(true)}><Menu/></button><div className="breadcrumb"><span>{activeStoreName}</span><b>/</b><strong>{view}</strong></div><div className="top-actions">{businessModel === "lead_generation" && <div className="global-date-picker"><button className="date-button" title="Choose reporting period" onClick={() => setLeadDatePickerOpen((open) => !open)}><CalendarDays/><span>{leadRangeLabel}</span><ChevronDown/></button>{leadDatePickerOpen && <div className="global-date-menu"><label>Period<select value={leadDatePreset} onChange={(event) => updateLeadPreset(event.target.value as FinanceDatePreset)}><option value="all_imported">All imported data</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="last_7_days">Last 7 days</option><option value="last_30_days">Last 30 days</option><option value="last_90_days">Last 90 days</option><option value="last_365_days">Last 365 days</option><option value="this_month">This month</option><option value="last_month">Last month</option><option value="custom">Custom dates</option></select></label>{leadDatePreset === "custom" && <div className="global-date-custom"><label>From<input type="date" value={leadFrom} onChange={(event) => setLeadFrom(event.target.value)}/></label><label>To<input type="date" value={leadTo} onChange={(event) => setLeadTo(event.target.value)}/></label></div>}<button className="primary" onClick={() => setLeadDatePickerOpen(false)}>Apply period</button></div>}</div>}{businessModel && <button className="export-button" disabled={syncingReporting} onClick={() => void syncReportingNow()} title={businessModel === "lead_generation" ? "Refresh GoHighLevel and ad reporting data now" : "Refresh Shopify, Meta, Google and Microsoft Ads reporting data now"}><RefreshCw className={syncingReporting ? "spin" : ""}/> {syncingReporting ? "Syncing…" : "Sync now"}</button>}<button className="icon-button" onClick={openSync} title="Open Shopify sync"><RefreshCw/></button><button className="export-button" onClick={()=>goTo("Reports")}><Table2/> Reports</button></div></header>
     {syncError && <div className="connection-error" style={{margin:"0 32px"}}>{syncError}</div>}
       <div className="content"><div className="page-heading"><div><span className="eyebrow">{businessModel === "lead_generation" ? "LEAD GENERATION INTELLIGENCE" : "ECOMMERCE INTELLIGENCE"}</span><h1>{view}</h1><p>{view==="Leads"?"A standalone view of ad cost against your selected GoHighLevel conversion.":view==="Overview"?(businessModel === "lead_generation" ? "Monitor GoHighLevel stage volumes, paid-media efficiency and pipeline value." : "A clear view of what your store earned—not just what it sold."):view==="UTM Analysis"?"Understand which traffic sources create profitable customers.":view==="Profit & Loss"?"Your ecommerce income statement, based on all imported Shopify data.":`Manage and analyse your ${view.toLowerCase()}.`}</p></div><div className="freshness"><span className={freshness?.latestStatus === "failed" ? "sync-dot syncing" : "sync-dot"}/><div><small>{freshnessHeading}</small><b>{freshnessDetail}</b>{freshness?.reporting && freshness.reporting.sources.length > 0 && <ul className="source-chips" aria-label="Reporting sources">{freshness.reporting.sources.map((item) => <li key={item.source} className={`source-chip ${item.status}`} title={item.status === "failed" ? `Last refresh failed: ${item.message ?? "unknown error"}` : item.lastRefreshedAt ? `Refreshed ${new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.lastRefreshedAt))}` : "Waiting for the first background refresh"}><span aria-hidden="true"/>{item.label}</li>)}</ul>}</div></div></div>

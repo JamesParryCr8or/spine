@@ -10,7 +10,7 @@ type GoogleAdsAccount = { customer_id: string; name: string; is_manager: boolean
 type SearchStreamResponse = Array<{ results?: Array<{ customer?: { id?: string; descriptiveName?: string; manager?: boolean }; customerClient?: { id?: string; descriptiveName?: string; manager?: boolean; level?: number; status?: string } }> }> & { error?: { message?: string } };
 
 function fail(request: Request, message: string) {
-  const url = new URL("/protected", request.url);
+  const url = new URL("/protected/connections", request.url);
   url.searchParams.set("connectionError", message);
   return NextResponse.redirect(url);
 }
@@ -130,7 +130,7 @@ export async function GET(request: Request) {
   })), { onConflict: "store_id,customer_id" });
   if (accountError) return fail(request, "Google Ads was authorized but Spine could not save the account list");
 
-  const nextUrl = new URL("/protected?googleAds=select", request.url);
+  const nextUrl = new URL("/protected/connections?googleAds=select", request.url);
   if (discoveryErrors.length) nextUrl.searchParams.set("googleAdsError", discoveryErrors[0]);
   const response = NextResponse.redirect(nextUrl);
   response.cookies.set(stateCookie, "", { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 0 });
