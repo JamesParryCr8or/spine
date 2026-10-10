@@ -8,7 +8,7 @@ import { fetchJson, peekJson } from "@/lib/queries/client";
 import { useResetOnChange } from "@/lib/use-reset-on-change";
 import type { ComboRow, DomainRow, MarginRow, RankRow, SalesInsights, TimeBucket } from "@/lib/analytics/sales-insights";
 
-type InsightsData = SalesInsights & { hasData: boolean; currency: string; timezone: string };
+type InsightsData = SalesInsights & { hasData: boolean; currency: string; timezone: string; dataRange?: { from: string; to: string } | null };
 
 const weekdayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const percent = (value: number) => `${Math.round(value * 100)}%`;
@@ -91,7 +91,12 @@ export function Sales({ reportRunId }: { reportRunId?: string }) {
 
   if (loadError) return <>{controls}<PanelState status="error" title="Sales insights could not be loaded" message={loadError} onRetry={() => setRetryToken((value) => value + 1)}/></>;
   if (!data) return <>{controls}<PanelState status="loading" message="Finding patterns in your orders…" lines={5}/></>;
-  if (!data.hasData) return <>{controls}<PanelState status="empty" title="No Shopify orders in this period" message="Connect Shopify and run the first sync, or widen the date range."/></>;
+  if (!data.hasData) {
+    const range = data.dataRange;
+    const label = (date: string) => new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
+    return <>{controls}<PanelState status="empty" title="No Shopify orders in this period" message={range ? `This store's orders run from ${label(range.from)} to ${label(range.to)}.` : "Connect Shopify and run the first sync, or widen the date range."}/>
+      {range && <button className="primary empty-action" onClick={() => { setDatePreset("custom"); setFromDate(range.from); setToDate(range.to); }}>Show {label(range.from)} to {label(range.to)}</button>}</>;
+  }
 
   const { summary } = data;
   const hourLabels = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, "0"));

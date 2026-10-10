@@ -4,6 +4,7 @@ import { inflateRawSync } from "node:zlib";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { shopifyGraph } from "@/lib/shopify/graphql";
 import { resolveShopifyDailyFees } from "@/lib/analytics/shopify-fees";
+import { campaignQuery, dateWindows, parseCampaignRows, type ShopifyQlRow as CampaignQlRow } from "@/lib/analytics/campaign-rows";
 
 type Store = { id: string; organization_id: string; shopify_domain?: string | null; currency: string };
 type ShopifyQlRow = Record<string, string | number | null>;
@@ -116,6 +117,66 @@ export async function refreshShopifyReporting(supabase: SupabaseClient, store: S
     const { error } = await supabase.from("shopify_acquisition_daily").upsert(acquisitionRows.slice(index, index + 500), { onConflict: "store_id,sales_date" });
     if (error) throw error;
   }
+}
+
+/** ShopifyQL returns at most this many rows per query; a window that hits it is split and re-queried. */
+const campaignRowCap = 1000;
+const campaignBackfillDays = 730;
+const shiftIso = (value: string, days: number) => new Date(new Date(`${value}T00:00:00Z`).getTime() + days * 86400000).toISOString().slice(0, 10);
+
+/**
+ * Daily campaign attribution (ShopifyQL campaign_sales) for [from, to]. A
+ * store's first run also backfills two years; after that only the sync
+ * window is re-read. Aggregated rows only: storage grows with campaigns x
+ * days, not orders.
+ */
+export async function refreshShopifyCampaigns(supabase: SupabaseClient, store: Store, from: string, to: string) {
+  if (!store.shopify_domain) return;
+  const { data: state, error: stateError } = await supabase.from("shopify_campaign_sync_state").select("backfilled_from,synced_at").eq("store_id", store.id).maybeSingle();
+  if (stateError) throw new Error(stateError.message);
+  if (state && state.synced_at >= freshAfter()) return;
+  const token = await readSecret(supabase, store.id, "shopify");
+  if (!token) return;
+
+  const run = (window: { from: string; to: string }) => shopifyGraph<ShopifyQlResult>(
+    store.shopify_domain!, token,
+    `query Campaigns($shopifyQl:String!){ shopifyqlQuery(query:$shopifyQl){ tableData{ rows } parseErrors } }`,
+    { shopifyQl: campaignQuery(window.from, window.to) },
+  );
+  const fetchWindow = async (window: { from: string; to: string }): Promise<CampaignQlRow[]> => {
+    const result = await run(window);
+    const parseError = result.shopifyqlQuery.parseErrors[0];
+    if (parseError) throw new Error(`Shopify campaign query: ${parseError}`);
+    const rows = result.shopifyqlQuery.tableData?.rows ?? [];
+    if (rows.length < campaignRowCap || window.from >= window.to) return rows;
+    const middle = shiftIso(window.from, Math.floor((new Date(`${window.to}T00:00:00Z`).getTime() - new Date(`${window.from}T00:00:00Z`).getTime()) / 86400000 / 2));
+    return [...await fetchWindow({ from: window.from, to: middle }), ...await fetchWindow({ from: shiftIso(middle, 1), to: window.to })];
+  };
+
+  const backfillFrom = shiftIso(to, -campaignBackfillDays);
+  const windows = [
+    { from, to },
+    ...(state ? [] : from > backfillFrom ? dateWindows(backfillFrom, shiftIso(from, -1), 90) : []),
+  ];
+  const now = new Date().toISOString();
+  for (let index = 0; index < windows.length; index += 3) {
+    const batch = windows.slice(index, index + 3);
+    const fetched = await Promise.all(batch.map(async (window) => ({ window, rows: await fetchWindow(window) })));
+    for (const { window, rows } of fetched) {
+      const parsed = parseCampaignRows(rows, { organizationId: store.organization_id, storeId: store.id, currency: store.currency, now });
+      const { error: deleteError } = await supabase.from("shopify_campaign_daily").delete().eq("store_id", store.id).gte("sales_date", window.from).lte("sales_date", window.to);
+      if (deleteError) throw new Error(deleteError.message);
+      for (let offset = 0; offset < parsed.length; offset += 500) {
+        const { error } = await supabase.from("shopify_campaign_daily").insert(parsed.slice(offset, offset + 500));
+        if (error) throw new Error(error.message);
+      }
+    }
+  }
+  const { error: saveError } = await supabase.from("shopify_campaign_sync_state").upsert({
+    store_id: store.id, organization_id: store.organization_id,
+    backfilled_from: state ? state.backfilled_from : windows.at(-1)?.from ?? from, synced_at: now,
+  }, { onConflict: "store_id" });
+  if (saveError) throw new Error(saveError.message);
 }
 
 function paymentQueryWindows(from: string, to: string) {
@@ -389,13 +450,14 @@ export type ReportingSourceResult = { source: string; status: "fulfilled" | "rej
 
 export async function refreshReportingData(_supabase: SupabaseClient, store: Store, from: string, to: string): Promise<ReportingSourceResult[]> {
   const reportingClient = createAdminClient();
-  const sources = ["shopify", "shopify_payments", "meta", "google_ads", "bing_ads"];
+  const sources = ["shopify", "shopify_payments", "meta", "google_ads", "bing_ads", "shopify_campaigns"];
   const results = await Promise.allSettled([
     refreshShopifyReporting(reportingClient, store, from, to),
     refreshShopifyPaymentGateways(reportingClient, store, from, to),
     refreshMeta(reportingClient, store, from, to),
     refreshGoogle(reportingClient, store, from, to),
     refreshMicrosoftAdsReporting(reportingClient, store, from, to),
+    refreshShopifyCampaigns(reportingClient, store, from, to),
   ]);
   return results.map((result, index) => {
     if (result.status === "rejected") {

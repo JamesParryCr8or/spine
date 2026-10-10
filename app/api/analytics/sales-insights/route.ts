@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { costKey, monetary, resolveEffectiveCost, type EffectiveCost } from "@/lib/analytics/effective-cost";
-import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
+import { reportingDateKey, reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { computeSalesInsights, storeDomainFromUrl, type InsightLine, type InsightOrder } from "@/lib/analytics/sales-insights";
 import { selectAllPages } from "@/lib/supabase/select-all";
 import { selectOrdersByProcessedAt } from "@/lib/supabase/select-orders";
@@ -102,5 +102,13 @@ export async function GET(request: Request) {
   });
 
   const insights = computeSalesInsights(orders, lines, store.timezone || "UTC");
-  return NextResponse.json({ hasData: orders.length > 0, currency: store.currency, timezone: store.timezone || "UTC", ...insights });
+  // An empty period usually means the dates miss the data: say where the store's orders actually are.
+  let dataRange: { from: string; to: string } | null = null;
+  if (orders.length === 0) {
+    const base = () => supabase.from("shopify_orders").select("processed_at").eq("store_id", store.id).eq("currency", store.currency).eq("test", false).is("cancelled_at", null).not("processed_at", "is", null);
+    const [first, last] = await Promise.all([base().order("processed_at", { ascending: true }).limit(1), base().order("processed_at", { ascending: false }).limit(1)]);
+    const firstAt = first.data?.[0]?.processed_at, lastAt = last.data?.[0]?.processed_at;
+    if (firstAt && lastAt) dataRange = { from: reportingDateKey(firstAt, store.timezone || "UTC"), to: reportingDateKey(lastAt, store.timezone || "UTC") };
+  }
+  return NextResponse.json({ hasData: orders.length > 0, currency: store.currency, timezone: store.timezone || "UTC", dataRange, ...insights });
 }
