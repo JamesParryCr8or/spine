@@ -175,7 +175,7 @@ Already solid: 98/98 tests pass, and CI runs typecheck, lint, test and build. Ev
 
   *Done when:* typecheck, lint, test and build all pass, the UI is unchanged, and `analytics-app.tsx` contains only the shell.
 
-- [ ] **2.2 [Opus] One route per screen, with the period in the URL.**
+- [~] **2.2 [Opus] One route per screen, with the period in the URL.** *Partly done (9 Oct 2026):* the open screen now lives in `?view=` (e.g. `/protected?view=profit-loss`), seeded server-side from `searchParams` in `app/protected/page.tsx`, updated with `history.pushState`, and restored on back/forward — so refresh and shared links reopen the same screen. Every screen is loaded with `next/dynamic`, and the build confirms each lands in its own JS chunk (P&L, Costs, Reports and UTM were checked). **Not done:** real `app/(app)/<screen>/page.tsx` routes with sidebar `<Link>`s (needs the shell's state hoisted into a layout), and moving the period (`from`/`to`/`granularity`/`compare`) into the URL to replace the three `localStorage` keys — each screen still owns its own period state. Do those together; the period is the part that needs a design decision (one top-bar control for all screens).
   - Add `app/(app)/overview/page.tsx`, `/pnl`, `/sales` and so on, with a shared layout for the sidebar and top bar. Each screen then gets its own JS chunk.
   - URL search params (`from`, `to`, `granularity`, `compare`) become the single source of truth for the period, set by one control in the top bar.
   - That replaces the dead picker and three localStorage keys: `spine:overview-filters:*`, `spine:pnl-period:*` and `spine:lead-period:*`.
