@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { createReportingClient } from "@/lib/analytics/reporting-refresh";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { rollingSyncWindow, runReportingSyncForStore } from "@/lib/analytics/reporting-sync";
 
 export const maxDuration = 300;
 
-type Store = { id: string; organization_id: string; shopify_domain: string | null; currency: string };
+type Store = { id: string; organization_id: string; shopify_domain: string | null; currency: string; business_model: string | null };
 
 /**
  * Scheduled reporting refresh (see vercel.json "crons"). Keeps the P&L and
@@ -24,14 +24,20 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const supabase = createReportingClient();
-  const { data: storeRows, error: storesError } = await supabase.from("stores").select("id,organization_id,shopify_domain,currency");
+  // Leave headroom under maxDuration (300s) for the in-flight order page and
+  // the final run updates; each store's Shopify import gets at most 120s of it.
+  const overallDeadline = Date.now() + 240_000;
+  const supabase = createAdminClient();
+  const { data: storeRows, error: storesError } = await supabase.from("stores").select("id,organization_id,shopify_domain,currency,business_model");
   if (storesError) return NextResponse.json({ error: storesError.message }, { status: 500 });
 
   const { from, to } = rollingSyncWindow();
   const outcomes = [];
   for (const store of (storeRows ?? []) as Store[]) {
-    outcomes.push(await runReportingSyncForStore(supabase, store, from, to, "cron"));
+    // Past the overall budget, stores still get the reporting refresh; their
+    // order import waits for the next tick.
+    const importDeadline = Date.now() < overallDeadline ? Math.min(overallDeadline, Date.now() + 120_000) : undefined;
+    outcomes.push(await runReportingSyncForStore(supabase, store, from, to, "cron", importDeadline));
   }
 
   const failed = outcomes.filter((outcome) => outcome.status === "failed");

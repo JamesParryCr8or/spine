@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 
 import { requireWorkspace } from "@/lib/workspace/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 type Pipeline = { id?: string; name?: string; stages?: Array<{ id?: string; name?: string; position?: number }> };
 
@@ -11,10 +11,12 @@ export async function GET() {
   if (!workspace.store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
   if (!["owner", "admin", "connector"].includes(workspace.membership.role)) return NextResponse.json({ error: "Owner or admin access is required" }, { status: 403 });
 
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!serviceKey || !url) return NextResponse.json({ error: "Lead reporting is not configured on the server" }, { status: 500 });
-  const admin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return NextResponse.json({ error: "Lead reporting is not configured on the server" }, { status: 500 });
+  }
   const { data: token, error: tokenError } = await admin.rpc("read_connection_secret_for_server", {
     requested_store_id: workspace.store.id,
     connection_provider: "gohighlevel",

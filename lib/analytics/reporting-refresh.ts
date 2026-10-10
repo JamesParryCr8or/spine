@@ -1,7 +1,7 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { inflateRawSync } from "node:zlib";
 
-import { getSupabasePublicEnvironment } from "@/lib/env";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { shopifyGraph } from "@/lib/shopify/graphql";
 import { resolveShopifyDailyFees } from "@/lib/analytics/shopify-fees";
 
@@ -13,12 +13,6 @@ type GoogleAdsPayload = Array<{ results?: GoogleAdsRow[] }>;
 
 const freshAfter = () => new Date(Date.now() - 15 * 60 * 1000).toISOString();
 
-export function createReportingClient() {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || process.env.SUPABASE_SECRET_KEY?.trim();
-  if (!key) throw new Error("Server reporting credentials are not configured");
-  const { url } = getSupabasePublicEnvironment();
-  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-}
 const numeric = (value: unknown) => {
   const number = Number(typeof value === "string" ? value.replace(/[£$,\s]/g, "") : value ?? 0);
   return Number.isFinite(number) ? number : 0;
@@ -394,7 +388,7 @@ export async function refreshMicrosoftAdsReporting(supabase: SupabaseClient, sto
 export type ReportingSourceResult = { source: string; status: "fulfilled" | "rejected"; message?: string };
 
 export async function refreshReportingData(_supabase: SupabaseClient, store: Store, from: string, to: string): Promise<ReportingSourceResult[]> {
-  const reportingClient = createReportingClient();
+  const reportingClient = createAdminClient();
   const sources = ["shopify", "shopify_payments", "meta", "google_ads", "bing_ads"];
   const results = await Promise.allSettled([
     refreshShopifyReporting(reportingClient, store, from, to),

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { discoverMetaAccounts, importMetaInsights } from "@/lib/connections/meta";
 import { requireWorkspace } from "@/lib/workspace/server";
+import { withStoreJobLock } from "@/lib/workspace/job-lock";
 import { canManageConnections } from "@/lib/workspace/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -71,7 +72,9 @@ export async function GET() {
   return NextResponse.json({ connection, sync });
 }
 
-export async function POST(request: Request) {
+export const POST = withStoreJobLock("meta_import", 300, handlePost);
+
+async function handlePost(request: Request) {
   const result = await context();
   if (result.response) return result.response;
   if (!canManageConnections(result.membership.role)) return NextResponse.json({ error: "Connection management access is required" }, { status: 403 });

@@ -1,7 +1,7 @@
 import "server-only";
-import { createClient } from "@supabase/supabase-js";
 import type { RevenueProvider } from "./oauth";
 import { requireWorkspace } from "@/lib/workspace/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export type RevenueWorkspace = Extract<Awaited<ReturnType<typeof requireWorkspace>>, { ok: true }>;
 export function oauthConfig(provider: RevenueProvider) {
@@ -18,7 +18,7 @@ export async function saveCredential(workspace: RevenueWorkspace, provider: Reve
 }
 export async function readCredential(workspace: RevenueWorkspace, provider: RevenueProvider) {
   if (!workspace.store || !["owner", "admin", "connector"].includes(workspace.membership.role)) throw new Error("Connection management access required");
-  const client = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false, autoRefreshToken: false } });
+  const client = createAdminClient();
   const { data, error } = await client.rpc("read_connection_secret_for_server", { requested_store_id: workspace.store.id, connection_provider: provider });
   if (error || !data) throw new Error("Reconnect this account before importing");
   const value = typeof data === "string" ? data : data.access_token;

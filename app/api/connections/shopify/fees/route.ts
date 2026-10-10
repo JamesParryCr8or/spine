@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { createReportingClient } from "@/lib/analytics/reporting-refresh";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { convertDatedAmount, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 import { shopifyGraph } from "@/lib/shopify/graphql";
 import { requireWorkspace } from "@/lib/workspace/server";
+import { withStoreJobLock } from "@/lib/workspace/job-lock";
 
 export const maxDuration = 300;
 
@@ -22,7 +23,9 @@ const localDate = (value: string, timeZone: string) => {
   return `${part("year")}-${part("month")}-${part("day")}`;
 };
 
-export async function POST(request: Request) {
+export const POST = withStoreJobLock("shopify_fees", maxDuration, handlePost);
+
+async function handlePost(request: Request) {
   const workspace = await requireWorkspace();
   if (!workspace.ok) return workspace.response;
   const { supabase, membership, store } = workspace;
@@ -34,7 +37,7 @@ export async function POST(request: Request) {
   if (!validDate(from) || !validDate(to) || from > to || Date.parse(to) - Date.parse(from) > 366 * 86400000) {
     return NextResponse.json({ error: "Choose a valid fee import window of up to 366 days." }, { status: 400 });
   }
-  const { data: token, error: secretError } = await createReportingClient().rpc("read_connection_secret_for_server", {
+  const { data: token, error: secretError } = await createAdminClient().rpc("read_connection_secret_for_server", {
     requested_store_id: store.id, connection_provider: "shopify",
   });
   if (secretError || typeof token !== "string" || !token) return NextResponse.json({ error: "Reconnect Shopify to refresh payment fees." }, { status: 409 });
@@ -87,7 +90,7 @@ export async function POST(request: Request) {
       balanceWarning = "Shopify payout transactions were unavailable; ShopifyQL fee totals were still checked.";
     }
 
-    const reportingDb = membership.role === "connector" ? createReportingClient() : supabase;
+    const reportingDb = membership.role === "connector" ? createAdminClient() : supabase;
     const { data: existing, error: dailyError } = await reportingDb.from("shopify_sales_daily").select("*")
       .eq("store_id", store.id).gte("sales_date", from).lte("sales_date", to);
     if (dailyError) throw new Error(dailyError.message);

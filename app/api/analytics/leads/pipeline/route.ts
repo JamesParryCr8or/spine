@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 
 import { requireWorkspace } from "@/lib/workspace/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { calculateJourneyCounts } from "@/lib/analytics/lead-funnel";
 
 export const maxDuration = 60;
@@ -14,10 +14,7 @@ type OpportunityPage = { opportunities?: Opportunity[]; meta?: { total?: number;
 const amount = (value: unknown) => Number(value ?? 0) || 0;
 
 async function ghlContext(storeId: string) {
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!serviceKey || !url) throw new Error("GoHighLevel reporting is not configured on the server");
-  const admin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
+  const admin = createAdminClient();
   const { data: token, error } = await admin.rpc("read_connection_secret_for_server", {
     requested_store_id: storeId,
     connection_provider: "gohighlevel",
