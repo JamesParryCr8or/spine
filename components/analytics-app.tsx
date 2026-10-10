@@ -118,6 +118,22 @@ export function AnalyticsApp({ initialViewSlug = null }: { initialViewSlug?: str
       .then(async (response) => response.ok ? response.json() as Promise<Freshness> : null)
       .then((payload) => setFreshness(payload))
       .catch(() => setFreshness(null));
+    // One background refresh per browser session; the server skips it if the store synced recently.
+    try {
+      if (!sessionStorage.getItem("spine:login-refresh")) {
+        sessionStorage.setItem("spine:login-refresh", "1");
+        fetch("/api/sync/login", { method: "POST" })
+          .then(async (response) => response.ok ? response.json() as Promise<{ started: boolean }> : null)
+          .then((result) => {
+            if (!result?.started) return;
+            // Pick up the finished refresh's source chips.
+            window.setTimeout(() => {
+              fetch("/api/analytics/freshness").then(async (response) => response.ok ? response.json() as Promise<Freshness> : null).then((payload) => { if (payload) setFreshness(payload); }).catch(() => undefined);
+            }, 75_000);
+          })
+          .catch(() => undefined);
+      }
+    } catch { /* sessionStorage can be unavailable; skip the login refresh. */ }
   }, []);
   useEffect(() => { createClient().auth.getUser().then(({ data }) => { const user = data.user; if (!user) return; const metadataName = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : typeof user.user_metadata?.name === "string" ? user.user_metadata.name : ""; setAccount({ name: metadataName || user.email?.split("@")[0] || "Account", email: user.email || "" }); }); }, []);
   const switchStore = async (storeId: string) => {
