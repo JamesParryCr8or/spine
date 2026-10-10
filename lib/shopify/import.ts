@@ -61,8 +61,8 @@ export type ShopifyImportOptions = {
   trigger: "manual" | "cron" | "login";
   /** The 5-year ShopifyQL daily sales/fees backfill. The cron job's reporting refresh covers a rolling window instead. */
   includeDailyReport: boolean;
-  /** "always" re-reads every product and variant; "daily" only when the last completed import is older than 20 hours. */
-  catalogue: "always" | "daily";
+  /** "always" re-reads every product and variant; "first" only when no import has completed yet. */
+  catalogue: "always" | "first";
   /** Epoch ms. Once passed, the import pauses between order pages and keeps its cursor for the next run. */
   deadline?: number;
 };
@@ -75,8 +75,6 @@ export type ShopifyImportCounts = {
 export type ShopifyImportResult =
   | { status: "busy" }
   | { status: "completed" | "paused"; resumed: boolean; mode: "initial" | "incremental"; windowStart: string | null; windowEnd: string; counts: ShopifyImportCounts };
-
-const catalogueRefreshMs = 20 * 60 * 60 * 1000;
 
 /**
  * Imports Shopify's daily report (optional), catalogue and orders for one
@@ -126,8 +124,7 @@ export async function runShopifyImport(options: ShopifyImportOptions): Promise<S
     const priorPagesProcessed = run.pages_processed ?? 0;
 
     const refreshCatalogue = options.catalogue === "always"
-      || !latestCompleted?.completed_at
-      || Date.parse(latestCompleted.completed_at) < Date.now() - catalogueRefreshMs;
+      || !latestCompleted?.completed_at;
     let productsProcessed = 0;
     let variantsProcessed = 0;
     if (refreshCatalogue) {
