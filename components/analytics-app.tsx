@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { clearQueryCache } from "@/lib/queries/client";
 import { PanelState } from "@/components/ui/panel-state";
 import Image from "next/image";
 import "./pnl-period-navigation.css";
@@ -30,6 +31,23 @@ const Reports = dynamic(() => import("@/components/screens/reports").then((modul
 const Sales = dynamic(() => import("@/components/screens/sales").then((module) => module.Sales), { loading: screenLoading });
 const SettingsView = dynamic(() => import("@/components/screens/settings").then((module) => module.SettingsView), { loading: screenLoading });
 const UTMAnalysis = dynamic(() => import("@/components/screens/utm-analysis").then((module) => module.UTMAnalysis), { loading: screenLoading });
+
+// Importing a screen's module early downloads its chunk, so opening it later is instant.
+const screenLoaders: Partial<Record<View, () => Promise<unknown>>> = {
+  "Overview": () => import("@/components/screens/overview"),
+  "Profit & Loss": () => import("@/components/screens/profit-loss"),
+  "Sales": () => import("@/components/screens/sales"),
+  "UTM Analysis": () => import("@/components/screens/utm-analysis"),
+  "Products": () => import("@/components/screens/products"),
+  "Customers": () => import("@/components/screens/customers"),
+  "Costs": () => import("@/components/screens/costs"),
+  "Expenses": () => import("@/components/screens/expenses"),
+  "Reports": () => import("@/components/screens/reports"),
+  "Connections": () => import("@/components/screens/connections"),
+  "Settings": () => import("@/components/screens/settings"),
+  "Leads": () => import("@/components/screens/leads"),
+};
+const preloadScreen = (view: View) => { void screenLoaders[view]?.().catch(() => undefined); };
 
 /** URL form of a view: "Profit & Loss" → "profit-loss". Overview is the bare /protected. */
 const viewSlug = (view: string) => view.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -62,6 +80,17 @@ export function AnalyticsApp() {
   const slug = slugFromPath(pathname);
   const view: View = viewFromSlug(slug) ?? "Overview";
   const goTo = useCallback((next: View) => router.push(viewHref(next)), [router]);
+  useEffect(() => {
+    // Once the first screen has settled, warm the biggest screens while the browser is idle.
+    const warm = () => { preloadScreen("Overview"); preloadScreen("Profit & Loss"); };
+    // Safari has no requestIdleCallback.
+    if (typeof window.requestIdleCallback === "function") {
+      const handle = window.requestIdleCallback(warm, { timeout: 4_000 });
+      return () => window.cancelIdleCallback(handle);
+    }
+    const timeout = globalThis.setTimeout(warm, 2_000);
+    return () => globalThis.clearTimeout(timeout);
+  }, []);
   useEffect(() => {
     // Unknown slug, or a legacy ?view= link: normalise to the screen's own path.
     const legacy = new URLSearchParams(window.location.search).get("view");
@@ -156,11 +185,12 @@ export function AnalyticsApp() {
       setSwitchingStore(false);
       return;
     }
+    await clearQueryCache();
     window.location.reload();
   };
   const leadRangeLabel = leadDatePreset === "custom" && leadFrom && leadTo ? `${leadFrom} to ${leadTo}` : leadDatePreset === "all_imported" ? "All imported data" : ({ today: "Today", yesterday: "Yesterday", last_7_days: "Last 7 days", last_7_complete_days: "Last 7 complete days", last_30_days: "Last 30 days", last_30_complete_days: "Last 30 complete days", last_90_days: "Last 90 days", last_365_days: "Last 365 days", this_month: "This month", last_month: "Last month", custom: "Custom dates", all_imported: "All imported data" } as Record<FinanceDatePreset, string>)[leadDatePreset];
   const updateLeadPreset = (preset: FinanceDatePreset) => { setLeadDatePreset(preset); if (preset !== "custom") { const dates = financeDateRange(preset); setLeadFrom(dates.from); setLeadTo(dates.to); } };
-  const logout = async () => { await createClient().auth.signOut(); router.push("/auth/login"); router.refresh(); };
+  const logout = async () => { await clearQueryCache(); await createClient().auth.signOut(); router.push("/auth/login"); router.refresh(); };
   const openSync = () => { setDrilldown(null); goTo("Connections"); setMobileOpen(false); };
   const syncReportingNow = async () => {
     setSyncingReporting(true); setSyncError("");
@@ -178,7 +208,7 @@ export function AnalyticsApp() {
   const freshnessHeading = !freshness ? "SHOPIFY DATA" : !freshness.connected ? "SHOPIFY NOT CONNECTED" : freshness.latestStatus === "running" || freshness.latestStatus === "paused" ? "IMPORTING SHOPIFY" : freshness.latestStatus === "failed" || freshness.latestStatus === "interrupted" ? "SYNC NEEDS ATTENTION" : freshness.lastSuccessfulSync ? "SHOPIFY SYNCED" : "READY TO SYNC";
   const freshnessDetail = freshness?.latestStatus === "running" ? "Importing your Shopify catalogue and orders" : freshness?.latestStatus === "paused" ? "Continuing in the background each hour" : freshness?.latestStatus === "interrupted" ? "Open Connections to resume the saved import" : freshness?.lastSuccessfulSync ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(freshness.lastSuccessfulSync)) : freshness?.latestStatus === "failed" ? "Open Connections to review the failed sync" : "Open Connections to import Shopify data";
   return <div className="app-shell">
-    <aside className={mobileOpen?"sidebar open":"sidebar"}><div className="brand"><span className="brand-mark"><Image src="/spine-logo.png" alt="" width={34} height={34} priority /></span><span><b>Spine</b><small>The backbone of your business</small></span><button className="mobile-close" onClick={()=>setMobileOpen(false)}><X/></button></div><label className="store-switcher"><span className="store-icon"><ShoppingBag/></span><span><small>STORE</small><b>{switchingStore ? "Switching…" : activeStoreName}</b></span><select aria-label="Active store" value={workspace?.activeStoreId ?? ""} disabled={!workspace || switchingStore || workspace.stores.length < 2} onChange={(event)=>void switchStore(event.target.value)}>{workspace?.stores.map((store)=>{const organization=workspace?.organizations.find((candidate)=>candidate.id===store.organizationId);return <option key={store.id} value={store.id}>{organization && (workspace?.organizations.length ?? 0) > 1 ? `${organization.name} · ` : ""}{store.name}</option>})}</select><ChevronDown/></label><nav>{availableNav.map((item)=>{if(item.subItem&&!customersExpanded)return null;const isCustomers=item.label==="Customers";return <div key={item.label}>{item.section&&<span className="nav-section">{item.section}</span>}<Link href={viewHref(item.label)} className={`${view===item.label ? "nav-item active" : "nav-item"}${item.subItem ? " nav-sub-item" : ""}`} title={item.display ? item.label : undefined} aria-current={view===item.label ? "page" : undefined} onClick={()=>{if(isCustomers)setCustomersExpanded((expanded)=>!expanded);setActiveReportRun(null);setDrilldown(null);setMobileOpen(false)}}><item.icon/><span className="nav-label">{item.display ?? item.label}</span>{isCustomers&&<ChevronDown style={{marginLeft:"auto",transform:customersExpanded?"rotate(0deg)":"rotate(-90deg)",transition:"transform .2s"}}/>}</Link></div>})}</nav><div className="sidebar-bottom"><button className="nav-item" onClick={logout}><LogOut/><span>Sign out</span></button><div className="user-card"><div>{account.name.slice(0, 2).toUpperCase()}</div><span><b>{account.name}</b><small>{account.email}</small></span></div></div></aside>
+    <aside className={mobileOpen?"sidebar open":"sidebar"}><div className="brand"><span className="brand-mark"><Image src="/spine-logo.png" alt="" width={34} height={34} priority /></span><span><b>Spine</b><small>The backbone of your business</small></span><button className="mobile-close" onClick={()=>setMobileOpen(false)}><X/></button></div><label className="store-switcher"><span className="store-icon"><ShoppingBag/></span><span><small>STORE</small><b>{switchingStore ? "Switching…" : activeStoreName}</b></span><select aria-label="Active store" value={workspace?.activeStoreId ?? ""} disabled={!workspace || switchingStore || workspace.stores.length < 2} onChange={(event)=>void switchStore(event.target.value)}>{workspace?.stores.map((store)=>{const organization=workspace?.organizations.find((candidate)=>candidate.id===store.organizationId);return <option key={store.id} value={store.id}>{organization && (workspace?.organizations.length ?? 0) > 1 ? `${organization.name} · ` : ""}{store.name}</option>})}</select><ChevronDown/></label><nav>{availableNav.map((item)=>{if(item.subItem&&!customersExpanded)return null;const isCustomers=item.label==="Customers";return <div key={item.label}>{item.section&&<span className="nav-section">{item.section}</span>}<Link href={viewHref(item.label)} className={`${view===item.label ? "nav-item active" : "nav-item"}${item.subItem ? " nav-sub-item" : ""}`} title={item.display ? item.label : undefined} aria-current={view===item.label ? "page" : undefined} onMouseEnter={()=>preloadScreen(item.label)} onFocus={()=>preloadScreen(item.label)} onClick={()=>{if(isCustomers)setCustomersExpanded((expanded)=>!expanded);setActiveReportRun(null);setDrilldown(null);setMobileOpen(false)}}><item.icon/><span className="nav-label">{item.display ?? item.label}</span>{isCustomers&&<ChevronDown style={{marginLeft:"auto",transform:customersExpanded?"rotate(0deg)":"rotate(-90deg)",transition:"transform .2s"}}/>}</Link></div>})}</nav><div className="sidebar-bottom"><button className="nav-item" onClick={logout}><LogOut/><span>Sign out</span></button><div className="user-card"><div>{account.name.slice(0, 2).toUpperCase()}</div><span><b>{account.name}</b><small>{account.email}</small></span></div></div></aside>
     <main className="main"><header className="topbar"><button className="menu-button" onClick={()=>setMobileOpen(true)}><Menu/></button><div className="breadcrumb"><span>{activeStoreName}</span><b>/</b><strong>{view}</strong></div><div className="top-actions">{businessModel === "lead_generation" && <div className="global-date-picker"><button className="date-button" title="Choose reporting period" onClick={() => setLeadDatePickerOpen((open) => !open)}><CalendarDays/><span>{leadRangeLabel}</span><ChevronDown/></button>{leadDatePickerOpen && <div className="global-date-menu"><label>Period<select value={leadDatePreset} onChange={(event) => updateLeadPreset(event.target.value as FinanceDatePreset)}><option value="all_imported">All imported data</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="last_7_days">Last 7 days</option><option value="last_30_days">Last 30 days</option><option value="last_90_days">Last 90 days</option><option value="last_365_days">Last 365 days</option><option value="this_month">This month</option><option value="last_month">Last month</option><option value="custom">Custom dates</option></select></label>{leadDatePreset === "custom" && <div className="global-date-custom"><label>From<input type="date" value={leadFrom} onChange={(event) => setLeadFrom(event.target.value)}/></label><label>To<input type="date" value={leadTo} onChange={(event) => setLeadTo(event.target.value)}/></label></div>}<button className="primary" onClick={() => setLeadDatePickerOpen(false)}>Apply period</button></div>}</div>}{businessModel && <button className="export-button" disabled={syncingReporting} onClick={() => void syncReportingNow()} title={businessModel === "lead_generation" ? "Refresh GoHighLevel and ad reporting data now" : "Refresh Shopify, Meta, Google and Microsoft Ads reporting data now"}><RefreshCw className={syncingReporting ? "spin" : ""}/> {syncingReporting ? "Syncing…" : "Sync now"}</button>}<button className="icon-button" onClick={openSync} title="Open Shopify sync"><RefreshCw/></button><button className="export-button" onClick={()=>goTo("Reports")}><Table2/> Reports</button></div></header>
     {syncError && <div className="connection-error" style={{margin:"0 32px"}}>{syncError}</div>}
       <div className="content"><div className="page-heading"><div><span className="eyebrow">{businessModel === "lead_generation" ? "LEAD GENERATION INTELLIGENCE" : "ECOMMERCE INTELLIGENCE"}</span><h1>{view}</h1><p>{view==="Leads"?"A standalone view of ad cost against your selected GoHighLevel conversion.":view==="Overview"?(businessModel === "lead_generation" ? "Monitor GoHighLevel stage volumes, paid-media efficiency and pipeline value." : "A clear view of what your store earned—not just what it sold."):view==="UTM Analysis"?"Understand which traffic sources create profitable customers.":view==="Profit & Loss"?"Your ecommerce income statement, based on all imported Shopify data.":`Manage and analyse your ${view.toLowerCase()}.`}</p></div><div className="freshness"><span className={freshness?.latestStatus === "failed" ? "sync-dot syncing" : "sync-dot"}/><div><small>{freshnessHeading}</small><b>{freshnessDetail}</b>{freshness?.reporting && freshness.reporting.sources.length > 0 && <ul className="source-chips" aria-label="Reporting sources">{freshness.reporting.sources.map((item) => <li key={item.source} className={`source-chip ${item.status}`} title={item.status === "failed" ? `Last refresh failed: ${item.message ?? "unknown error"}` : item.lastRefreshedAt ? `Refreshed ${new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.lastRefreshedAt))}` : "Waiting for the first background refresh"}><span aria-hidden="true"/>{item.label}</li>)}</ul>}</div></div></div>

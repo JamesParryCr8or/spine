@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { StatCardSkeleton } from "@/components/ui/skeleton";
 import { reportingPeriods, type ReportingGranularity } from "@/lib/analytics/reporting-periods";
 import { useResetOnChange } from "@/lib/use-reset-on-change";
+import { fetchJson, peekJson } from "@/lib/queries/client";
 import { BarChart3, CircleDollarSign, Download, ExternalLink, Info, Megaphone, Package, Settings, Sparkles, TrendingUp, Users, WalletCards } from "lucide-react";
 import { type View, type DrilldownContext, default365DayRange, type FinanceDatePreset, financeDateRange, Trend, downloadCsv, useReportRun, type CurrencyCoverage, type CurrencyConversionCoverage, type PnlData, type PnlPeriodData, pnlSeriesKey, fetchPnlSeries, type UtmData, type ProductData, type CustomerData } from "@/components/analytics/shared";
-import { PanelState } from "@/components/ui/panel-state";
+import { PanelState, UpdatingChip } from "@/components/ui/panel-state";
 
 type OverviewWidgetId = "channel" | "products" | "customers" | "costs";
 
@@ -122,6 +123,7 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
   const [trendData, setTrendData] = useState<PnlPeriodData[]>([]);
   const [trendLoading, setTrendLoading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
   const [customizingWidgets, setCustomizingWidgets] = useState(false);
@@ -197,28 +199,47 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
       comparisonSuffix = `?from=${previousStart.toISOString().slice(0, 10)}&to=${previousEnd.toISOString().slice(0, 10)}`;
     }
     const utmSuffix = params.size ? `?attribution=last_touch&${params}` : "?attribution=last_touch";
-    Promise.all([
-      fetch(`/api/analytics/overview${suffix}`).then(async (response) => response.ok ? response.json() as Promise<OverviewData> : null),
-      fetch(`/api/analytics/pnl${suffix}`).then(async (response) => response.ok ? response.json() as Promise<PnlData> : null),
-      comparisonSuffix ? fetch(`/api/analytics/overview${comparisonSuffix}`).then(async (response) => response.ok ? response.json() as Promise<OverviewData> : null) : Promise.resolve(null),
-      comparisonSuffix ? fetch(`/api/analytics/pnl${comparisonSuffix}`).then(async (response) => response.ok ? response.json() as Promise<PnlData> : null) : Promise.resolve(null),
-      fetch(`/api/analytics/products${suffix}`).then(async (response) => response.ok ? response.json() as Promise<ProductData> : null),
-      fetch(`/api/analytics/customers${suffix}`).then(async (response) => response.ok ? response.json() as Promise<CustomerData> : null),
-      fetch(`/api/analytics/utm${utmSuffix}`).then(async (response) => response.ok ? response.json() as Promise<UtmData> : null),
-    ])
-      .then(([overview, pnl, comparison, previousPnl, productsData, customersData, utmData]) => {
-        setLiveData(overview); setPnlSummary(pnl); setComparisonData(comparison); setPnlComparison(previousPnl);
-        setOverviewProducts(productsData); setOverviewCustomers(customersData); setOverviewUtm(utmData);
-        setLoadError(!overview);
-        finishReportRun(overview ? "completed" : "failed", overview?.metrics.orders ?? null);
-      })
+    const urls: Array<string | null> = [
+      `/api/analytics/overview${suffix}`,
+      `/api/analytics/pnl${suffix}`,
+      comparisonSuffix ? `/api/analytics/overview${comparisonSuffix}` : null,
+      comparisonSuffix ? `/api/analytics/pnl${comparisonSuffix}` : null,
+      `/api/analytics/products${suffix}`,
+      `/api/analytics/customers${suffix}`,
+      `/api/analytics/utm${utmSuffix}`,
+    ];
+    const controller = new AbortController();
+    const show = (results: Array<unknown | null>) => {
+      const [overview, pnl, comparison, previousPnl, productsData, customersData, utmData] = results;
+      setLiveData(overview as OverviewData | null); setPnlSummary(pnl as PnlData | null);
+      setComparisonData(comparison as OverviewData | null); setPnlComparison(previousPnl as PnlData | null);
+      setOverviewProducts(productsData as ProductData | null); setOverviewCustomers(customersData as CustomerData | null); setOverviewUtm(utmData as UtmData | null);
+      setLoadError(!overview);
+    };
+    void (async () => {
+      // Paint the last real numbers immediately, then refresh behind them.
+      const cached = await Promise.all(urls.map((url) => url ? peekJson<unknown>(url) : Promise.resolve(null)));
+      if (controller.signal.aborted) return;
+      if (cached[0]) {
+        show(cached.map((entry) => entry?.data ?? null));
+        setLoading(false);
+        if (!cached.every((entry, index) => !urls[index] || entry?.fresh)) setRefreshing(true);
+      }
+      // One failed panel degrades to its cached copy (or nothing), as before.
+      const results = await Promise.all(urls.map((url, index) => url ? fetchJson<unknown>(url, { signal: controller.signal }).catch(() => cached[index]?.data ?? null) : Promise.resolve(null)));
+      if (controller.signal.aborted) return;
+      show(results);
+      const overview = results[0] as OverviewData | null;
+      finishReportRun(overview ? "completed" : "failed", overview?.metrics.orders ?? null);
+    })()
       .catch(() => {
-        setLiveData(null); setPnlSummary(null); setComparisonData(null); setPnlComparison(null);
-        setOverviewProducts(null); setOverviewCustomers(null); setOverviewUtm(null);
+        if (controller.signal.aborted) return;
+        show([null, null, null, null, null, null, null]);
         setLoadError(true);
         finishReportRun("failed", null, "Overview data could not be loaded");
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!controller.signal.aborted) { setLoading(false); setRefreshing(false); } });
+    return () => controller.abort();
   }, [finishReportRun, fromDate, toDate, retryToken]);
 
   useEffect(() => {
@@ -384,6 +405,7 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
   return <>
     <section className="filter-row pnl-period finance-date-controls"><label>Period<select aria-label="Date period" value={datePreset} onChange={(event) => applyDatePreset(event.target.value as FinanceDatePreset)}><option value="last_7_days">Last 7 days (today)</option><option value="last_7_complete_days">Last 7 complete days</option><option value="last_30_days">Last 30 days (today)</option><option value="last_30_complete_days">Last 30 complete days</option><option value="last_90_days">Last 90 days</option><option value="last_365_days">Last 365 days</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="this_month">This month</option><option value="last_month">Last month</option><option value="all_imported">All imported data</option><option value="custom">Custom dates</option></select></label><label>From<input type="date" value={fromDate} onChange={(event) => { setDatePreset("custom"); setLoading(true); setFromDate(event.target.value); }}/></label><label>To<input type="date" value={toDate} onChange={(event) => { setDatePreset("custom"); setLoading(true); setToDate(event.target.value); }}/></label><label>Group by<select aria-label="Overview trend granularity" value={granularity} onChange={(event) => setGranularity(event.target.value as ReportingGranularity)}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></label>{fromDate && toDate ? <span className="report-note">Compared with the immediately preceding period.</span> : null}</section>
     {trendLoading && !loading ? <PanelState status="loading" message="Calculating trend periods…"/> : null}
+    <UpdatingChip show={refreshing}/>
     {!loading && loadError ? <PanelState status="error" title="Your Shopify summary could not be loaded" message="Check your connection and try again." onRetry={() => setRetryToken((token) => token + 1)}/> : null}
     {!loading && !loadError && !hasLiveData && liveData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to start your live dashboard</strong><span>Live sales and orders will appear here after your first sync.</span></div></div> : null}
     {liveData?.currencyCoverage.convertedOrders ? <div className="connection-notice"><Info/><div><strong>{liveData.currencyCoverage.convertedOrders.toLocaleString()} orders converted to {liveData.currency}</strong><span>Historical rates applied: {liveData.currencyCoverage.convertedCurrencies.map((item) => `${item.currency} (${item.orders.toLocaleString()})`).join(", ")}.</span></div></div> : null}{liveData?.currencyCoverage.excludedOrders ? <div className="connection-notice"><Info/><div><strong>{liveData.currencyCoverage.excludedOrders.toLocaleString()} orders excluded from financial totals</strong><span>Reporting currency is {liveData.currency}. Excluded: {liveData.currencyCoverage.excludedCurrencies.map((item) => `${item.currency} (${item.orders.toLocaleString()})`).join(", ")}. Add explicit exchange rates before consolidating these orders.</span></div></div> : null}{liveData?.marketingCurrencyCoverage.convertedRows ? <div className="connection-notice"><Info/><div><strong>{liveData.marketingCurrencyCoverage.convertedRows.toLocaleString()} advertising spend rows converted to {liveData.currency}</strong><span>Historical rates applied: {liveData.marketingCurrencyCoverage.convertedCurrencies.map((item) => `${item.currency} (${item.rows.toLocaleString()})`).join(", ")}.</span></div></div> : null}{liveData?.marketingCurrencyCoverage.excludedRows ? <div className="connection-notice"><Info/><div><strong>{liveData.marketingCurrencyCoverage.excludedRows.toLocaleString()} advertising spend rows excluded</strong><span>Missing dated rates: {liveData.marketingCurrencyCoverage.excludedCurrencies.map((item) => `${item.currency} (${item.rows.toLocaleString()})`).join(", ")}.</span></div></div> : null}
