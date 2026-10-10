@@ -16,8 +16,8 @@ export type InsightOrder = {
   discounts: number;
   /** 1 = the customer's first order, >1 = repeat, null = unknown. */
   customerIndex: number | null;
-  /** Lower-cased email domain of the customer, or null for guests. */
-  emailDomain: string | null;
+  /** Storefront (Shopify Markets) domain the customer landed on, or null when no visit was tracked. */
+  storeDomain: string | null;
 };
 
 export type InsightLine = {
@@ -33,7 +33,7 @@ export type InsightLine = {
 export type RankRow = { label: string; orders: number; sales: number };
 export type ComboRow = { a: string; b: string; orders: number; netSales: number; /** Share of orders containing the rarer product that also contain the other. */ confidence: number };
 export type TimeBucket = { orders: number; sales: number };
-export type DomainRow = { domain: string; customers: number; orders: number; sales: number; freeProvider: boolean };
+export type DomainRow = { domain: string; orders: number; sales: number; aov: number };
 export type MarginRow = { product: string; units: number; sales: number; cogs: number; margin: number; marginPct: number };
 
 export type SalesInsights = {
@@ -41,7 +41,7 @@ export type SalesInsights = {
   combos: ComboRow[];
   byHour: TimeBucket[];
   byWeekday: TimeBucket[];
-  domains: DomainRow[];
+  domains: { rows: DomainRow[]; /** Share of orders with a known storefront domain. */ coverage: number };
   margin: { rows: MarginRow[]; incompleteProducts: number; costedShare: number };
   countries: RankRow[];
   channels: RankRow[];
@@ -49,17 +49,15 @@ export type SalesInsights = {
   customerTypes: RankRow[];
 };
 
-const freeProviders = new Set([
-  "gmail.com", "googlemail.com", "yahoo.com", "yahoo.co.uk", "ymail.com", "hotmail.com", "hotmail.co.uk", "outlook.com", "outlook.co.uk",
-  "live.com", "live.co.uk", "msn.com", "icloud.com", "me.com", "mac.com", "aol.com", "btinternet.com", "sky.com", "virginmedia.com",
-  "talktalk.net", "ntlworld.com", "proton.me", "protonmail.com", "gmx.com", "mail.com", "tiscali.co.uk", "blueyonder.co.uk",
-]);
-
-export function emailDomain(email: string | null | undefined): string | null {
-  const at = email?.lastIndexOf("@") ?? -1;
-  if (!email || at < 0) return null;
-  const domain = email.slice(at + 1).trim().toLowerCase();
-  return domain.includes(".") ? domain : null;
+/** Storefront host of a landing-page URL ("www." stripped), or null if it has no host. */
+export function storeDomainFromUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const host = new URL(value).hostname.toLowerCase().replace(/^www\./, "");
+    return host.includes(".") ? host : null;
+  } catch {
+    return null;
+  }
 }
 
 const round2 = (value: number) => Math.round(value * 100) / 100;
@@ -92,7 +90,8 @@ export function computeSalesInsights(orders: InsightOrder[], lines: InsightLine[
   const channels = new Map<string, { orders: Set<string>; sales: number }>();
   const customerTypes = new Map<string, { orders: Set<string>; sales: number }>();
   const codes = new Map<string, { orders: Set<string>; sales: number; discounts: number }>();
-  const domains = new Map<string, { customers: Set<string>; orders: number; sales: number }>();
+  const domains = new Map<string, { orders: number; sales: number }>();
+  let withDomain = 0;
   let netSales = 0, discounted = 0, known = 0, repeat = 0;
 
   for (const order of orders) {
@@ -113,12 +112,12 @@ export function computeSalesInsights(orders: InsightOrder[], lines: InsightLine[
       row.discounts += order.discounts / orderCodes.length;
       codes.set(code, row);
     }
-    if (order.emailDomain) {
-      const row = domains.get(order.emailDomain) ?? { customers: new Set<string>(), orders: 0, sales: 0 };
-      row.customers.add(order.customerId ?? order.id);
+    if (order.storeDomain) {
+      withDomain += 1;
+      const row = domains.get(order.storeDomain) ?? { orders: 0, sales: 0 };
       row.orders += 1;
       row.sales += order.netSales;
-      domains.set(order.emailDomain, row);
+      domains.set(order.storeDomain, row);
     }
   }
 
@@ -181,7 +180,7 @@ export function computeSalesInsights(orders: InsightOrder[], lines: InsightLine[
     marginRows.push({ product: row.product, units: row.units, sales: round2(row.sales), cogs: round2(row.cogs), margin: round2(row.sales - row.cogs), marginPct: (row.sales - row.cogs) / row.sales });
   }
 
-  const domainRows = topBy([...domains].map(([domain, row]) => ({ domain, customers: row.customers.size, orders: row.orders, sales: round2(row.sales), freeProvider: freeProviders.has(domain) })), (row) => row.sales, 40);
+  const domainRows = topBy([...domains].map(([domain, row]) => ({ domain, orders: row.orders, sales: round2(row.sales), aov: row.orders ? row.sales / row.orders : 0 })), (row) => row.sales, 20);
   const discountRows = topBy([...codes].map(([label, row]) => ({ label, orders: row.orders.size, sales: round2(row.sales), discounts: round2(row.discounts) })), (row) => row.sales, 12);
 
   return {
@@ -198,7 +197,7 @@ export function computeSalesInsights(orders: InsightOrder[], lines: InsightLine[
     combos,
     byHour: byHour.map((bucket) => ({ orders: bucket.orders, sales: round2(bucket.sales) })),
     byWeekday: byWeekday.map((bucket) => ({ orders: bucket.orders, sales: round2(bucket.sales) })),
-    domains: domainRows,
+    domains: { rows: domainRows, coverage: orders.length ? withDomain / orders.length : 0 },
     margin: { rows: topBy(marginRows, (row) => row.margin, 100), incompleteProducts, costedShare: totalLineSales > 0 ? costedSales / totalLineSales : 0 },
     countries: rank(countries, 10),
     channels: rank(channels, 8),

@@ -49,7 +49,6 @@ export function Sales({ reportRunId }: { reportRunId?: string }) {
   const [refreshing, setRefreshing] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
   const [timeMetric, setTimeMetric] = useState<"sales" | "orders">("sales");
-  const [businessOnly, setBusinessOnly] = useState(true);
   const [marginSort, setMarginSort] = useState<"margin" | "marginPct">("margin");
 
   useResetOnChange(`${fromDate}|${toDate}|${retryToken}`, () => { setData(null); setLoadError(""); });
@@ -99,7 +98,7 @@ export function Sales({ reportRunId }: { reportRunId?: string }) {
   const dayLabels = weekdayNames.map((name) => name.slice(0, 3));
   const peakHour = data.byHour.reduce((best, bucket, hour) => bucket[timeMetric] > data.byHour[best][timeMetric] ? hour : best, 0);
   const peakDay = data.byWeekday.reduce((best, bucket, day) => bucket[timeMetric] > data.byWeekday[best][timeMetric] ? day : best, 0);
-  const domains: DomainRow[] = (businessOnly ? data.domains.filter((row) => !row.freeProvider) : data.domains).slice(0, 10);
+  const domains: DomainRow[] = data.domains.rows.slice(0, 10);
   const maxDomain = Math.max(0, ...domains.map((row) => row.sales));
   const marginRows: MarginRow[] = [...data.margin.rows].sort((left, right) => right[marginSort] - left[marginSort]).slice(0, 10);
   const maxMargin = Math.max(0, ...marginRows.map((row) => row.margin));
@@ -133,9 +132,9 @@ export function Sales({ reportRunId }: { reportRunId?: string }) {
       </article>
 
       <article className="panel report-panel insight-panel">
-        <div className="panel-head"><div><span className="eyebrow">CUSTOMERS</span><h2>Email domains by revenue</h2></div><label className="inline-toggle"><input type="checkbox" checked={businessOnly} onChange={(event) => setBusinessOnly(event.target.checked)}/> Business only</label></div>
-        <span className="report-note insight-note">{businessOnly ? "Gmail, Outlook and other free providers are hidden, so clinics, salons and companies stand out." : "All customer email domains."}</span>
-        {domains.length ? <ul className="rank-list">{domains.map((row) => <li key={row.domain}><div><strong>{row.domain}</strong><span>{money.format(row.sales)} · {row.customers.toLocaleString()} customer{row.customers === 1 ? "" : "s"} · {row.orders.toLocaleString()} orders</span></div><Bar value={row.sales} max={maxDomain}/></li>)}</ul> : <PanelState status="empty" title="No matching domains" message={businessOnly ? "Every customer in this period uses a free email provider." : "No customer emails were found."}/>}
+        <div className="panel-head"><div><span className="eyebrow">MARKETS</span><h2>Store domains by revenue</h2></div></div>
+        <span className="report-note insight-note">The storefront domain each order&apos;s visit landed on, so you can compare your Shopify Markets. Covers {percent(data.domains.coverage)} of orders; the rest have no tracked visit.</span>
+        {domains.length ? <ul className="rank-list">{domains.map((row) => <li key={row.domain}><div><strong>{row.domain}</strong><span>{money.format(row.sales)} · {row.orders.toLocaleString()} orders · {money2.format(row.aov)} average order</span></div><Bar value={row.sales} max={maxDomain}/></li>)}</ul> : <PanelState status="empty" title="No storefront domains recorded" message="Shopify did not report a landing page for orders in this period."/>}
       </article>
 
       <article className="panel report-panel insight-panel">

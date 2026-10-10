@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { costKey, monetary, resolveEffectiveCost, type EffectiveCost } from "@/lib/analytics/effective-cost";
 import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
-import { computeSalesInsights, emailDomain, type InsightLine, type InsightOrder } from "@/lib/analytics/sales-insights";
+import { computeSalesInsights, storeDomainFromUrl, type InsightLine, type InsightOrder } from "@/lib/analytics/sales-insights";
 import { selectAllPages } from "@/lib/supabase/select-all";
 import { selectOrdersByProcessedAt } from "@/lib/supabase/select-orders";
 import { requireWorkspace } from "@/lib/workspace/server";
@@ -54,22 +54,20 @@ export async function GET(request: Request) {
   if (ordersError) return NextResponse.json({ error: ordersError }, { status: 500 });
 
   const orderChunks = chunks(orderRows.map((order) => order.id), 200);
-  const customerChunks = chunks([...new Set(orderRows.flatMap((order) => order.customer_id ? [order.customer_id] : []))], 200);
-  const [lineResult, refundResult, attributionResult, customerResult, variantResult, costResult] = await Promise.all([
+  const [lineResult, refundResult, attributionResult, variantResult, costResult] = await Promise.all([
     selectAllPages<LineRow>((range) => Promise.all(orderChunks.map((ids) => supabase.from("shopify_order_lines").select("order_id,product_gid,title,variant_gid,sku,current_quantity,net_sales").in("order_id", ids).order("id", { ascending: true }).range(range.from, range.to))).then(mergeChunkPages)),
     selectAllPages<{ order_id: string; total_refunded: string | number }>((range) => Promise.all(orderChunks.map((ids) => supabase.from("shopify_refunds").select("order_id,total_refunded").in("order_id", ids).order("id", { ascending: true }).range(range.from, range.to))).then(mergeChunkPages)),
-    selectAllPages<{ order_id: string; customer_order_index: number | null }>((range) => Promise.all(orderChunks.map((ids) => supabase.from("shopify_order_attribution").select("order_id,customer_order_index").eq("attribution_model", "last_touch").in("order_id", ids).order("id", { ascending: true }).range(range.from, range.to))).then(mergeChunkPages)),
-    selectAllPages<{ id: string; email: string | null }>((range) => Promise.all(customerChunks.map((ids) => supabase.from("shopify_customers").select("id,email").in("id", ids).order("id", { ascending: true }).range(range.from, range.to))).then(mergeChunkPages)),
+    selectAllPages<{ order_id: string; customer_order_index: number | null; landing_page: string | null }>((range) => Promise.all(orderChunks.map((ids) => supabase.from("shopify_order_attribution").select("order_id,customer_order_index,landing_page").eq("attribution_model", "last_touch").in("order_id", ids).order("id", { ascending: true }).range(range.from, range.to))).then(mergeChunkPages)),
     selectAllPages<{ id: string; shopify_gid: string; sku: string | null; shopify_unit_cost: string | null }>((range) => supabase.from("shopify_variants").select("id,shopify_gid,sku,shopify_unit_cost").eq("store_id", store.id).order("id", { ascending: true }).range(range.from, range.to)),
     selectAllPages<EffectiveCost>((range) => supabase.from("product_costs").select("variant_id,sku,amount,effective_from,effective_to,source").eq("store_id", store.id).order("id", { ascending: true }).range(range.from, range.to)),
   ]);
-  const failure = [lineResult, refundResult, attributionResult, customerResult, variantResult, costResult].find((result) => result.error)?.error;
+  const failure = [lineResult, refundResult, attributionResult, variantResult, costResult].find((result) => result.error)?.error;
   if (failure) return NextResponse.json({ error: failure }, { status: 500 });
 
   const refunds = new Map<string, number>();
   for (const refund of refundResult.rows) refunds.set(refund.order_id, (refunds.get(refund.order_id) ?? 0) + Number(refund.total_refunded));
   const indexByOrder = new Map(attributionResult.rows.map((row) => [row.order_id, row.customer_order_index]));
-  const domainByCustomer = new Map(customerResult.rows.map((customer) => [customer.id, emailDomain(customer.email)]));
+  const domainByOrder = new Map(attributionResult.rows.map((row) => [row.order_id, storeDomainFromUrl(row.landing_page)]));
 
   const variantsByGid = new Map(variantResult.rows.map((variant) => [variant.shopify_gid, variant]));
   const variantsBySku = new Map(variantResult.rows.filter((variant) => variant.sku).map((variant) => [variant.sku!.trim().toLowerCase(), variant]));
@@ -90,7 +88,7 @@ export async function GET(request: Request) {
     netSales: Number(order.net_product_sales) - (refunds.get(order.id) ?? 0),
     discounts: Number(order.discounts),
     customerIndex: indexByOrder.get(order.id) ?? null,
-    emailDomain: order.customer_id ? domainByCustomer.get(order.customer_id) ?? null : null,
+    storeDomain: domainByOrder.get(order.id) ?? null,
   }));
   const lines: InsightLine[] = lineResult.rows.flatMap((line) => {
     const processedAt = processedByOrder.get(line.order_id);

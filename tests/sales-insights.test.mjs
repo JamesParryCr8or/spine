@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { computeSalesInsights, emailDomain } from "../lib/analytics/sales-insights.ts";
+import { computeSalesInsights, storeDomainFromUrl } from "../lib/analytics/sales-insights.ts";
 
-const order = (id, extra = {}) => ({ id, customerId: `c-${id}`, processedAt: "2026-07-10T09:30:00Z", source: "web", country: "GB", discountCodes: [], netSales: 100, discounts: 0, customerIndex: 1, emailDomain: null, ...extra });
+const order = (id, extra = {}) => ({ id, customerId: `c-${id}`, processedAt: "2026-07-10T09:30:00Z", source: "web", country: "GB", discountCodes: [], netSales: 100, discounts: 0, customerIndex: 1, storeDomain: null, ...extra });
 const line = (orderId, key, extra = {}) => ({ orderId, productKey: key, product: key.toUpperCase(), units: 1, netSales: 50, unitCost: 20, ...extra });
 
-test("emailDomain lowercases and rejects junk", () => {
-  assert.equal(emailDomain("Jo@Clinic.CO.uk"), "clinic.co.uk");
-  assert.equal(emailDomain("nope"), null);
-  assert.equal(emailDomain(null), null);
+test("storeDomainFromUrl takes the host and drops www", () => {
+  assert.equal(storeDomainFromUrl("https://www.Hairmax.co.uk/products/laser?x=1"), "hairmax.co.uk");
+  assert.equal(storeDomainFromUrl("/products/laser"), null);
+  assert.equal(storeDomainFromUrl(null), null);
 });
 
 test("hour and weekday use the store timezone", () => {
@@ -40,14 +40,14 @@ test("a product with any unit missing a cost is not ranked for margin", () => {
   assert.equal(margin.rows[0].marginPct, 0.6);
 });
 
-test("domains group revenue and flag free providers", () => {
-  const orders = [order("1", { emailDomain: "clinic.co.uk", netSales: 300 }), order("2", { emailDomain: "clinic.co.uk", customerId: "c-1", netSales: 100 }), order("3", { emailDomain: "gmail.com", netSales: 50 })];
+test("storefront domains rank by revenue and report coverage", () => {
+  const orders = [order("1", { storeDomain: "hairmax.co.uk", netSales: 300 }), order("2", { storeDomain: "hairmax.co.uk", netSales: 100 }), order("3", { storeDomain: "hairmax.eu", netSales: 50 }), order("4")];
   const { domains } = computeSalesInsights(orders, [], "UTC");
-  assert.equal(domains[0].domain, "clinic.co.uk");
-  assert.equal(domains[0].sales, 400);
-  assert.equal(domains[0].orders, 2);
-  assert.equal(domains[0].freeProvider, false);
-  assert.equal(domains[1].freeProvider, true);
+  assert.equal(domains.rows[0].domain, "hairmax.co.uk");
+  assert.equal(domains.rows[0].sales, 400);
+  assert.equal(domains.rows[0].orders, 2);
+  assert.equal(domains.rows[0].aov, 200);
+  assert.equal(domains.coverage, 0.75);
 });
 
 test("repeat rate ignores orders with unknown customer index", () => {
