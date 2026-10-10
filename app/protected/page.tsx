@@ -1,7 +1,5 @@
-import { AnalyticsApp } from "@/components/analytics-app";
-
-export default async function ProtectedPage({ searchParams }: { searchParams: Promise<{ [key: string]: string | string[] | undefined }> }) {
-  const { view } = await searchParams;
-  // ?view= picks the screen, so a refresh or shared link reopens it.
-  return <AnalyticsApp initialViewSlug={typeof view === "string" ? view : null} />;
+// The screen itself is rendered by the persistent shell in layout.tsx, which
+// reads it from the URL; this page only exists so /protected is a route.
+export default function ProtectedPage() {
+  return null;
 }

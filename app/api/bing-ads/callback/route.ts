@@ -6,7 +6,7 @@ const stateCookie = "spine-bing-ads-oauth-state";
 const verifierCookie = "spine-bing-ads-oauth-verifier";
 type AccountsPayload = { Error?: { Message?: string } };
 
-function fail(request: Request, message: string) { const url = new URL("/protected", request.url); url.searchParams.set("bingAdsError", message); return NextResponse.redirect(url); }
+function fail(request: Request, message: string) { const url = new URL("/protected/connections", request.url); url.searchParams.set("bingAdsError", message); return NextResponse.redirect(url); }
 function headers(accessToken: string, developerToken: string) { return { Authorization: `Bearer ${accessToken}`, "DeveloperToken": developerToken, "Content-Type": "application/json" }; }
 
 export async function GET(request: Request) {
@@ -40,7 +40,7 @@ export async function GET(request: Request) {
   await workspace.supabase.from("bing_ads_accounts").delete().eq("store_id", workspace.store.id);
   const { error: accountError } = await workspace.supabase.from("bing_ads_accounts").insert(selected);
   if (accountError) return fail(request, "Microsoft Advertising connected but account choices could not be saved");
-  const next = new URL("/protected?bingAds=select", request.url);
+  const next = new URL("/protected/connections?bingAds=select", request.url);
   const response = NextResponse.redirect(next);
   const cookieOptions = { httpOnly: true, sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", maxAge: 0 };
   response.cookies.set(stateCookie, "", cookieOptions); response.cookies.set(verifierCookie, "", cookieOptions);

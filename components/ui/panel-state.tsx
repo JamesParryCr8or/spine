@@ -43,3 +43,9 @@ export function PanelState(props: PanelStateProps) {
     </div>
   );
 }
+
+/** Small "Updating…" pill shown while cached numbers are on screen and fresh ones load. */
+export function UpdatingChip({ show }: { show: boolean }) {
+  if (!show) return null;
+  return <span className="updating-chip" role="status" aria-live="polite"><span aria-hidden="true"/>Updating…</span>;
+}

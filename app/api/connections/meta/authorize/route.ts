@@ -6,7 +6,7 @@ import { canManageConnections } from "@/lib/workspace/permissions";
 const stateCookie = "spine_meta_oauth_state";
 
 const errorRedirect = (request: NextRequest, message: string) => {
-  const url = new URL("/protected", request.url);
+  const url = new URL("/protected/connections", request.url);
   url.searchParams.set("metaOAuth", "error");
   url.searchParams.set("metaError", message);
   return NextResponse.redirect(url);

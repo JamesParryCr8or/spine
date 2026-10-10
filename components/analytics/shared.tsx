@@ -3,6 +3,7 @@
 import { useCallback, useRef } from "react";
 import { type ReportingGranularity, type ReportingPeriod } from "@/lib/analytics/reporting-periods";
 import { ArrowDownRight, ArrowUpRight, BarChart3, CalendarDays, Database, FileBarChart, Info, LayoutDashboard, Megaphone, Package, PhoneCall, Settings, ShoppingBag, Table2, TrendingUp, Users, WalletCards } from "lucide-react";
+import { fetchJson } from "@/lib/queries/client";
 
 export type View = "Revenue & Costs" | "Overview" | "Profit & Loss" | "Sales" | "UTM Analysis" | "Products" | "Leads" | "Pipeline outcomes" | "Stage ageing" | "Lead sources" | "Sales team" | "Forecast" | "Lost reasons" | "Follow-ups" | "Customers" | "Customer cohorts" | "Repurchase rates" | "Time between orders" | "Product journeys" | "New versus repeat sales" | "Top Shopify customers" | "Sales by country" | "Costs" | "Expenses" | "Reports" | "Connections" | "Settings" | "Team";
 
@@ -165,9 +166,7 @@ export async function fetchPnlSeries(periods: Array<{ start: string; end: string
   const results = new Map<string, PnlData>();
   for (let index = 0; index < periods.length; index += 120) {
     const batch = periods.slice(index, index + 120).map(pnlSeriesKey).join(",");
-    const response = await fetch(`/api/analytics/pnl/series?periods=${batch}`, { signal });
-    if (!response.ok) throw new Error("P&L series could not be loaded");
-    const payload = await response.json() as { periods: Array<{ start: string; end: string; data: PnlData }> };
+    const payload = await fetchJson<{ periods: Array<{ start: string; end: string; data: PnlData }> }>(`/api/analytics/pnl/series?periods=${batch}`, { signal });
     for (const period of payload.periods) results.set(pnlSeriesKey(period), period.data);
   }
   return results;
