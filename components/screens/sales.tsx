@@ -1,69 +1,157 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { reportingPeriods, type ReportingGranularity } from "@/lib/analytics/reporting-periods";
-import { Download, Info, Search, ShoppingBag, X } from "lucide-react";
-import { default365DayRange, type FinanceDatePreset, financeDateRange, FinanceDateControls, downloadCsv, useReportRun } from "@/components/analytics/shared";
-import { PanelState } from "@/components/ui/panel-state";
-import { TableRowSkeleton } from "@/components/ui/skeleton";
+import { Info } from "lucide-react";
+import { default365DayRange, type FinanceDatePreset, financeDateRange, FinanceDateControls, useReportRun } from "@/components/analytics/shared";
+import { PanelState, UpdatingChip } from "@/components/ui/panel-state";
+import { fetchJson, peekJson } from "@/lib/queries/client";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
+import type { ComboRow, DomainRow, MarginRow, RankRow, SalesInsights, TimeBucket } from "@/lib/analytics/sales-insights";
 
-type SalesOrder = { id: string; order_name: string; processed_at: string | null; financial_status: string | null; fulfillment_status: string | null; source_name: string | null; net_product_sales: string; shipping_revenue: string; total_sales: string; currency: string; refunded: number };
+type InsightsData = SalesInsights & { hasData: boolean; currency: string; timezone: string };
 
-type SalesBreakdownDimension = "date" | "channel" | "customerType" | "country" | "discountCode" | "product";
+const weekdayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const percent = (value: number) => `${Math.round(value * 100)}%`;
 
-type SalesBreakdownRow = { label: string; orders: number; units: number; sales: number; refunds?: number; cogs?: number; paymentFees?: number; grossProfit?: number; salesWithoutRecordedCost?: number; missingCostLines?: number };
+/** Horizontal share bar: width is the row's value relative to the largest in its list. */
+function Bar({ value, max, tone = "purple" }: { value: number; max: number; tone?: "purple" | "green" }) {
+  return <i className={`insight-bar ${tone}`}><b style={{ width: `${max > 0 ? Math.max(2, Math.min(100, (value / max) * 100)) : 0}%` }}/></i>;
+}
 
-type SalesData = { hasData: boolean; currency: string; timezone: string; period: { start: string; end: string } | null; analysisOrderCount: number; dailySource: "shopifyql" | "imported_orders"; breakdowns: Record<SalesBreakdownDimension, SalesBreakdownRow[]>; orders: SalesOrder[] };
+function RankList({ title, eyebrow, rows, money, note }: { title: string; eyebrow: string; rows: RankRow[]; money: (value: number) => string; note?: string }) {
+  const max = Math.max(0, ...rows.map((row) => row.sales));
+  return <article className="panel report-panel insight-panel">
+    <div className="panel-head"><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2></div></div>
+    {note && <span className="report-note insight-note">{note}</span>}
+    {rows.length ? <ul className="rank-list">{rows.map((row) => <li key={row.label}><div><strong>{row.label}</strong><span>{money(row.sales)} · {row.orders.toLocaleString()} orders</span></div><Bar value={row.sales} max={max}/></li>)}</ul> : <PanelState status="empty" title="Nothing to show yet"/>}
+  </article>;
+}
 
-type OrderDetail = { currency: string; order: SalesOrder & { gross_sales: string; discounts: string; tax: string; duties: string }; lines: Array<{ id: string; title: string; variant_title: string | null; sku: string | null; current_quantity: number; net_sales: string; unitCost: number | null; cogs: number | null }>; metrics: { refunds: number; cogs: number; grossProfit: number; missingCostLines: number } };
+function TimeChart({ buckets, labels, metric, money }: { buckets: TimeBucket[]; labels: string[]; metric: "sales" | "orders"; money: (value: number) => string }) {
+  const values = buckets.map((bucket) => bucket[metric]);
+  const max = Math.max(0, ...values);
+  const peak = values.indexOf(max);
+  return <div className="time-chart" role="img" aria-label="Sales by time">
+    {buckets.map((bucket, index) => <div key={labels[index]} className={index === peak && max > 0 ? "peak" : ""} title={`${labels[index]}: ${metric === "sales" ? money(bucket.sales) : bucket.orders.toLocaleString()} ${metric === "sales" ? "" : "orders"}`}>
+      <b style={{ height: `${max > 0 ? Math.max(2, (values[index] / max) * 100) : 0}%` }}/>
+      <span>{labels[index]}</span>
+    </div>)}
+  </div>;
+}
 
 export function Sales({ reportRunId }: { reportRunId?: string }) {
   const finishReportRun = useReportRun(reportRunId);
-  const [data, setData] = useState<SalesData | null>(null);
-  const [search, setSearch] = useState("");
+  const [data, setData] = useState<InsightsData | null>(null);
   const [fromDate, setFromDate] = useState(default365DayRange.from);
   const [toDate, setToDate] = useState(default365DayRange.to);
   const [datePreset, setDatePreset] = useState<FinanceDatePreset>("last_365_days");
-  const [breakdownDimension, setBreakdownDimension] = useState<SalesBreakdownDimension>("date");
-  const [groupBy, setGroupBy] = useState<ReportingGranularity>("daily");
-  const [financialStatus, setFinancialStatus] = useState("all");
-  const [fulfilmentStatus, setFulfilmentStatus] = useState("all");
-  const [source, setSource] = useState("all");
-  const [refundFilter, setRefundFilter] = useState("all");
-  const [detail, setDetail] = useState<OrderDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [retryToken, setRetryToken] = useState(0);
+  const [timeMetric, setTimeMetric] = useState<"sales" | "orders">("sales");
+  const [marginSort, setMarginSort] = useState<"margin" | "marginPct">("margin");
+
+  useResetOnChange(`${fromDate}|${toDate}|${retryToken}`, () => { setData(null); setLoadError(""); });
   useEffect(() => {
     const params = new URLSearchParams();
     if (fromDate) params.set("from", fromDate);
     if (toDate) params.set("to", toDate);
-    fetch(`/api/analytics/orders${params.size ? `?${params}` : ""}`).then(async (response) => response.ok ? response.json() as Promise<SalesData> : null).then((payload) => { setData(payload); finishReportRun(payload ? "completed" : "failed", payload?.analysisOrderCount ?? null); }).catch(() => { setData(null); finishReportRun("failed", null, "Sales data could not be loaded"); });
-  }, [fromDate, toDate, finishReportRun]);
-  const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: detail?.currency || data?.currency || "GBP", maximumFractionDigits: 2 });
-  const orders = data?.orders ?? [];
-  const financialStatuses = [...new Set(orders.map((order) => order.financial_status || "Unknown"))].sort();
-  const fulfilmentStatuses = [...new Set(orders.map((order) => order.fulfillment_status || "Unknown"))].sort();
-  const sources = [...new Set(orders.map((order) => order.source_name || "Unknown"))].sort();
-  const visibleOrders = orders.filter((order) => `${order.order_name} ${order.financial_status ?? ""} ${order.fulfillment_status ?? ""}`.toLowerCase().includes(search.trim().toLowerCase()) && (financialStatus === "all" || (order.financial_status || "Unknown") === financialStatus) && (fulfilmentStatus === "all" || (order.fulfillment_status || "Unknown") === fulfilmentStatus) && (source === "all" || (order.source_name || "Unknown") === source) && (refundFilter === "all" || refundFilter === "refunded" && order.refunded > 0 || refundFilter === "not-refunded" && order.refunded === 0));
-  const dailyRows = data?.breakdowns.date ?? [];
-  const groupedDailyRows = (() => {
-    if (groupBy === "daily" || !data?.period || !dailyRows.length) return dailyRows;
-    const periods = reportingPeriods(data.period.start, data.period.end, groupBy, 1000);
-    return periods.map((period): SalesBreakdownRow => {
-      const rows = dailyRows.filter((row) => row.label >= period.start && row.label <= period.end);
-      const sum = (key: keyof SalesBreakdownRow) => rows.reduce((total, row) => total + Number(row[key] ?? 0), 0);
-      return { label: period.label, orders: sum("orders"), units: sum("units"), sales: sum("sales"), refunds: sum("refunds"), cogs: sum("cogs"), paymentFees: sum("paymentFees"), grossProfit: sum("grossProfit"), salesWithoutRecordedCost: sum("salesWithoutRecordedCost"), missingCostLines: sum("missingCostLines") };
-    }).filter((row) => row.orders || row.sales);
-  })();
-  const breakdownRows = breakdownDimension === "date" ? groupedDailyRows : data?.breakdowns[breakdownDimension] ?? [];
-  const breakdownLabels: Record<SalesBreakdownDimension, string> = { date: "Date", channel: "Sales channel", customerType: "Customer type", country: "Country", discountCode: "Discount code", product: "Product" };
-  const exportSales = () => downloadCsv("shopify-orders.csv", [["Report", "Sales orders"], ["Period", data?.period ? `${data.period.start} to ${data.period.end}` : "No imported orders"], ["Timezone", data?.timezone || "UTC"], ["Currency", data?.currency || "GBP"], ["Filters", [search.trim() ? `Search: ${search.trim()}` : "", financialStatus !== "all" ? `Payment: ${financialStatus}` : "", fulfilmentStatus !== "all" ? `Fulfilment: ${fulfilmentStatus}` : "", source !== "all" ? `Source: ${source}` : "", refundFilter !== "all" ? `Refunds: ${refundFilter}` : ""].filter(Boolean).join(" · ") || "None"], ["Generated at", new Date().toISOString()], [], ["Order", "Date", "Financial status", "Fulfilment status", "Source", "Product sales", "Refunds", "Shipping", "Total"], ...visibleOrders.map((order) => [order.order_name, order.processed_at || "", order.financial_status || "", order.fulfillment_status || "", order.source_name || "", Number(order.net_product_sales), order.refunded, Number(order.shipping_revenue), Number(order.total_sales)])]);
-  const openDetail = async (id: string) => { setDetail(null); setDetailError(""); setDetailLoading(true); try { const response = await fetch(`/api/analytics/orders/${encodeURIComponent(id)}`); const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Could not load order"); setDetail(payload); } catch (reason) { setDetailError(reason instanceof Error ? reason.message : "Could not load order"); } finally { setDetailLoading(false); } };
-  const applySalesDatePreset = (preset: FinanceDatePreset) => {
+    const url = `/api/analytics/sales-insights${params.size ? `?${params}` : ""}`;
+    const controller = new AbortController();
+    void (async () => {
+      // Paint the last real numbers immediately, then refresh behind them.
+      const cached = await peekJson<InsightsData>(url);
+      if (controller.signal.aborted) return;
+      if (cached) { setData(cached.data); if (!cached.fresh) setRefreshing(true); }
+      try {
+        const payload = await fetchJson<InsightsData>(url, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        setData(payload);
+        finishReportRun("completed", payload.summary.orders);
+      } catch (reason) {
+        if (controller.signal.aborted) return;
+        if (!cached) { setLoadError(reason instanceof Error ? reason.message : "Sales insights could not be loaded"); finishReportRun("failed", null, "Sales insights could not be loaded"); }
+      } finally {
+        if (!controller.signal.aborted) setRefreshing(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [fromDate, toDate, retryToken, finishReportRun]);
+
+  const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: data?.currency || "GBP", maximumFractionDigits: 0 });
+  const money2 = new Intl.NumberFormat("en-GB", { style: "currency", currency: data?.currency || "GBP", maximumFractionDigits: 2 });
+  const applyPreset = (preset: FinanceDatePreset) => {
     setDatePreset(preset);
     if (preset === "custom") return;
     const range = financeDateRange(preset);
     setFromDate(range.from); setToDate(range.to);
   };
-  return <><FinanceDateControls preset={datePreset} from={fromDate} to={toDate} onPreset={applySalesDatePreset} onFrom={(value) => { setDatePreset("custom"); setFromDate(value); }} onTo={(value) => { setDatePreset("custom"); setToDate(value); }} groupBy={groupBy} onGroupBy={setGroupBy}/><section className="panel report-panel sales-breakdown"><div className="panel-head"><div><span className="eyebrow">SALES BREAKDOWN</span><h2>Understand what drives sales</h2></div><div className="feature-actions"><span className="report-note">{data ? `${data.analysisOrderCount.toLocaleString()} orders analysed` : "Loading sales analysis…"}</span><select aria-label="Sales breakdown" value={breakdownDimension} onChange={(event) => setBreakdownDimension(event.target.value as SalesBreakdownDimension)}><option value="date">By date</option><option value="channel">By channel</option><option value="customerType">By new/repeat customer</option><option value="country">By country</option><option value="discountCode">By discount code</option><option value="product">By product</option></select></div></div>{breakdownDimension === "date" ? <span className="report-note">{data?.dailySource === "shopifyql" ? "Daily totals come from ShopifyQL, the same analytics engine used by Shopify Admin. Payment fees come from Shopify's fees report." : "Reconnect Shopify with read_reports to use Shopify Admin-matched daily totals."}</span> : breakdownDimension === "product" ? <span className="report-note">Product sales are after discounts; refunds remain at order level until refund allocation is available.</span> : breakdownDimension === "discountCode" ? <span className="report-note">Orders using multiple codes split units and net sales evenly so totals remain additive.</span> : null}<div className="table-scroll"><table className="data-table"><thead>{breakdownDimension === "date" ? <tr><th>Date</th><th>Orders</th><th>Units</th><th>Net sales</th><th>Refunds</th><th>COGS</th><th>Gross profit</th><th>Payment fees</th><th>Profit after fees</th></tr> : <tr><th>{breakdownLabels[breakdownDimension]}</th><th>Orders</th><th>Units</th><th>Net sales</th><th>Average order value</th></tr>}</thead><tbody>{!data ? <tr><td colSpan={breakdownDimension === "date" ? 9 : 5} className="empty-row">Calculating sales breakdown…</td></tr> : breakdownRows.length ? breakdownRows.map((row) => breakdownDimension === "date" ? <tr key={row.label}><td><strong>{/^\d{4}-\d{2}-\d{2}$/.test(row.label) ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${row.label}T00:00:00Z`)) : row.label}</strong></td><td>{row.orders.toLocaleString()}</td><td>{row.units.toLocaleString()}</td><td><strong>{formatter.format(row.sales)}</strong></td><td>{formatter.format(-(row.refunds ?? 0))}</td><td><strong>{formatter.format(row.cogs ?? 0)}</strong>{(row.salesWithoutRecordedCost ?? 0) > 0 ? <small>{row.missingCostLines ? `${row.missingCostLines.toLocaleString()} imported lines missing cost · ` : ""}{formatter.format(row.salesWithoutRecordedCost ?? 0)} of Shopify sales missing recorded cost</small> : null}</td><td><strong>{formatter.format(row.grossProfit ?? row.sales - (row.cogs ?? 0))}</strong></td><td>{formatter.format(-(row.paymentFees ?? 0))}</td><td><strong>{formatter.format((row.grossProfit ?? row.sales - (row.cogs ?? 0)) - (row.paymentFees ?? 0))}</strong></td></tr> : <tr key={row.label}><td><strong>{row.label}</strong></td><td>{row.orders.toLocaleString()}</td><td>{row.units.toLocaleString()}</td><td><strong>{formatter.format(row.sales)}</strong></td><td>{row.orders ? formatter.format(row.sales / row.orders) : "—"}</td></tr>) : <tr><td colSpan={breakdownDimension === "date" ? 9 : 5} className="empty-row">No sales in this period.</td></tr>}</tbody></table></div></section><section className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">SHOPIFY ORDERS</span><h2>Sales and orders</h2></div><div className="feature-actions"><span className="report-note">Most recent 250 imported orders</span><button className="export-button" disabled={!visibleOrders.length} onClick={exportSales}><Download/> Export CSV</button></div></div><div className="filter-row"><div className="search"><Search/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search orders or status..."/></div><select aria-label="Financial status" value={financialStatus} onChange={(event) => setFinancialStatus(event.target.value)}><option value="all">All payments</option>{financialStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select><select aria-label="Fulfilment status" value={fulfilmentStatus} onChange={(event) => setFulfilmentStatus(event.target.value)}><option value="all">All fulfilment</option>{fulfilmentStatuses.map((status) => <option key={status} value={status}>{status}</option>)}</select><select aria-label="Sales source" value={source} onChange={(event) => setSource(event.target.value)}><option value="all">All sources</option>{sources.map((value) => <option key={value} value={value}>{value}</option>)}</select><select aria-label="Refund status" value={refundFilter} onChange={(event) => setRefundFilter(event.target.value)}><option value="all">All refund states</option><option value="refunded">Refunded</option><option value="not-refunded">Not refunded</option></select></div>{data && !data.hasData ? <div className="cost-empty"><ShoppingBag/><strong>No Shopify orders yet</strong><span>Connect Shopify and run the first sync to populate sales.</span></div> : <div className="table-scroll"><table className="data-table"><thead><tr><th>Order</th><th>Date</th><th>Financial status</th><th>Fulfilment</th><th>Source</th><th>Product sales</th><th>Refunds</th><th>Shipping</th><th>Total</th></tr></thead><tbody>{!data ? Array.from({ length: 6 }, (_, index) => <TableRowSkeleton key={index} columns={9}/>) : visibleOrders.length === 0 ? <tr><td colSpan={9} className="empty-row">No orders match that search.</td></tr> : visibleOrders.map((order) => <tr key={order.id}><td><button className="table-link" onClick={() => void openDetail(order.id)}><strong>{order.order_name}</strong></button></td><td>{order.processed_at ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(new Date(order.processed_at)) : "—"}</td><td>{order.financial_status || "—"}</td><td>{order.fulfillment_status || "—"}</td><td>{order.source_name || "—"}</td><td>{formatter.format(Number(order.net_product_sales))}</td><td>{order.refunded ? formatter.format(-order.refunded) : "—"}</td><td>{formatter.format(Number(order.shipping_revenue))}</td><td><strong>{formatter.format(Number(order.total_sales))}</strong></td></tr>)}</tbody></table></div>}</section>{(detailLoading || detail || detailError) && <div className="modal-backdrop" onMouseDown={() => { if (!detailLoading) { setDetail(null); setDetailError(""); } }}><section className="connection-modal order-drawer" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" disabled={detailLoading} onClick={() => { setDetail(null); setDetailError(""); }}><X/></button>{detailLoading ? <PanelState status="loading" message="Loading order details…"/> : detailError ? <div className="connection-error">{detailError}</div> : detail && <><div className="modal-brand"><span className="source-logo s"><ShoppingBag/></span><div><span className="eyebrow">ORDER PROFITABILITY</span><h2>{detail.order.order_name}</h2></div></div><div className="order-detail-grid"><div><span>Product sales</span><strong>{formatter.format(Number(detail.order.net_product_sales))}</strong></div><div><span>Refunds</span><strong>{formatter.format(-detail.metrics.refunds)}</strong></div><div><span>Product COGS</span><strong>{detail.metrics.missingCostLines ? "Partial" : formatter.format(-detail.metrics.cogs)}</strong></div><div><span>Gross profit</span><strong>{detail.metrics.missingCostLines ? "Coverage needed" : formatter.format(detail.metrics.grossProfit)}</strong></div></div>{detail.metrics.missingCostLines > 0 && <div className="connection-notice"><Info/><div><strong>{detail.metrics.missingCostLines} line items are missing a cost</strong><span>Gross profit is incomplete until effective-dated product costs are added.</span></div></div>}<div className="table-scroll"><table className="data-table"><thead><tr><th>Line item</th><th>SKU</th><th>Qty</th><th>Net sales</th><th>Unit cost</th><th>COGS</th></tr></thead><tbody>{detail.lines.map((line) => <tr key={line.id}><td><strong>{line.title}</strong><small>{line.variant_title || ""}</small></td><td>{line.sku || "—"}</td><td>{line.current_quantity}</td><td>{formatter.format(Number(line.net_sales))}</td><td>{line.unitCost === null ? "Missing" : formatter.format(line.unitCost)}</td><td>{line.cogs === null ? "Missing" : formatter.format(line.cogs)}</td></tr>)}</tbody></table></div></>}</section></div>}</>;
+
+  const controls = <FinanceDateControls preset={datePreset} from={fromDate} to={toDate} onPreset={applyPreset} onFrom={(value) => { setDatePreset("custom"); setFromDate(value); }} onTo={(value) => { setDatePreset("custom"); setToDate(value); }}/>;
+
+  if (loadError) return <>{controls}<PanelState status="error" title="Sales insights could not be loaded" message={loadError} onRetry={() => setRetryToken((value) => value + 1)}/></>;
+  if (!data) return <>{controls}<PanelState status="loading" message="Finding patterns in your orders…" lines={5}/></>;
+  if (!data.hasData) return <>{controls}<PanelState status="empty" title="No Shopify orders in this period" message="Connect Shopify and run the first sync, or widen the date range."/></>;
+
+  const { summary } = data;
+  const hourLabels = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, "0"));
+  const dayLabels = weekdayNames.map((name) => name.slice(0, 3));
+  const peakHour = data.byHour.reduce((best, bucket, hour) => bucket[timeMetric] > data.byHour[best][timeMetric] ? hour : best, 0);
+  const peakDay = data.byWeekday.reduce((best, bucket, day) => bucket[timeMetric] > data.byWeekday[best][timeMetric] ? day : best, 0);
+  const domains: DomainRow[] = data.domains.rows.slice(0, 10);
+  const maxDomain = Math.max(0, ...domains.map((row) => row.sales));
+  const marginRows: MarginRow[] = [...data.margin.rows].sort((left, right) => right[marginSort] - left[marginSort]).slice(0, 10);
+  const maxMargin = Math.max(0, ...marginRows.map((row) => row.margin));
+  const combos: ComboRow[] = data.combos.slice(0, 8);
+  const maxCombo = Math.max(0, ...combos.map((row) => row.orders));
+
+  return <>
+    {controls}
+    <UpdatingChip show={refreshing}/>
+    <section className="insight-kpis">
+      <div><span>Net sales</span><strong>{money.format(summary.netSales)}</strong></div>
+      <div><span>Orders</span><strong>{summary.orders.toLocaleString()}</strong></div>
+      <div><span>Average order value</span><strong>{money2.format(summary.aov)}</strong></div>
+      <div><span>Units per order</span><strong>{summary.unitsPerOrder.toFixed(2)}</strong></div>
+      <div><span>Repeat customer orders</span><strong>{summary.repeatRate === null ? "—" : percent(summary.repeatRate)}</strong></div>
+      <div><span>Orders with 2+ products</span><strong>{percent(summary.multiProductShare)}</strong></div>
+      <div><span>Orders using a discount</span><strong>{percent(summary.discountedShare)}</strong></div>
+    </section>
+
+    <section className="insight-grid">
+      <article className="panel report-panel insight-panel wide">
+        <div className="panel-head"><div><span className="eyebrow">BASKETS</span><h2>Products bought together</h2></div></div>
+        <span className="report-note insight-note">Pairs of products that appear in the same order. The percentage is how often buyers of the less common product also bought the other.</span>
+        {combos.length ? <ul className="rank-list">{combos.map((row) => <li key={`${row.a}|${row.b}`}><div><strong>{row.a} <em>+</em> {row.b}</strong><span>{row.orders.toLocaleString()} orders · {money.format(row.netSales)} · {percent(row.confidence)} attach rate</span></div><Bar value={row.orders} max={maxCombo}/></li>)}</ul> : <PanelState status="empty" title="No repeated combinations yet" message="Needs at least two orders containing the same pair of products."/>}
+      </article>
+
+      <article className="panel report-panel insight-panel wide">
+        <div className="panel-head"><div><span className="eyebrow">TIMING</span><h2>When customers buy</h2></div><div className="segmented">{(["sales", "orders"] as const).map((key) => <button key={key} className={timeMetric === key ? "active" : ""} onClick={() => setTimeMetric(key)}>{key === "sales" ? "Net sales" : "Orders"}</button>)}</div></div>
+        <span className="report-note insight-note">Busiest hour is {hourLabels[peakHour]}:00 and busiest day is {weekdayNames[peakDay]}, in store time ({data.timezone}).</span>
+        <div className="time-charts"><div><h3>By hour</h3><TimeChart buckets={data.byHour} labels={hourLabels} metric={timeMetric} money={(value) => money.format(value)}/></div><div><h3>By weekday</h3><TimeChart buckets={data.byWeekday} labels={dayLabels} metric={timeMetric} money={(value) => money.format(value)}/></div></div>
+      </article>
+
+      <article className="panel report-panel insight-panel">
+        <div className="panel-head"><div><span className="eyebrow">MARKETS</span><h2>Store domains by revenue</h2></div></div>
+        <span className="report-note insight-note">The storefront domain each order&apos;s visit landed on, so you can compare your Shopify Markets. Covers {percent(data.domains.coverage)} of orders; the rest have no tracked visit.</span>
+        {domains.length ? <ul className="rank-list">{domains.map((row) => <li key={row.domain}><div><strong>{row.domain}</strong><span>{money.format(row.sales)} · {row.orders.toLocaleString()} orders · {money2.format(row.aov)} average order</span></div><Bar value={row.sales} max={maxDomain}/></li>)}</ul> : <PanelState status="empty" title="No storefront domains recorded" message="Shopify did not report a landing page for orders in this period."/>}
+      </article>
+
+      <article className="panel report-panel insight-panel">
+        <div className="panel-head"><div><span className="eyebrow">PROFITABILITY</span><h2>Biggest contribution margin</h2></div><div className="segmented">{(["margin", "marginPct"] as const).map((key) => <button key={key} className={marginSort === key ? "active" : ""} onClick={() => setMarginSort(key)}>{key === "margin" ? "Amount" : "Percent"}</button>)}</div></div>
+        <span className="report-note insight-note">Net sales minus product cost, before shipping and fees. Only products with a known cost on every sale are ranked.</span>
+        {marginRows.length ? <ul className="rank-list">{marginRows.map((row) => <li key={row.product}><div><strong>{row.product}</strong><span>{money.format(row.margin)} margin · {percent(row.marginPct)} · {row.units.toLocaleString()} units</span></div><Bar value={row.margin} max={maxMargin} tone="green"/></li>)}</ul> : <PanelState status="empty" title="No products have complete costs yet" message="Add product costs on the Costs screen, or sync Shopify unit costs, and margins appear here."/>}
+        {data.margin.incompleteProducts > 0 && <div className="insight-foot"><Info/>{data.margin.incompleteProducts.toLocaleString()} product{data.margin.incompleteProducts === 1 ? " is" : "s are"} missing a cost and not ranked ({percent(data.margin.costedShare)} of product sales have a cost).</div>}
+      </article>
+
+      <RankList eyebrow="GEOGRAPHY" title="Countries by revenue" rows={data.countries} money={(value) => money.format(value)}/>
+      <RankList eyebrow="CHANNELS" title="Sales channels" rows={data.channels} money={(value) => money.format(value)}/>
+      <RankList eyebrow="NEW VS REPEAT" title="Customer type" rows={data.customerTypes} money={(value) => money.format(value)}/>
+      <article className="panel report-panel insight-panel">
+        <div className="panel-head"><div><span className="eyebrow">PROMOTIONS</span><h2>Discount codes</h2></div></div>
+        <span className="report-note insight-note">Revenue from orders using each code, and the discount value given away.</span>
+        {data.discountCodes.length ? <ul className="rank-list">{data.discountCodes.map((row) => <li key={row.label}><div><strong>{row.label}</strong><span>{money.format(row.sales)} · {row.orders.toLocaleString()} orders{row.label === "No discount code" ? "" : ` · ${money.format(row.discounts)} discounted`}</span></div><Bar value={row.sales} max={Math.max(...data.discountCodes.map((code) => code.sales))}/></li>)}</ul> : <PanelState status="empty" title="No discount codes used"/>}
+      </article>
+    </section>
+  </>;
 }

@@ -481,3 +481,34 @@ button { cursor:pointer; }
 .row-action{height:28px;border:1px solid #d9d3ff;background:#f4f2ff;color:#5b49d6;border-radius:7px;padding:0 10px;font-size:9px;font-weight:800;cursor:pointer;white-space:nowrap}
 .row-action:hover{background:#6c5ce7;color:white;border-color:#6c5ce7}
 .cost-grid.live strong{font-variant-numeric:tabular-nums}
+
+/* Sales insights */
+.insight-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));border:1px solid var(--line);border-radius:10px;background:white;margin:0 0 14px;overflow:hidden}
+.insight-kpis>div{padding:16px 18px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:6px}
+.insight-kpis>div:last-child{border-right:0}
+.insight-kpis span{font-size:9px;color:#8d95a4;font-weight:700}
+.insight-kpis strong{font-size:19px;font-variant-numeric:tabular-nums}
+.insight-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start}
+.insight-panel.wide{grid-column:1/-1}
+.insight-panel>.panel-head{align-items:flex-start;gap:12px}
+.insight-note{display:block;padding:6px 20px 0;line-height:1.55}
+.rank-list{list-style:none;margin:0;padding:12px 20px 18px;display:grid;gap:14px}
+.rank-list li{display:grid;gap:7px}
+.rank-list li>div{display:flex;flex-direction:column;gap:3px;min-width:0}
+.rank-list strong{font-size:11px;color:#1f293b;overflow-wrap:anywhere}
+.rank-list strong em{font-style:normal;color:#9aa1ae;margin:0 3px}
+.rank-list span{font-size:9px;color:#7d8595}
+.insight-bar{display:block;height:6px;border-radius:99px;background:#eceef4;overflow:hidden}
+.insight-bar b{display:block;height:100%;border-radius:99px;background:#6c5ce7}
+.insight-bar.green b{background:#16b981}
+.time-charts{display:grid;grid-template-columns:2fr 1fr;gap:28px;padding:16px 20px 20px}
+.time-charts h3{font-size:10px;margin:0 0 10px;color:#586174}
+.time-chart{display:flex;align-items:flex-end;gap:3px;height:150px}
+.time-chart>div{flex:1;min-width:0;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:5px}
+.time-chart b{display:block;width:100%;background:#cfc8ff;border-radius:3px 3px 0 0;min-height:2px}
+.time-chart>div.peak b{background:#6c5ce7}
+.time-chart span{font-size:8px;color:#9aa1ae}
+.inline-toggle{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:700;color:#586174;cursor:pointer;white-space:nowrap}
+.insight-foot{display:flex;align-items:center;gap:8px;margin:0 20px 18px;padding:10px 12px;border-radius:8px;background:#f7f6ff;color:#6858d0;font-size:9px;font-weight:600}
+.insight-foot svg{width:14px;flex:none}
+@media(max-width:900px){.insight-grid{grid-template-columns:1fr}.time-charts{grid-template-columns:1fr}.insight-kpis>div{border-bottom:1px solid var(--line)}}
