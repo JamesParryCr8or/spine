@@ -27,7 +27,7 @@ async function goHighLevelResult(reportingClient: SupabaseClient, store: Store):
  * fees, UTMs and customers read. Stops between order pages at `deadline` and
  * resumes from the saved cursor next time. No deadline means no import.
  */
-async function shopifyOrdersResult(reportingClient: SupabaseClient, store: Store, deadline: number | undefined): Promise<ReportingSourceResult[]> {
+async function shopifyOrdersResult(reportingClient: SupabaseClient, store: Store, deadline: number | undefined, trigger: "cron" | "manual" | "login"): Promise<ReportingSourceResult[]> {
   if (!deadline || store.business_model === "lead_generation" || !store.shopify_domain) return [];
   const { data: connection, error: connectionError } = await reportingClient.from("data_connections").select("status").eq("store_id", store.id).eq("provider", "shopify").maybeSingle();
   if (connectionError) return [{ source: "shopify_orders", status: "rejected", message: connectionError.message }];
@@ -42,7 +42,7 @@ async function shopifyOrdersResult(reportingClient: SupabaseClient, store: Store
       accessToken: token,
       shopCurrency: store.currency,
       createdBy: null,
-      trigger: "cron",
+      trigger,
       includeDailyReport: false,
       catalogue: "daily",
       deadline,
@@ -84,7 +84,7 @@ export async function runReportingSyncForStore(
   store: Store,
   from: string,
   to: string,
-  trigger: "cron" | "manual",
+  trigger: "cron" | "manual" | "login",
   /** When set, also runs the Shopify order import until this epoch-ms deadline. */
   shopifyImportDeadline?: number,
 ): Promise<ReportingSyncOutcome> {
@@ -102,7 +102,7 @@ export async function runReportingSyncForStore(
     const [reportingResults, ghlResults, shopifyResults] = await Promise.all([
       refreshReportingData(reportingClient, store, from, to),
       goHighLevelResult(reportingClient, store),
-      shopifyOrdersResult(reportingClient, store, shopifyImportDeadline),
+      shopifyOrdersResult(reportingClient, store, shopifyImportDeadline, trigger),
     ]);
     const results = [...reportingResults, ...ghlResults, ...shopifyResults];
     await reportingClient.from("reporting_sync_runs").update({ status: "completed", results, completed_at: new Date().toISOString() }).eq("id", run.id);

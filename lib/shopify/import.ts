@@ -58,7 +58,7 @@ export type ShopifyImportOptions = {
   /** Shop currency, used for ShopifyQL daily rows and variants without a cost currency. */
   shopCurrency: string;
   createdBy: string | null;
-  trigger: "manual" | "cron";
+  trigger: "manual" | "cron" | "login";
   /** The 5-year ShopifyQL daily sales/fees backfill. The cron job's reporting refresh covers a rolling window instead. */
   includeDailyReport: boolean;
   /** "always" re-reads every product and variant; "daily" only when the last completed import is older than 20 hours. */
@@ -107,7 +107,7 @@ export async function runShopifyImport(options: ShopifyImportOptions): Promise<S
       ? { data: existingRun, error: null }
       : await reportingDb.from("sync_runs").insert({ organization_id: organizationId, store_id: store.id, source: "shopify", resource: "catalog_orders", status: "running", sync_mode: syncMode, window_start: windowStart, window_end: windowEnd, created_by: options.createdBy,
         // Manual inserts stay identical to before 20261009120000_sync_runs_background.sql, which adds `trigger`.
-        ...(options.trigger === "cron" ? { trigger: "cron" } : {}) }).select("id,cursor,records_processed,pages_processed,sync_mode,window_start,window_end,updated_at").single();
+        ...(options.trigger !== "manual" ? { trigger: options.trigger } : {}) }).select("id,cursor,records_processed,pages_processed,sync_mode,window_start,window_end,updated_at").single();
     if (runError) {
       // 23505: another import holds sync_runs_one_active_source_idx.
       if (runError.code === "23505") return { status: "busy" };
