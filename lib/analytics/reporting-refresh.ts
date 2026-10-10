@@ -130,13 +130,13 @@ const shiftIso = (value: string, days: number) => new Date(new Date(`${value}T00
  * window is re-read. Aggregated rows only: storage grows with campaigns x
  * days, not orders.
  */
-export async function refreshShopifyCampaigns(supabase: SupabaseClient, store: Store, from: string, to: string) {
+export async function refreshShopifyCampaigns(supabase: SupabaseClient, store: Store, from: string, to: string): Promise<string | undefined> {
   if (!store.shopify_domain) return;
   const { data: state, error: stateError } = await supabase.from("shopify_campaign_sync_state").select("backfilled_from,synced_at").eq("store_id", store.id).maybeSingle();
   if (stateError) throw new Error(stateError.message);
-  if (state && state.synced_at >= freshAfter()) return;
+  if (state && state.synced_at >= freshAfter()) return "Skipped: refreshed in the last 15 minutes";
   const token = await readSecret(supabase, store.id, "shopify");
-  if (!token) return;
+  if (!token) return "Skipped: no Shopify token";
 
   const run = (window: { from: string; to: string }) => shopifyGraph<ShopifyQlResult>(
     store.shopify_domain!, token,
@@ -148,11 +148,15 @@ export async function refreshShopifyCampaigns(supabase: SupabaseClient, store: S
     const parseError = result.shopifyqlQuery.parseErrors[0];
     if (parseError) throw new Error(`Shopify campaign query: ${parseError}`);
     const rows = result.shopifyqlQuery.tableData?.rows ?? [];
+    if (!result.shopifyqlQuery.tableData) diagnostics.emptyTables += 1;
+    diagnostics.queries += 1;
+    if (!diagnostics.columns && rows[0]) diagnostics.columns = Object.keys(rows[0]).join(",");
     if (rows.length < campaignRowCap || window.from >= window.to) return rows;
     const middle = shiftIso(window.from, Math.floor((new Date(`${window.to}T00:00:00Z`).getTime() - new Date(`${window.from}T00:00:00Z`).getTime()) / 86400000 / 2));
     return [...await fetchWindow({ from: window.from, to: middle }), ...await fetchWindow({ from: shiftIso(middle, 1), to: window.to })];
   };
 
+  const diagnostics = { queries: 0, emptyTables: 0, fetched: 0, kept: 0, columns: "" };
   const backfillFrom = shiftIso(to, -campaignBackfillDays);
   const windows = [
     { from, to },
@@ -164,6 +168,7 @@ export async function refreshShopifyCampaigns(supabase: SupabaseClient, store: S
     const fetched = await Promise.all(batch.map(async (window) => ({ window, rows: await fetchWindow(window) })));
     for (const { window, rows } of fetched) {
       const parsed = parseCampaignRows(rows, { organizationId: store.organization_id, storeId: store.id, currency: store.currency, now });
+      diagnostics.fetched += rows.length; diagnostics.kept += parsed.length;
       const { error: deleteError } = await supabase.from("shopify_campaign_daily").delete().eq("store_id", store.id).gte("sales_date", window.from).lte("sales_date", window.to);
       if (deleteError) throw new Error(deleteError.message);
       for (let offset = 0; offset < parsed.length; offset += 500) {
@@ -177,6 +182,8 @@ export async function refreshShopifyCampaigns(supabase: SupabaseClient, store: S
     backfilled_from: state ? state.backfilled_from : windows.at(-1)?.from ?? from, synced_at: now,
   }, { onConflict: "store_id" });
   if (saveError) throw new Error(saveError.message);
+  // Surfaces in reporting_sync_runs.results, so an empty result can be told apart from a failed or null query.
+  return `${diagnostics.queries} queries, ${diagnostics.fetched} rows returned, ${diagnostics.kept} kept, ${diagnostics.emptyTables} without a table${diagnostics.columns ? `; columns: ${diagnostics.columns}` : ""}`;
 }
 
 function paymentQueryWindows(from: string, to: string) {
@@ -465,7 +472,7 @@ export async function refreshReportingData(_supabase: SupabaseClient, store: Sto
       console.error("Reporting refresh failed", { source: sources[index], message });
       return { source: sources[index], status: "rejected" as const, message };
     }
-    return { source: sources[index], status: "fulfilled" as const };
+    return { source: sources[index], status: "fulfilled" as const, ...(typeof result.value === "string" ? { message: result.value } : {}) };
   });
 }
 
