@@ -6,6 +6,7 @@ import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExcha
 import { calculateAcquisitionMetrics } from "@/lib/analytics/acquisition";
 import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
 import { reportingDateKey, reportingMonthKey, reportingRangeToUtc } from "@/lib/analytics/reporting-range";
+import { timed } from "@/lib/server-timing";
 
 export const maxDuration = 60;
 
@@ -39,7 +40,7 @@ function monthLabel(date: Date, timezone: string) {
  * Financial calculations stay on the server. All imported orders contribute to
  * the headline totals; the chart displays the six latest months in the store.
  */
-export async function GET(request: Request) {
+async function handleGet(request: Request) {
   const params = new URL(request.url).searchParams;
   const fromDate = params.get("from") ?? "";
   const toDate = params.get("to") ?? "";
@@ -264,4 +265,4 @@ export async function GET(request: Request) {
   });
 }
 
-
+export const GET = timed("analytics/overview", handleGet);

@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 
 import { requireWorkspace } from "@/lib/workspace/server";
 import { computePnl, loadPnlInputs } from "@/lib/analytics/pnl-engine";
+import { timed } from "@/lib/server-timing";
 
 export const maxDuration = 60;
 
 /** One P&L for one date range. Multi-period views use ./series instead. */
-export async function GET(request: Request) {
+async function handleGet(request: Request) {
   const params = new URL(request.url).searchParams;
   const fromDate = params.get("from") ?? "";
   const toDate = params.get("to") ?? "";
@@ -23,3 +24,5 @@ export async function GET(request: Request) {
   if (!loaded.ok) return NextResponse.json({ error: loaded.error }, { status: 500 });
   return NextResponse.json(computePnl(loaded.inputs, store));
 }
+
+export const GET = timed("analytics/pnl", handleGet);

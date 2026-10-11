@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireWorkspace } from "@/lib/workspace/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { calculateJourneyCounts } from "@/lib/analytics/lead-funnel";
+import { timed } from "@/lib/server-timing";
 
 export const maxDuration = 60;
 
@@ -50,7 +51,7 @@ async function pipelinesFor(locationId: string, token: string, base: string) {
   }));
 }
 
-export async function GET(request: Request) {
+async function handleGet(request: Request) {
   const params = new URL(request.url).searchParams;
   const from = params.get("from") ?? "";
   const to = params.get("to") ?? "";
@@ -241,3 +242,4 @@ export async function PATCH(request: Request) {
   return NextResponse.json({ success: true, pipelineId });
 }
 
+export const GET = timed("analytics/leads/pipeline", handleGet);

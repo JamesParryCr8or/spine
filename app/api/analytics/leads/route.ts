@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 
 import { requireWorkspace } from "@/lib/workspace/server";
+import { timed } from "@/lib/server-timing";
 
 const isDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
 const amount = (value: unknown) => Number(value ?? 0) || 0;
 
-export async function GET(request: Request) {
+async function handleGet(request: Request) {
   const params = new URL(request.url).searchParams;
   const from = params.get("from") ?? "";
   const to = params.get("to") ?? "";
@@ -74,3 +75,4 @@ export async function GET(request: Request) {
   });
 }
 
+export const GET = timed("analytics/leads", handleGet);

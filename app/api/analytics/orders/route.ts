@@ -5,6 +5,7 @@ import { costKey, monetary, resolveEffectiveCost, type EffectiveCost } from "@/l
 import { requireWorkspace } from "@/lib/workspace/server";
 import { selectAllPages } from "@/lib/supabase/select-all";
 import { selectOrdersByProcessedAt } from "@/lib/supabase/select-orders";
+import { timed } from "@/lib/server-timing";
 
 type OrderRow = {
   id: string; customer_id: string | null; order_name: string; processed_at: string | null;
@@ -46,7 +47,7 @@ function mergeChunkPages<T>(chunkPages: Array<{ data: T[] | null; error: { messa
   return { data: chunkPages.flatMap((page) => page.data ?? []), error: null };
 }
 
-export async function GET(request: Request) {
+async function handleGet(request: Request) {
   const workspace = await requireWorkspace();
   if (!workspace.ok) return workspace.response;
   const { supabase, store } = workspace;
@@ -228,3 +229,5 @@ export async function GET(request: Request) {
     orders: orderRows.slice(0, 250).map((order) => ({ ...order, refunded: refundsByOrder.get(order.id) ?? 0 })),
   });
 }
+
+export const GET = timed("analytics/orders", handleGet);
