@@ -7,17 +7,15 @@ import { PanelState, UpdatingChip } from "@/components/ui/panel-state";
 import { UtmTools } from "@/components/screens/utm-tools";
 import { fetchJson, peekJson } from "@/lib/queries/client";
 import { useResetOnChange } from "@/lib/use-reset-on-change";
-import type { AttributionModel, CampaignPerformance, CampaignRow } from "@/lib/analytics/campaign-performance";
+import type { CampaignPerformance, CampaignRow } from "@/lib/analytics/campaign-performance";
 
 type CampaignsData = CampaignPerformance & {
-  currency: string; timezone: string; model: AttributionModel; hasData: boolean;
+  currency: string; timezone: string; hasData: boolean;
   period: { from: string; to: string };
   synced: { at: string; backfilledFrom: string } | null;
-  shopifySales: number; attributedShare: number | null;
   spendCoverage: { excludedRows?: number } & Record<string, unknown>;
 };
 
-const modelLabels: Record<AttributionModel, string> = { last_non_direct: "Last non-direct click", last_click: "Last click", first_click: "First click" };
 const platformLabels = { meta: "Meta", google: "Google Ads", microsoft: "Microsoft Ads" } as const;
 const percent = (value: number) => `${Math.round(value * 100)}%`;
 const roasText = (value: number | null) => value === null ? "—" : `${value.toFixed(2)}×`;
@@ -46,7 +44,6 @@ export function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: strin
   const [fromDate, setFromDate] = useState(initialRange?.from || financeDateRange("last_90_days").from);
   const [toDate, setToDate] = useState(initialRange?.to || financeDateRange("last_90_days").to);
   const [datePreset, setDatePreset] = useState<FinanceDatePreset>(initialRange?.from ? "custom" : "last_90_days");
-  const [model, setModel] = useState<AttributionModel>(initialRange?.attributionModel === "first_touch" ? "first_click" : "last_non_direct");
   const [loadError, setLoadError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
@@ -59,9 +56,9 @@ export function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: strin
 
   const effectiveFrom = fromDate || earliestDate;
   const effectiveTo = toDate || new Date().toISOString().slice(0, 10);
-  useResetOnChange(`${effectiveFrom}|${effectiveTo}|${model}|${retryToken}`, () => { setData(null); setLoadError(""); setLimit(25); });
+  useResetOnChange(`${effectiveFrom}|${effectiveTo}|${retryToken}`, () => { setData(null); setLoadError(""); setLimit(25); });
   useEffect(() => {
-    const url = `/api/analytics/campaigns?${new URLSearchParams({ from: effectiveFrom, to: effectiveTo, model })}`;
+    const url = `/api/analytics/campaigns?${new URLSearchParams({ from: effectiveFrom, to: effectiveTo })}`;
     const controller = new AbortController();
     void (async () => {
       // Paint the last real numbers immediately, then refresh behind them.
@@ -81,7 +78,7 @@ export function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: strin
       }
     })();
     return () => controller.abort();
-  }, [effectiveFrom, effectiveTo, model, retryToken, finishReportRun]);
+  }, [effectiveFrom, effectiveTo, retryToken, finishReportRun]);
 
   const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: data?.currency || "GBP", maximumFractionDigits: 0 });
   const money2 = new Intl.NumberFormat("en-GB", { style: "currency", currency: data?.currency || "GBP", maximumFractionDigits: 2 });
@@ -93,7 +90,6 @@ export function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: strin
   };
   const controls = <>
     <FinanceDateControls preset={datePreset} from={fromDate} to={toDate} onPreset={applyPreset} onFrom={(value) => { setDatePreset("custom"); setFromDate(value); }} onTo={(value) => { setDatePreset("custom"); setToDate(value); }}/>
-    <div className="segmented model-switch" role="group" aria-label="Attribution model">{(Object.keys(modelLabels) as AttributionModel[]).map((key) => <button key={key} className={model === key ? "active" : ""} onClick={() => setModel(key)}>{modelLabels[key]}</button>)}</div>
   </>;
 
   const targets = data ? [...new Map(data.rows.filter((row) => row.source || row.medium || row.campaign).map((row) => [JSON.stringify([row.source, row.medium, row.campaign]), { value: JSON.stringify([row.source, row.medium, row.campaign]), label: `${row.source || "(none)"} / ${row.medium || "(none)"} / ${row.campaign || "(none)"}` }])).values()].sort((left, right) => left.label.localeCompare(right.label)) : [];
@@ -117,7 +113,7 @@ export function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: strin
   const { totals, coverage } = data;
   const tools = <details className="panel report-panel setup-tools"><summary><div><span className="eyebrow">SETUP</span><h2>Tracking links, spend mapping and custom spend</h2></div></summary><UtmTools currency={data.currency} targets={targets} summary={`${money.format(coverage.matchedSpend)} of ${money.format(coverage.campaignSpend)} Meta campaign spend matched · ${money.format(coverage.customSpend)} custom spend`} onChanged={() => setRetryToken((value) => value + 1)}/></details>;
 
-  if (!data.hasData) return <>{controls}<PanelState status="empty" title="No campaign data for this period" message={data.synced ? "Shopify reported no campaign-attributed orders in this period. Try a wider range." : "Campaign data has not been pulled from Shopify yet. Click Sync now: the first sync backfills two years."}/>{tools}</>;
+  if (!data.hasData) return <>{controls}<PanelState status="empty" title="No campaign data for this period" message={data.synced ? "No orders were found in this period. Try a wider range." : "Campaign data has not been pulled from Shopify yet. Click Sync now: the first sync backfills two years."}/>{tools}</>;
 
   const matches = (row: CampaignRow) => spendFilter === "all" || (spendFilter === "matched") === (row.spend !== null);
   const needle = search.trim().toLowerCase();
@@ -135,9 +131,9 @@ export function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: strin
     {controls}
     <UpdatingChip show={refreshing}/>
     <section className="insight-kpis">
-      <div><span>Attributed sales</span><strong>{money.format(totals.sales)}</strong><small>{data.attributedShare === null ? "" : `${percent(data.attributedShare)} of Shopify sales`}</small></div>
+      <div><span>Net sales</span><strong>{money.format(totals.sales)}</strong><small>{percent(1 - totals.untaggedShare)} carries UTM tags</small></div>
       <div><span>Ad spend</span><strong>{totals.adSpend > 0 ? money.format(totals.adSpend) : "—"}</strong><small>Meta, Google, Microsoft</small></div>
-      <div><span>Blended ROAS</span><strong>{roasText(totals.blendedRoas)}</strong><small>All attributed sales ÷ spend</small></div>
+      <div><span>Blended ROAS</span><strong>{roasText(totals.blendedRoas)}</strong><small>All net sales ÷ ad spend</small></div>
       <div><span>Paid-tagged ROAS</span><strong>{roasText(totals.taggedRoas)}</strong><small>Only paid-tagged links</small></div>
       <div><span>Orders</span><strong>{totals.orders.toLocaleString()}</strong><small>{totals.orders ? `${percent(totals.newOrders / totals.orders)} from new customers` : ""}</small></div>
       <div><span>Untagged sales</span><strong>{percent(totals.untaggedShare)}</strong><small>Direct or no UTM</small></div>
@@ -146,7 +142,7 @@ export function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: strin
     <section className="insight-grid">
       <article className="panel report-panel insight-panel">
         <div className="panel-head"><div><span className="eyebrow">PLATFORMS</span><h2>Return on ad spend by platform</h2></div></div>
-        <span className="report-note insight-note">Platform spend against Shopify-attributed sales from paid-tagged links. Ad clicks without UTM tags are not counted, so ROAS here is a floor.</span>
+        <span className="report-note insight-note">Platform spend against net sales from paid-tagged links. Ad clicks without UTM tags are not counted, so ROAS here is a floor.</span>
         {data.platforms.length ? <ul className="rank-list">{data.platforms.map((platform) => <li key={platform.platform}><div><strong>{platformLabels[platform.platform]} <em>·</em> {roasText(platform.roas)}</strong><span>{money.format(platform.taggedSales)} tagged sales · {platform.taggedOrders.toLocaleString()} orders · {money.format(platform.spend)} spend</span></div><Bar value={platform.taggedSales} max={maxPlatformSales}/><Bar value={platform.spend} max={maxPlatformSales} tone="amber"/></li>)}</ul> : <PanelState status="empty" title="No ad platform data" message="Connect Meta, Google Ads or Microsoft Ads to compare spend with sales."/>}
       </article>
 
@@ -156,12 +152,12 @@ export function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: strin
       </article>
 
       <article className="panel report-panel insight-panel wide">
-        <div className="panel-head"><div><span className="eyebrow">TREND</span><h2>Weekly attributed sales vs ad spend</h2></div><span className="legend-keys"><i className="sales"/> Sales <i className="spend"/> Spend</span></div>
+        <div className="panel-head"><div><span className="eyebrow">TREND</span><h2>Weekly net sales vs ad spend</h2></div><span className="legend-keys"><i className="sales"/> Sales <i className="spend"/> Spend</span></div>
         <WeeklyChart points={data.weekly.slice(-26)} money={(amount) => money.format(amount)}/>
       </article>
 
       <article className="panel report-panel insight-panel wide">
-        <div className="panel-head"><div><span className="eyebrow">{modelLabels[model].toUpperCase()}</span><h2>Campaign performance</h2></div><button className="export-button" onClick={() => downloadCsv("campaign-performance.csv", exportRows)}>Export CSV</button></div>
+        <div className="panel-head"><div><span className="eyebrow">LAST-TOUCH UTM</span><h2>Campaign performance</h2></div><button className="export-button" onClick={() => downloadCsv("campaign-performance.csv", exportRows)}>Export CSV</button></div>
         <div className="filter-row"><div className="search"><Search/><input value={search} onChange={(event) => { setSearch(event.target.value); setLimit(25); }} placeholder="Find a campaign, source or medium..."/></div><div className="segmented">{(["all", "matched", "unmatched"] as const).map((key) => <button key={key} className={spendFilter === key ? "active" : ""} onClick={() => { setSpendFilter(key); setLimit(25); }}>{key === "all" ? "All" : key === "matched" ? "With spend" : "No spend match"}</button>)}</div></div>
         <div className="table-scroll"><table className="data-table"><thead><tr><th>Campaign</th>{sortHeader("orders", "Orders")}{sortHeader("sales", "Sales")}{sortHeader("spend", "Spend")}{sortHeader("roas", "ROAS")}<th>Cost / order</th><th>New customers</th></tr></thead>
           <tbody>{shown.length === 0 ? <tr><td colSpan={7} className="empty-row">No campaigns match.</td></tr> : shown.map((row) => <tr key={row.key}>
@@ -173,7 +169,7 @@ export function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: strin
             <td>{row.cpa === null ? "—" : money2.format(row.cpa)}</td>
             <td>{row.orders ? percent(row.newOrders / row.orders) : "—"}</td>
           </tr>)}</tbody></table></div>
-        <div className="table-footer"><span>Showing {shown.length.toLocaleString()} of {filtered.length.toLocaleString()} campaigns · sales are Shopify total sales (incl. shipping and tax)</span>{filtered.length > shown.length && <button onClick={() => setLimit((current) => current + 50)}>Show more</button>}</div>
+        <div className="table-footer"><span>Showing {shown.length.toLocaleString()} of {filtered.length.toLocaleString()} campaigns · net sales after discounts and returns</span>{filtered.length > shown.length && <button onClick={() => setLimit((current) => current + 50)}>Show more</button>}</div>
       </article>
 
       <article className="panel report-panel insight-panel wide">

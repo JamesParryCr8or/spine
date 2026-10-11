@@ -1,6 +1,6 @@
 /**
- * Pure helpers for ShopifyQL's campaign_sales dataset: the query text and the
- * row parsing. No I/O, so it is unit tested; relative imports only.
+ * Pure helpers for the daily UTM breakdown of ShopifyQL's sales dataset
+ * (order_utm_* dimensions): the query text and the row parsing. No I/O, so it is unit tested; relative imports only.
  */
 
 export type ShopifyQlRow = Record<string, string | number | null>;
@@ -13,26 +13,16 @@ export type CampaignDailyRow = {
   utm_medium: string;
   utm_campaign: string;
   customer_type: "new" | "returning" | "unknown";
-  last_click_orders: number;
-  last_click_sales: number;
-  last_non_direct_orders: number;
-  last_non_direct_sales: number;
-  first_click_orders: number;
-  first_click_sales: number;
+  orders: number;
+  net_sales: number;
   currency: string;
   synced_at: string;
 };
 
-export const campaignMeasures = [
-  "campaign_last_click_order_count", "campaign_last_click_total_sales",
-  "campaign_last_non_direct_click_order_count", "campaign_last_non_direct_click_total_sales",
-  "campaign_first_click_order_count", "campaign_first_click_total_sales",
-] as const;
-
 export function campaignQuery(from: string, to: string) {
-  return `FROM campaign_sales
-SHOW ${campaignMeasures.join(", ")}
-GROUP BY utm_source, utm_medium, utm_campaign, new_or_returning_customer
+  return `FROM sales
+SHOW orders, net_sales
+GROUP BY order_utm_source, order_utm_medium, order_utm_campaign, new_or_returning_customer
 TIMESERIES day
 SINCE ${from} UNTIL ${to}
 ORDER BY day ASC`;
@@ -62,15 +52,11 @@ export function parseCampaignRows(rows: ShopifyQlRow[], context: { organizationI
     const day = typeof row.day === "string" ? row.day.slice(0, 10) : "";
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
     const next = {
-      last_click_orders: Math.max(0, Math.trunc(parseNumber(row.campaign_last_click_order_count))),
-      last_click_sales: parseNumber(row.campaign_last_click_total_sales),
-      last_non_direct_orders: Math.max(0, Math.trunc(parseNumber(row.campaign_last_non_direct_click_order_count))),
-      last_non_direct_sales: parseNumber(row.campaign_last_non_direct_click_total_sales),
-      first_click_orders: Math.max(0, Math.trunc(parseNumber(row.campaign_first_click_order_count))),
-      first_click_sales: parseNumber(row.campaign_first_click_total_sales),
+      orders: Math.max(0, Math.trunc(parseNumber(row.orders))),
+      net_sales: parseNumber(row.net_sales),
     };
-    if (Object.values(next).every((value) => value === 0)) continue;
-    const source = clean(row.utm_source), medium = clean(row.utm_medium), campaign = clean(row.utm_campaign), type = customerType(row.new_or_returning_customer);
+    if (next.orders === 0 && next.net_sales === 0) continue;
+    const source = clean(row.order_utm_source), medium = clean(row.order_utm_medium), campaign = clean(row.order_utm_campaign), type = customerType(row.new_or_returning_customer);
     const key = [day, source, medium, campaign, type].join("\u0000");
     const existing = merged.get(key);
     if (existing) {
