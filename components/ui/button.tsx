@@ -19,12 +19,18 @@ const buttonVariants = cva(
           "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
+        // Design-system variants: they read the --ds tokens, so they look the same on every screen.
+        primary: "bg-ds-accent text-white shadow-sm hover:bg-ds-accent-strong",
+        soft: "bg-ds-accent-soft text-ds-accent-strong hover:bg-[#e6e2ff]",
+        quiet: "border border-ds-line-strong bg-ds-surface text-ds-ink hover:bg-ds-canvas",
+        danger: "border border-ds-negative/30 bg-ds-surface text-ds-negative hover:bg-ds-negative-soft",
       },
       size: {
         default: "h-9 px-4 py-2",
         sm: "h-8 rounded-md px-3 text-xs",
         lg: "h-10 rounded-md px-8",
         icon: "h-9 w-9",
+        md: "h-10 px-4 text-ds-small font-semibold",
       },
     },
     defaultVariants: {
@@ -38,17 +44,23 @@ export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
   asChild?: boolean;
+  /** Shows a spinner and disables the button while an action runs. */
+  loading?: boolean;
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
+  ({ className, variant, size, asChild = false, loading = false, disabled, children, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
+        disabled={disabled || loading}
+        aria-busy={loading || undefined}
         {...props}
-      />
+      >
+        {asChild ? children : <>{loading && <span aria-hidden="true" className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />}{children}</>}
+      </Comp>
     );
   },
 );

@@ -11,6 +11,23 @@ export default {
   theme: {
     extend: {
       colors: {
+        ds: {
+          canvas: "var(--ds-canvas)",
+          surface: "var(--ds-surface)",
+          ink: "var(--ds-ink)",
+          muted: "var(--ds-muted)",
+          line: "var(--ds-line)",
+          "line-strong": "var(--ds-line-strong)",
+          accent: "var(--ds-accent)",
+          "accent-strong": "var(--ds-accent-strong)",
+          "accent-soft": "var(--ds-accent-soft)",
+          positive: "var(--ds-positive)",
+          "positive-soft": "var(--ds-positive-soft)",
+          negative: "var(--ds-negative)",
+          "negative-soft": "var(--ds-negative-soft)",
+          warning: "var(--ds-warning)",
+          "warning-soft": "var(--ds-warning-soft)",
+        },
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
         card: {
@@ -52,7 +69,18 @@ export default {
           "5": "hsl(var(--chart-5))",
         },
       },
+      // Type scale: 12px labels, 13px secondary, 14px body. Nothing below 11px.
+      fontSize: {
+        "ds-label": ["12px", { lineHeight: "16px", letterSpacing: "0.04em", fontWeight: "700" }],
+        "ds-small": ["13px", { lineHeight: "18px" }],
+        "ds-body": ["14px", { lineHeight: "20px" }],
+        "ds-title": ["18px", { lineHeight: "24px", fontWeight: "700" }],
+        "ds-display": ["26px", { lineHeight: "32px", fontWeight: "700" }],
+      },
+      boxShadow: { ds: "var(--ds-shadow)" },
       borderRadius: {
+        ds: "var(--ds-radius)",
+        "ds-sm": "var(--ds-radius-sm)",
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
