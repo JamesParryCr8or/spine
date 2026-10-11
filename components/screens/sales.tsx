@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Info } from "lucide-react";
 import { default365DayRange, type FinanceDatePreset, financeDateRange, FinanceDateControls, useReportRun } from "@/components/analytics/shared";
 import { PanelState, UpdatingChip } from "@/components/ui/panel-state";
+import { LeakagePanels } from "@/components/screens/leakage-panels";
 import { fetchJson, peekJson } from "@/lib/queries/client";
 import { useResetOnChange } from "@/lib/use-reset-on-change";
 import type { MarginRow, RankRow, SalesInsights, TimeBucket } from "@/lib/analytics/sales-insights";
@@ -141,5 +142,6 @@ export function Sales({ reportRunId }: { reportRunId?: string }) {
         {data.discountCodes.length ? <ul className="rank-list">{data.discountCodes.map((row) => <li key={row.label}><div><strong>{row.label}</strong><span>{money.format(row.sales)} · {row.orders.toLocaleString()} orders{row.label === "No discount code" ? "" : ` · ${money.format(row.discounts)} discounted`}</span></div><Bar value={row.sales} max={Math.max(...data.discountCodes.map((code) => code.sales))}/></li>)}</ul> : <PanelState status="empty" title="No discount codes used"/>}
       </article>
     </section>
+    <LeakagePanels from={fromDate} to={toDate}/>
   </>;
 }
