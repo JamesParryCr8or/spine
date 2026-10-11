@@ -5,6 +5,13 @@ import { WeeklyReportSettings } from "@/components/weekly-report-settings";
 import { SyncScheduleSettings } from "@/components/sync-schedule-settings";
 import { CircleDollarSign, KeyRound, Trash2 } from "lucide-react";
 import { PanelState } from "@/components/ui/panel-state";
+import { Button } from "@/components/ui/button";
+import { DataTable, type Column } from "@/components/ui/data-table";
+import { EmptyState } from "@/components/ui/empty-state";
+import { FormField, FormGrid, SelectInput, TextInput } from "@/components/ui/form-field";
+import { Modal } from "@/components/ui/modal";
+import { Panel } from "@/components/ui/panel";
+import { useToast } from "@/components/ui/toast";
 
 type ExchangeRateRow = { id: string; base_currency: string; quote_currency: string; rate: string; effective_date: string; source: string; notes: string | null; updated_at: string };
 
@@ -13,6 +20,9 @@ type ConnectionAuditEvent = { id: string; provider: "meta" | "shopify" | "google
 type StoreCostDefaults = { fulfilmentAmount: string; fulfilmentBasis: "orders" | "units"; postageAmount: string; postageBasis: "orders" | "units"; defaultCogsPercent: string; businessContributionMarginPercent: string; currency: string };
 
 export function SettingsView() {
+  const { toast } = useToast();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [rates, setRates] = useState<ExchangeRateRow[]>([]);
   const [connectionAudit, setConnectionAudit] = useState<ConnectionAuditEvent[]>([]);
   const [auditUserId, setAuditUserId] = useState("");
@@ -46,6 +56,7 @@ export function SettingsView() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Could not save cost defaults");
       setCostDefaults(payload.defaults);
+      toast({ title: "Cost defaults saved", tone: "success" });
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save cost defaults"); } finally { setSavingDefaults(false); }
   };
   const saveAverageOrderValue = async () => {
@@ -55,6 +66,7 @@ export function SettingsView() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Could not save average order value");
       setAverageOrderValue(String(payload.averageOrderValue));
+      toast({ title: "Average order value saved", tone: "success" });
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save average order value"); } finally { setSavingAverageOrderValue(false); }
   };
   const loadConnectionAudit = useCallback(() => fetch("/api/settings/connection-audit").then(async (response) => { if (response.status === 403) return null; const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Could not load connection security history"); setConnectionAudit(payload.events ?? []); setAuditUserId(payload.currentUserId ?? ""); return payload; }).catch((reason) => setError(reason instanceof Error ? reason.message : "Could not load connection security history")).finally(() => setAuditLoading(false)), []);
@@ -72,8 +84,6 @@ export function SettingsView() {
     finally { setSavingBrandName(false); }
   };
   const deleteCurrentBrand = async () => {
-    const confirmed = window.confirm(`Delete "${currentBrandName || "this brand"}"? This permanently removes its connections, imported data, costs and reports. This cannot be undone.`);
-    if (!confirmed) return;
     setDeletingBrand(true); setError("");
     try {
       const response = await fetch("/api/workspace", { method: "DELETE" });
@@ -99,6 +109,7 @@ export function SettingsView() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Could not save exchange rate");
       setForm({ ...form, rate: "", notes: "" }); await loadRates();
+      toast({ title: "Exchange rate saved", tone: "success" });
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save exchange rate"); } finally { setSaving(false); }
   };
   const deleteRate = async (id: string) => {
@@ -106,6 +117,106 @@ export function SettingsView() {
     const response = await fetch(`/api/settings/exchange-rates?id=${encodeURIComponent(id)}`, { method: "DELETE" });
     if (!response.ok) { const payload = await response.json(); setError(payload.error || "Could not delete exchange rate"); return; }
     await loadRates();
+    toast({ title: "Exchange rate deleted", tone: "success" });
   };
-  return <><section className="cost-toolbar"><div><span className="eyebrow">FINANCIAL SETTINGS</span><h2>Store cost defaults</h2><p>Set the cost and margin assumptions used by reporting for this brand.</p></div></section>{error && <div className="connection-error cost-error">{error}</div>}<section className="panel report-panel brand-settings" data-business-model={businessModel}><div className="panel-head"><div><span className="eyebrow">CURRENT BRAND</span><h2>Brand settings</h2><p>Set the active brand&apos;s name and reporting model. The navigation updates to show only the pages that model needs.</p></div></div><div className="filter-row"><label>Brand name<input value={currentBrandName} disabled={!canManage || savingBrandName} maxLength={80} onChange={(event) => setCurrentBrandName(event.target.value)} placeholder="Brand name"/></label><label>Business model<select value={businessModel} disabled={!canManage || savingBrandName} onChange={(event) => setBusinessModel(event.target.value as "ecommerce" | "lead_generation")}><option value="ecommerce">Ecommerce</option><option value="lead_generation">Lead generation</option></select><small>{businessModel === "lead_generation" ? "Shows Leads, connections and settings." : "Shows ecommerce reporting, products and customer insights."}</small></label>{canManage && <button className="primary" disabled={savingBrandName || deletingBrand || currentBrandName.trim().length < 2} onClick={() => void saveCurrentBrandSettings()}>{savingBrandName ? "Saving…" : "Save brand settings"}</button>}</div>{canManage && <div className="brand-danger"><div><strong>Delete this brand</strong><span>Deletes this brand and all of its stored data. You will switch to another brand.</span></div><button className="danger-button" disabled={savingBrandName || deletingBrand} onClick={() => void deleteCurrentBrand()}>{deletingBrand ? "Deleting…" : "Delete brand"}</button></div>}</section><section className="panel report-panel brand-settings"><div className="panel-head"><div><span className="eyebrow">BRANDS</span><h2>Add another brand</h2><p>Each brand has its own Shopify, Meta, Google Ads, and Klaviyo connections, costs, and reporting data.</p></div></div><div className="filter-row"><label>Brand name<input value={brandName} disabled={!canManage || creatingBrand} maxLength={80} onChange={(event) => setBrandName(event.target.value)} placeholder="New brand"/></label>{canManage && <button className="primary" disabled={creatingBrand || brandName.trim().length < 2} onClick={() => void createBrand()}>{creatingBrand ? "Creating…" : "Create and switch"}</button>}</div></section>{businessModel === "lead_generation" ? <><section className="panel report-panel lead-gen-economics"><div className="panel-head"><div><span className="eyebrow">BUSINESS ECONOMICS</span><h2>Product and service contribution margin</h2><p>Set the share of collected sales remaining after direct product or service costs, before marketing and operating costs.</p></div><span className="report-note">{costDefaults.currency}</span></div><div className="filter-row"><label>Contribution margin (%)<input inputMode="decimal" min="0" max="100" value={costDefaults.businessContributionMarginPercent} disabled={!canManage} onChange={(event) => setCostDefaults({ ...costDefaults, businessContributionMarginPercent: event.target.value })}/></label>{canManage && <button className="primary" disabled={savingDefaults} onClick={() => void saveCostDefaults()}>{savingDefaults ? "Saving…" : "Save margin"}</button>}</div></section><section className="panel report-panel lead-gen-economics"><div className="panel-head"><div><span className="eyebrow">SALES ASSUMPTION</span><h2>Average purchase value</h2><p>Used with the selected GoHighLevel purchase stage to estimate revenue and earnings per lead.</p></div><span className="report-note">{costDefaults.currency}</span></div><div className="filter-row"><label>Average order / deal value<input inputMode="decimal" min="0" max="1000000000" value={averageOrderValue} disabled={!canManage || savingAverageOrderValue} onChange={(event) => setAverageOrderValue(event.target.value)} placeholder="250"/></label>{canManage && <button className="primary" disabled={savingAverageOrderValue || !Number.isFinite(Number(averageOrderValue)) || Number(averageOrderValue) < 0} onClick={() => void saveAverageOrderValue()}>{savingAverageOrderValue ? "Saving…" : "Save value"}</button>}</div></section></> : <section className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">ORDER ECONOMICS</span><h2>Fulfilment and postage</h2><p>Product shipping overrides take priority over the postage default. Use the COGS rate only when a product does not have its own Shopify or manual unit cost.</p></div><span className="report-note">{costDefaults.currency}</span></div><div className="filter-row"><label>Default COGS rate (%)<input inputMode="decimal" min="0" max="100" value={costDefaults.defaultCogsPercent} disabled={!canManage} onChange={(event) => setCostDefaults({ ...costDefaults, defaultCogsPercent: event.target.value })}/></label><label>Fulfilment cost<input inputMode="decimal" min="0" value={costDefaults.fulfilmentAmount} disabled={!canManage} onChange={(event) => setCostDefaults({ ...costDefaults, fulfilmentAmount: event.target.value })}/></label><label>Fulfilment basis<select value={costDefaults.fulfilmentBasis} disabled={!canManage} onChange={(event) => setCostDefaults({ ...costDefaults, fulfilmentBasis: event.target.value as "orders" | "units" })}><option value="orders">Per order</option><option value="units">Per unit</option></select></label><label>Postage cost<input inputMode="decimal" min="0" value={costDefaults.postageAmount} disabled={!canManage} onChange={(event) => setCostDefaults({ ...costDefaults, postageAmount: event.target.value })}/></label><label>Postage basis<select value={costDefaults.postageBasis} disabled={!canManage} onChange={(event) => setCostDefaults({ ...costDefaults, postageBasis: event.target.value as "orders" | "units" })}><option value="orders">Per order</option><option value="units">Per unit</option></select></label>{canManage && <button className="primary" disabled={savingDefaults} onClick={() => void saveCostDefaults()}>{savingDefaults ? "Saving…" : "Save defaults"}</button>}</div></section>}<SyncScheduleSettings/><WeeklyReportSettings/><section className="cost-toolbar"><div><span className="eyebrow">CURRENCY SETTINGS</span><h2>Exchange rates</h2><p>Add dated rates before Spine converts Shopify Markets orders into {reportingCurrency}. Until then, those orders remain excluded from consolidated totals.</p></div></section>{canManage && <section className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">MANUAL RATE</span><h2>Add or replace a dated rate</h2></div></div><div className="filter-row"><label>Source currency<input value={form.baseCurrency} maxLength={3} onChange={(event) => setForm({ ...form, baseCurrency: event.target.value.toUpperCase() })}/></label><label>Reporting currency<input value={reportingCurrency} disabled/></label><label>Rate<input inputMode="decimal" value={form.rate} onChange={(event) => setForm({ ...form, rate: event.target.value })} placeholder="0.7900000000"/></label><label>Effective date<input type="date" value={form.effectiveDate} onChange={(event) => setForm({ ...form, effectiveDate: event.target.value })}/></label><label>Notes<input value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Optional source or rationale"/></label><button className="primary" disabled={saving || !form.rate || form.baseCurrency.length !== 3} onClick={() => void saveRate()}>{saving ? "Saving…" : "Save rate"}</button></div></section>}<section className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">RATE HISTORY</span><h2>Effective-dated conversions</h2></div><span className="report-note">One unit of source currency equals the listed reporting-currency amount.</span></div>{loading ? <PanelState status="loading" message="Loading exchange rates…"/> : rates.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Effective date</th><th>Conversion</th><th>Source</th><th>Notes</th><th/></tr></thead><tbody>{rates.map((rate) => <tr key={rate.id}><td>{new Date(`${rate.effective_date}T00:00:00Z`).toLocaleDateString("en-GB")}</td><td><strong>1 {rate.base_currency} = {Number(rate.rate).toLocaleString("en-GB", { maximumFractionDigits: 10 })} {rate.quote_currency}</strong></td><td>{rate.source}</td><td>{rate.notes || "—"}</td><td>{canManage && <button className="icon-button" title="Delete rate" onClick={() => void deleteRate(rate.id)}><Trash2/></button>}</td></tr>)}</tbody></table></div> : <div className="cost-empty"><CircleDollarSign/><strong>No exchange rates yet</strong><span>Foreign-currency orders remain excluded until a dated rate is available.</span></div>}</section>{canManage && <section className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">CONNECTION SECURITY</span><h2>Credential audit history</h2></div><span className="report-note">Owner/admin view · secret values are never recorded.</span></div>{auditLoading ? <PanelState status="loading" message="Loading credential history…"/> : connectionAudit.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Time</th><th>Provider</th><th>Action</th><th>Actor</th><th>Details</th></tr></thead><tbody>{connectionAudit.map((event) => <tr key={event.id}><td>{new Date(event.created_at).toLocaleString("en-GB")}</td><td>{event.provider === "google_ads" ? "Google Ads" : event.provider.charAt(0).toUpperCase() + event.provider.slice(1)}</td><td><strong>{({ credential_created: "Credential created", credential_rotated: "Credential rotated", connection_deleted: "Connection deleted", scopes_updated: "Shopify scopes updated" } as const)[event.action]}</strong></td><td>{event.actor_user_id === auditUserId ? "You" : `User …${event.actor_user_id.slice(-6)}`}</td><td>{event.action === "scopes_updated" ? `${event.metadata.scope_count ?? 0} scopes recorded` : "No secret values stored"}</td></tr>)}</tbody></table></div> : <div className="cost-empty"><KeyRound/><strong>No credential changes recorded yet</strong><span>Future connection changes will appear here for owners and admins.</span></div>}</section>}</>;
+  const rateColumns: Column<ExchangeRateRow>[] = [
+    { key: "date", header: "Effective date", sortValue: (rate) => rate.effective_date, render: (rate) => new Date(`${rate.effective_date}T00:00:00Z`).toLocaleDateString("en-GB") },
+    { key: "conversion", header: "Conversion", sortValue: (rate) => `${rate.base_currency}${rate.quote_currency}`, render: (rate) => <strong className="font-semibold">1 {rate.base_currency} = {Number(rate.rate).toLocaleString("en-GB", { maximumFractionDigits: 10 })} {rate.quote_currency}</strong>, csv: (rate) => `1 ${rate.base_currency} = ${rate.rate} ${rate.quote_currency}` },
+    { key: "source", header: "Source", sortValue: (rate) => rate.source },
+    { key: "notes", header: "Notes", render: (rate) => rate.notes || "—", csv: (rate) => rate.notes ?? "" },
+    { key: "actions", header: "", render: (rate) => canManage ? <Button variant="ghost" size="icon" aria-label={`Delete the ${rate.base_currency} rate effective ${rate.effective_date}`} onClick={() => void deleteRate(rate.id)}><Trash2/></Button> : null },
+  ];
+  const providerName = (provider: ConnectionAuditEvent["provider"]) => provider === "google_ads" ? "Google Ads" : provider.charAt(0).toUpperCase() + provider.slice(1);
+  const actionNames = { credential_created: "Credential created", credential_rotated: "Credential rotated", connection_deleted: "Connection deleted", scopes_updated: "Shopify scopes updated" } as const;
+  const auditColumns: Column<ConnectionAuditEvent>[] = [
+    { key: "time", header: "Time", sortValue: (event) => event.created_at, render: (event) => new Date(event.created_at).toLocaleString("en-GB") },
+    { key: "provider", header: "Provider", sortValue: (event) => providerName(event.provider), render: (event) => providerName(event.provider) },
+    { key: "action", header: "Action", sortValue: (event) => actionNames[event.action], render: (event) => <strong className="font-semibold">{actionNames[event.action]}</strong>, csv: (event) => actionNames[event.action] },
+    { key: "actor", header: "Actor", render: (event) => event.actor_user_id === auditUserId ? "You" : `User …${event.actor_user_id.slice(-6)}`, csv: (event) => event.actor_user_id === auditUserId ? "You" : event.actor_user_id },
+    { key: "details", header: "Details", render: (event) => event.action === "scopes_updated" ? `${event.metadata.scope_count ?? 0} scopes recorded` : "No secret values stored", csv: (event) => event.action === "scopes_updated" ? `${event.metadata.scope_count ?? 0} scopes recorded` : "No secret values stored" },
+  ];
+  const basisOptions = <><option value="orders">Per order</option><option value="units">Per unit</option></>;
+  const saveButton = (label: string, busy: boolean, disabled: boolean, onClick: () => void) => canManage ? <div className="mt-4 flex justify-end"><Button variant="primary" size="md" loading={busy} disabled={disabled} onClick={onClick}>{label}</Button></div> : null;
+  return <>
+    <div className="mb-5">
+      <span className="block text-ds-label uppercase text-ds-muted">Financial settings</span>
+      <h2 className="mt-1 text-ds-display text-ds-ink">Store cost defaults</h2>
+      <p className="mt-1 max-w-[70ch] text-ds-small text-ds-muted">Set the cost and margin assumptions used by reporting for this brand.</p>
+    </div>
+    {error && <PanelState status="error" title="That did not work" message={error}/>}
+
+    <Panel eyebrow="Current brand" title="Brand settings" description="Set the active brand's name and reporting model. The navigation updates to show only the pages that model needs.">
+      <FormGrid>
+        <FormField label="Brand name"><TextInput value={currentBrandName} disabled={!canManage || savingBrandName} maxLength={80} onChange={(event) => setCurrentBrandName(event.target.value)} placeholder="Brand name"/></FormField>
+        <FormField label="Business model" hint={businessModel === "lead_generation" ? "Shows Leads, connections and settings." : "Shows ecommerce reporting, products and customer insights."}>
+          <SelectInput value={businessModel} disabled={!canManage || savingBrandName} onChange={(event) => setBusinessModel(event.target.value as "ecommerce" | "lead_generation")}><option value="ecommerce">Ecommerce</option><option value="lead_generation">Lead generation</option></SelectInput>
+        </FormField>
+      </FormGrid>
+      {saveButton("Save brand settings", savingBrandName, deletingBrand || currentBrandName.trim().length < 2, () => void saveCurrentBrandSettings())}
+      {canManage && <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-ds-sm border border-ds-negative/30 bg-ds-negative-soft px-4 py-3">
+        <div><strong className="block text-ds-small font-semibold text-ds-negative">Delete this brand</strong><span className="text-ds-small text-ds-ink">Deletes this brand and all of its stored data. You will switch to another brand.</span></div>
+        <Button variant="danger" size="md" disabled={savingBrandName || deletingBrand} onClick={() => { setDeleteConfirmation(""); setConfirmingDelete(true); }}>Delete brand</Button>
+      </div>}
+    </Panel>
+
+    <Panel eyebrow="Brands" title="Add another brand" description="Each brand has its own Shopify, Meta, Google Ads, and Klaviyo connections, costs, and reporting data.">
+      <FormGrid><FormField label="Brand name"><TextInput value={brandName} disabled={!canManage || creatingBrand} maxLength={80} onChange={(event) => setBrandName(event.target.value)} placeholder="New brand"/></FormField></FormGrid>
+      {saveButton("Create and switch", creatingBrand, brandName.trim().length < 2, () => void createBrand())}
+    </Panel>
+
+    {businessModel === "lead_generation" ? <>
+      <Panel eyebrow="Business economics" title="Product and service contribution margin" description="Set the share of collected sales remaining after direct product or service costs, before marketing and operating costs." actions={<span className="text-ds-small text-ds-muted">{costDefaults.currency}</span>}>
+        <FormGrid><FormField label="Contribution margin (%)"><TextInput inputMode="decimal" value={costDefaults.businessContributionMarginPercent} disabled={!canManage} onChange={(event) => setCostDefaults({ ...costDefaults, businessContributionMarginPercent: event.target.value })}/></FormField></FormGrid>
+        {saveButton("Save margin", savingDefaults, false, () => void saveCostDefaults())}
+      </Panel>
+      <Panel eyebrow="Sales assumption" title="Average purchase value" description="Used with the selected GoHighLevel purchase stage to estimate revenue and earnings per lead." actions={<span className="text-ds-small text-ds-muted">{costDefaults.currency}</span>}>
+        <FormGrid><FormField label="Average order / deal value"><TextInput inputMode="decimal" value={averageOrderValue} disabled={!canManage || savingAverageOrderValue} onChange={(event) => setAverageOrderValue(event.target.value)} placeholder="250"/></FormField></FormGrid>
+        {saveButton("Save value", savingAverageOrderValue, !Number.isFinite(Number(averageOrderValue)) || Number(averageOrderValue) < 0, () => void saveAverageOrderValue())}
+      </Panel>
+    </> : <Panel eyebrow="Order economics" title="Fulfilment and postage" description="Product shipping overrides take priority over the postage default. Use the COGS rate only when a product does not have its own Shopify or manual unit cost." actions={<span className="text-ds-small text-ds-muted">{costDefaults.currency}</span>}>
+      <FormGrid>
+        <FormField label="Default COGS rate (%)"><TextInput inputMode="decimal" value={costDefaults.defaultCogsPercent} disabled={!canManage} onChange={(event) => setCostDefaults({ ...costDefaults, defaultCogsPercent: event.target.value })}/></FormField>
+        <span aria-hidden="true" className="hidden sm:block"/>
+        <FormField label="Fulfilment cost"><TextInput inputMode="decimal" value={costDefaults.fulfilmentAmount} disabled={!canManage} onChange={(event) => setCostDefaults({ ...costDefaults, fulfilmentAmount: event.target.value })}/></FormField>
+        <FormField label="Fulfilment basis"><SelectInput value={costDefaults.fulfilmentBasis} disabled={!canManage} onChange={(event) => setCostDefaults({ ...costDefaults, fulfilmentBasis: event.target.value as "orders" | "units" })}>{basisOptions}</SelectInput></FormField>
+        <FormField label="Postage cost"><TextInput inputMode="decimal" value={costDefaults.postageAmount} disabled={!canManage} onChange={(event) => setCostDefaults({ ...costDefaults, postageAmount: event.target.value })}/></FormField>
+        <FormField label="Postage basis"><SelectInput value={costDefaults.postageBasis} disabled={!canManage} onChange={(event) => setCostDefaults({ ...costDefaults, postageBasis: event.target.value as "orders" | "units" })}>{basisOptions}</SelectInput></FormField>
+      </FormGrid>
+      {saveButton("Save defaults", savingDefaults, false, () => void saveCostDefaults())}
+    </Panel>}
+    <SyncScheduleSettings/>
+    <WeeklyReportSettings/>
+
+    <div className="mb-5 mt-8">
+      <span className="block text-ds-label uppercase text-ds-muted">Currency settings</span>
+      <h2 className="mt-1 text-ds-display text-ds-ink">Exchange rates</h2>
+      <p className="mt-1 max-w-[70ch] text-ds-small text-ds-muted">Add dated rates before Spine converts Shopify Markets orders into {reportingCurrency}. Until then, those orders remain excluded from consolidated totals.</p>
+    </div>
+    {canManage && <Panel eyebrow="Manual rate" title="Add or replace a dated rate">
+      <FormGrid className="lg:grid-cols-3">
+        <FormField label="Source currency"><TextInput value={form.baseCurrency} maxLength={3} onChange={(event) => setForm({ ...form, baseCurrency: event.target.value.toUpperCase() })}/></FormField>
+        <FormField label="Reporting currency"><TextInput value={reportingCurrency} disabled/></FormField>
+        <FormField label="Rate"><TextInput inputMode="decimal" value={form.rate} onChange={(event) => setForm({ ...form, rate: event.target.value })} placeholder="0.7900000000"/></FormField>
+        <FormField label="Effective date"><TextInput type="date" value={form.effectiveDate} onChange={(event) => setForm({ ...form, effectiveDate: event.target.value })}/></FormField>
+        <FormField label="Notes" optional className="lg:col-span-2"><TextInput value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Source or rationale"/></FormField>
+      </FormGrid>
+      <div className="mt-4 flex justify-end"><Button variant="primary" size="md" loading={saving} disabled={!form.rate || form.baseCurrency.length !== 3} onClick={() => void saveRate()}>Save rate</Button></div>
+    </Panel>}
+    <Panel eyebrow="Rate history" title="Effective-dated conversions" description="One unit of source currency equals the listed reporting-currency amount." flush>
+      <DataTable caption="Exchange rates" columns={rateColumns} rows={rates} rowKey={(rate) => rate.id} loading={loading} exportName="exchange-rates.csv"
+        empty={<EmptyState icon={<CircleDollarSign/>} title="No exchange rates yet" description="Foreign-currency orders remain excluded until a dated rate is available."/>}/>
+    </Panel>
+    {canManage && <Panel eyebrow="Connection security" title="Credential audit history" description="Owner/admin view. Secret values are never recorded." flush>
+      <DataTable caption="Credential audit history" columns={auditColumns} rows={connectionAudit} rowKey={(event) => event.id} loading={auditLoading} exportName="credential-audit.csv"
+        empty={<EmptyState icon={<KeyRound/>} title="No credential changes recorded yet" description="Future connection changes will appear here for owners and admins."/>}/>
+    </Panel>}
+
+    <Modal open={confirmingDelete} onClose={() => setConfirmingDelete(false)} eyebrow="Delete brand" title={`Delete ${currentBrandName || "this brand"}?`}
+      footer={<><Button variant="quiet" size="md" onClick={() => setConfirmingDelete(false)}>Cancel</Button><Button variant="danger" size="md" loading={deletingBrand} disabled={deleteConfirmation.trim() !== currentBrandName.trim() || !currentBrandName.trim()} onClick={() => void deleteCurrentBrand()}>Delete brand permanently</Button></>}>
+      <div className="flex flex-col gap-4">
+        <p className="text-ds-body text-ds-ink">This permanently removes the brand&apos;s connections, imported data, costs and reports. This cannot be undone.</p>
+        <FormField label={`Type "${currentBrandName}" to confirm`}><TextInput value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} autoComplete="off"/></FormField>
+      </div>
+    </Modal>
+  </>;
 }

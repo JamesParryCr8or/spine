@@ -2,6 +2,12 @@
 
 import { useEffect, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { FormField, FormGrid, SelectInput, TextInput } from "@/components/ui/form-field";
+import { Panel } from "@/components/ui/panel";
+import { PanelState } from "@/components/ui/panel-state";
+import { useToast } from "@/components/ui/toast";
+
 type WeeklyReportState = { enabled: boolean; webhookUrl: string | null; globalWebhookConfigured: boolean; canManage: boolean };
 
 /**
@@ -9,11 +15,11 @@ type WeeklyReportState = { enabled: boolean; webhookUrl: string | null; globalWe
  * Owners and admins only; other roles don't see the panel.
  */
 export function WeeklyReportSettings() {
+  const { toast } = useToast();
   const [state, setState] = useState<WeeklyReportState | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState("");
   const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -31,11 +37,11 @@ export function WeeklyReportSettings() {
     return () => controller.abort();
   }, []);
 
-  if (!state?.canManage) return error ? <section className="panel report-panel"><div className="panel-error" role="alert">{error}</div></section> : null;
+  if (!state?.canManage) return error ? <Panel><PanelState status="error" title="Weekly report settings could not be loaded" message={error}/></Panel> : null;
 
   const dirty = enabled !== state.enabled || webhookUrl.trim() !== (state.webhookUrl ?? "");
   const save = async () => {
-    setSaving(true); setError(""); setStatus("");
+    setSaving(true); setError("");
     try {
       const response = await fetch("/api/settings/weekly-report", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled, webhookUrl }) });
       const payload = await response.json();
@@ -43,7 +49,7 @@ export function WeeklyReportSettings() {
       const value = payload as WeeklyReportState;
       setState(value);
       setWebhookUrl(value.webhookUrl ?? "");
-      setStatus("Saved");
+      toast({ title: "Weekly report settings saved", tone: "success" });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not save weekly report settings");
     } finally {
@@ -51,18 +57,14 @@ export function WeeklyReportSettings() {
     }
   };
 
-  return <section className="panel report-panel">
-    <div className="panel-head"><div>
-      <span className="eyebrow">WEEKLY REPORT</span>
-      <h2>Monday summary</h2>
-      <p>Send last week&apos;s sales, profit and ad spend for this brand to a webhook (for example a GoHighLevel workflow) every Monday. Off until you turn it on.</p>
-    </div></div>
-    <div className="filter-row">
-      <label>Send weekly report<select value={enabled ? "on" : "off"} onChange={(event) => { setEnabled(event.target.value === "on"); setStatus(""); }}><option value="off">Off</option><option value="on">On</option></select></label>
-      <label>Webhook URL<input type="url" placeholder={state.globalWebhookConfigured ? "Leave blank to use the default webhook" : "https://…"} value={webhookUrl} onChange={(event) => { setWebhookUrl(event.target.value); setStatus(""); }}/></label>
-      <button className="primary" disabled={saving || !dirty} onClick={() => void save()}>{saving ? "Saving…" : "Save weekly report"}</button>
-      {status && <span className="report-note" role="status">{status}</span>}
-    </div>
-    {error && <div className="panel-error" role="alert">{error}</div>}
-  </section>;
+  return (
+    <Panel eyebrow="Weekly report" title="Monday summary" description="Send last week's sales, profit and ad spend for this brand to a webhook (for example a GoHighLevel workflow) every Monday. Off until you turn it on.">
+      <FormGrid>
+        <FormField label="Send weekly report"><SelectInput value={enabled ? "on" : "off"} onChange={(event) => setEnabled(event.target.value === "on")}><option value="off">Off</option><option value="on">On</option></SelectInput></FormField>
+        <FormField label="Webhook URL" optional={state.globalWebhookConfigured} hint={state.globalWebhookConfigured ? "Leave blank to use the default webhook." : undefined}><TextInput type="url" placeholder="https://…" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)}/></FormField>
+      </FormGrid>
+      {error && <div className="mt-4"><PanelState status="error" title="That did not work" message={error}/></div>}
+      <div className="mt-4 flex justify-end"><Button variant="primary" size="md" loading={saving} disabled={!dirty} onClick={() => void save()}>Save weekly report</Button></div>
+    </Panel>
+  );
 }
