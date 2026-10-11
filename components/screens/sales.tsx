@@ -6,7 +6,7 @@ import { default365DayRange, type FinanceDatePreset, financeDateRange, FinanceDa
 import { PanelState, UpdatingChip } from "@/components/ui/panel-state";
 import { fetchJson, peekJson } from "@/lib/queries/client";
 import { useResetOnChange } from "@/lib/use-reset-on-change";
-import type { ComboRow, DomainRow, MarginRow, RankRow, SalesInsights, TimeBucket } from "@/lib/analytics/sales-insights";
+import type { MarginRow, RankRow, SalesInsights, TimeBucket } from "@/lib/analytics/sales-insights";
 
 type InsightsData = SalesInsights & { hasData: boolean; currency: string; timezone: string; dataRange?: { from: string; to: string } | null };
 
@@ -103,12 +103,8 @@ export function Sales({ reportRunId }: { reportRunId?: string }) {
   const dayLabels = weekdayNames.map((name) => name.slice(0, 3));
   const peakHour = data.byHour.reduce((best, bucket, hour) => bucket[timeMetric] > data.byHour[best][timeMetric] ? hour : best, 0);
   const peakDay = data.byWeekday.reduce((best, bucket, day) => bucket[timeMetric] > data.byWeekday[best][timeMetric] ? day : best, 0);
-  const domains: DomainRow[] = data.domains.rows.slice(0, 10);
-  const maxDomain = Math.max(0, ...domains.map((row) => row.sales));
   const marginRows: MarginRow[] = [...data.margin.rows].sort((left, right) => right[marginSort] - left[marginSort]).slice(0, 10);
   const maxMargin = Math.max(0, ...marginRows.map((row) => row.margin));
-  const combos: ComboRow[] = data.combos.slice(0, 8);
-  const maxCombo = Math.max(0, ...combos.map((row) => row.orders));
 
   return <>
     {controls}
@@ -119,17 +115,10 @@ export function Sales({ reportRunId }: { reportRunId?: string }) {
       <div><span>Average order value</span><strong>{money2.format(summary.aov)}</strong></div>
       <div><span>Units per order</span><strong>{summary.unitsPerOrder.toFixed(2)}</strong></div>
       <div><span>Repeat customer orders</span><strong>{summary.repeatRate === null ? "—" : percent(summary.repeatRate)}</strong></div>
-      <div><span>Orders with 2+ products</span><strong>{percent(summary.multiProductShare)}</strong></div>
-      <div><span>Orders using a discount</span><strong>{percent(summary.discountedShare)}</strong></div>
+      <div><span>Orders using a discount code</span><strong>{percent(summary.discountedShare)}</strong></div>
     </section>
 
     <section className="insight-grid">
-      <article className="panel report-panel insight-panel wide">
-        <div className="panel-head"><div><span className="eyebrow">BASKETS</span><h2>Products bought together</h2></div></div>
-        <span className="report-note insight-note">Pairs of products that appear in the same order. The percentage is how often buyers of the less common product also bought the other.</span>
-        {combos.length ? <ul className="rank-list">{combos.map((row) => <li key={`${row.a}|${row.b}`}><div><strong>{row.a} <em>+</em> {row.b}</strong><span>{row.orders.toLocaleString()} orders · {money.format(row.netSales)} · {percent(row.confidence)} attach rate</span></div><Bar value={row.orders} max={maxCombo}/></li>)}</ul> : <PanelState status="empty" title="No repeated combinations yet" message="Needs at least two orders containing the same pair of products."/>}
-      </article>
-
       <article className="panel report-panel insight-panel wide">
         <div className="panel-head"><div><span className="eyebrow">TIMING</span><h2>When customers buy</h2></div><div className="segmented">{(["sales", "orders"] as const).map((key) => <button key={key} className={timeMetric === key ? "active" : ""} onClick={() => setTimeMetric(key)}>{key === "sales" ? "Net sales" : "Orders"}</button>)}</div></div>
         <span className="report-note insight-note">Busiest hour is {hourLabels[peakHour]}:00 and busiest day is {weekdayNames[peakDay]}, in store time ({data.timezone}).</span>
@@ -137,15 +126,9 @@ export function Sales({ reportRunId }: { reportRunId?: string }) {
       </article>
 
       <article className="panel report-panel insight-panel">
-        <div className="panel-head"><div><span className="eyebrow">MARKETS</span><h2>Store domains by revenue</h2></div></div>
-        <span className="report-note insight-note">The storefront domain each order&apos;s visit landed on, so you can compare your Shopify Markets. Covers {percent(data.domains.coverage)} of orders; the rest have no tracked visit.</span>
-        {domains.length ? <ul className="rank-list">{domains.map((row) => <li key={row.domain}><div><strong>{row.domain}</strong><span>{money.format(row.sales)} · {row.orders.toLocaleString()} orders · {money2.format(row.aov)} average order</span></div><Bar value={row.sales} max={maxDomain}/></li>)}</ul> : <PanelState status="empty" title="No storefront domains recorded" message="Shopify did not report a landing page for orders in this period."/>}
-      </article>
-
-      <article className="panel report-panel insight-panel">
         <div className="panel-head"><div><span className="eyebrow">PROFITABILITY</span><h2>Biggest contribution margin</h2></div><div className="segmented">{(["margin", "marginPct"] as const).map((key) => <button key={key} className={marginSort === key ? "active" : ""} onClick={() => setMarginSort(key)}>{key === "margin" ? "Amount" : "Percent"}</button>)}</div></div>
-        <span className="report-note insight-note">Net sales minus product cost, before shipping and fees. Only products with a known cost on every sale are ranked.</span>
-        {marginRows.length ? <ul className="rank-list">{marginRows.map((row) => <li key={row.product}><div><strong>{row.product}</strong><span>{money.format(row.margin)} margin · {percent(row.marginPct)} · {row.units.toLocaleString()} units</span></div><Bar value={row.margin} max={maxMargin} tone="green"/></li>)}</ul> : <PanelState status="empty" title="No products have complete costs yet" message="Add product costs on the Costs screen, or sync Shopify unit costs, and margins appear here."/>}
+        <span className="report-note insight-note">Shopify gross profit: net sales minus the cost recorded in Shopify. Only products with a cost on every sale are ranked.</span>
+        {marginRows.length ? <ul className="rank-list">{marginRows.map((row) => <li key={row.product}><div><strong>{row.product}</strong><span>{money.format(row.margin)} margin · {percent(row.marginPct)} · {row.units.toLocaleString()} units</span></div><Bar value={row.margin} max={maxMargin} tone="green"/></li>)}</ul> : <PanelState status="empty" title="No products have complete costs yet" message="Add unit costs to your products in Shopify and margins appear here. Costs added in Spine apply to Profit & Loss."/>}
         {data.margin.incompleteProducts > 0 && <div className="insight-foot"><Info/>{data.margin.incompleteProducts.toLocaleString()} product{data.margin.incompleteProducts === 1 ? " is" : "s are"} missing a cost and not ranked ({percent(data.margin.costedShare)} of product sales have a cost).</div>}
       </article>
 
