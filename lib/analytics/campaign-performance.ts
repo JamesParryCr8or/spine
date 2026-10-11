@@ -24,6 +24,8 @@ export type CampaignRow = {
   key: string; source: string; medium: string; campaign: string; platform: Platform | null;
   orders: number; sales: number; newOrders: number; aov: number;
   spend: number | null; spendLink: SpendLink | null; roas: number | null; cpa: number | null;
+  /** The ad platform's own name for the matched campaign (e.g. Google's name for a numeric-ID UTM), or null. */
+  adCampaignName: string | null;
 };
 export type SourceRow = { source: string; medium: string; orders: number; sales: number; spend: number | null; roas: number | null };
 export type PlatformRow = { platform: Platform; spend: number; taggedSales: number; taggedOrders: number; roas: number | null };
@@ -87,7 +89,7 @@ export function computeCampaignPerformance(input: {
     // Net sales as reported by Shopify (after discounts and returns, before shipping and tax).
     const source = normalizeUtmSource(day.utm_source, ""), medium = day.utm_medium.trim().toLowerCase(), campaign = day.utm_campaign.trim().toLowerCase();
     const key = [source, medium, campaign].join("\u0000");
-    const row = groups.get(key) ?? { key, source, medium, campaign, platform: platformOf(source, medium), orders: 0, sales: 0, newOrders: 0, aov: 0, spend: null, spendLink: null, roas: null, cpa: null };
+    const row = groups.get(key) ?? { key, source, medium, campaign, platform: platformOf(source, medium), orders: 0, sales: 0, newOrders: 0, aov: 0, spend: null, spendLink: null, roas: null, cpa: null, adCampaignName: null };
     row.orders += dayOrders; row.sales += daySales;
     if (day.customer_type === "new") row.newOrders += dayOrders;
     groups.set(key, row);
@@ -115,20 +117,21 @@ export function computeCampaignPerformance(input: {
     spendByKey.set(key, { spend: (existing?.spend ?? 0) + spend, link: existing && existing.link !== link ? (existing.link === "manual" || link === "manual" ? "manual" : "auto") : link });
   };
   const keyFor = (source: string, medium: string, campaign: string) => [normalizeUtmSource(source, ""), medium.trim().toLowerCase(), campaign.trim().toLowerCase()].join("\u0000");
+  const nameByKey = new Map<string, string>();
   const unmatched: UnmatchedCampaign[] = [];
   let campaignSpend = 0, matchedSpend = 0, customSpend = 0;
 
   for (const ad of input.adCampaigns) {
     campaignSpend += ad.spend;
     const mapping = manual.get(ad.campaignId);
-    if (mapping) { addSpend(keyFor(mapping.source, mapping.medium, mapping.campaign), ad.spend, "manual"); matchedSpend += ad.spend; continue; }
+    if (mapping) { const target = keyFor(mapping.source, mapping.medium, mapping.campaign); addSpend(target, ad.spend, "manual"); nameByKey.set(target, ad.campaignName); matchedSpend += ad.spend; continue; }
     const candidates = [normalizeName(ad.campaignName), normalizeName(ad.campaignId)].filter(Boolean)
       .flatMap((name) => rowsByCampaign.get(name) ?? [])
       .filter((row) => platformOfSourceOnly(row.source) === ad.platform);
     if (!candidates.length) { unmatched.push({ platform: ad.platform, campaignId: ad.campaignId, campaignName: ad.campaignName, spend: round2(ad.spend) }); continue; }
     // Several UTM rows can share one campaign name (different mediums): share spend by sales.
     const totalSales = candidates.reduce((total, row) => total + row.sales, 0);
-    for (const row of candidates) addSpend(row.key, totalSales > 0 ? ad.spend * row.sales / totalSales : ad.spend / candidates.length, "auto");
+    for (const row of candidates) { addSpend(row.key, totalSales > 0 ? ad.spend * row.sales / totalSales : ad.spend / candidates.length, "auto"); nameByKey.set(row.key, ad.campaignName); }
     matchedSpend += ad.spend;
   }
   for (const item of input.customSpend) {
@@ -141,7 +144,7 @@ export function computeCampaignPerformance(input: {
     const spend = linked ? round2(linked.spend) : null;
     return {
       ...row, sales: round2(row.sales), aov: row.orders ? row.sales / row.orders : 0,
-      spend, spendLink: linked?.link ?? null,
+      spend, spendLink: linked?.link ?? null, adCampaignName: nameByKey.get(row.key) ?? null,
       roas: spend && spend > 0 ? row.sales / spend : null,
       cpa: spend && spend > 0 && row.orders ? spend / row.orders : null,
     };

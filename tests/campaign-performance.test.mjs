@@ -26,6 +26,15 @@ test("meta campaign matches the same-named UTM campaign automatically", () => {
   assert.equal(result.coverage.unmatched.length, 0);
 });
 
+test("a Google campaign matches a numeric-ID UTM campaign and keeps its name", () => {
+  const result = computeCampaignPerformance({ ...base, days: [day({ utm_source: "google", utm_medium: "cpc", utm_campaign: "21612094953" })], adCampaigns: [{ platform: "google", campaignId: "21612094953", campaignName: "Brand - UK", spend: 40 }] });
+  assert.equal(result.rows[0].spend, 40);
+  assert.equal(result.rows[0].spendLink, "auto");
+  assert.equal(result.rows[0].roas, 5);
+  assert.equal(result.rows[0].adCampaignName, "Brand - UK");
+  assert.equal(result.coverage.unmatched.length, 0);
+});
+
 test("a campaign from another platform never auto-matches", () => {
   const result = computeCampaignPerformance({ ...base, days: [day({ utm_source: "google", utm_medium: "cpc" })], adCampaigns: [{ platform: "meta", campaignId: "1", campaignName: "summer_sale", spend: 50 }] });
   assert.equal(result.rows[0].spend, null);
