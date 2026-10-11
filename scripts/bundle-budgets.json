@@ -1,0 +1,13 @@
+{
+  "_note": "Uncompressed first-load JavaScript per route, in bytes. Set about 12% above the sizes measured on 11 Oct 2026 so normal changes pass and a large regression fails.",
+  "default": 520000,
+  "routes": {
+    "/protected": 985000,
+    "/protected/[view]": 985000,
+    "/auth/login": 860000,
+    "/auth/sign-up": 860000,
+    "/auth/update-password": 840000,
+    "/auth/forgot-password": 840000,
+    "/invite/[token]": 840000
+  }
+}

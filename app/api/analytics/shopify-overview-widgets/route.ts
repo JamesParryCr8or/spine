@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 import { shopifyGraph } from "@/lib/shopify/graphql";
 import { requireWorkspace } from "@/lib/workspace/server";
+import { timed } from "@/lib/server-timing";
 
 type Row = Record<string, string | number | null>;
 type Payload = { shopifyqlQuery: { tableData: { rows: Row[] } | null; parseErrors: string[] } };
@@ -15,7 +16,7 @@ const number = (value: unknown) => {
 };
 const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
 
-export async function GET(request: Request) {
+async function handleGet(request: Request) {
   const params = new URL(request.url).searchParams;
   const from = params.get("from") || "2000-01-01";
   const to = params.get("to") || new Date().toISOString().slice(0, 10);
@@ -71,3 +72,5 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Shopify reports could not be loaded" }, { status: 502 });
   }
 }
+
+export const GET = timed("analytics/shopify-overview-widgets", handleGet);

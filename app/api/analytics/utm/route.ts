@@ -8,6 +8,7 @@ import { createCurrencyCoverage } from "@/lib/analytics/currency-coverage";
 import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExchangeRate, type DatedExchangeRate } from "@/lib/analytics/exchange-rate";
 import { selectAllPages } from "@/lib/supabase/select-all";
 import { selectOrdersByProcessedAt } from "@/lib/supabase/select-orders";
+import { timed } from "@/lib/server-timing";
 
 type Order = { id: string; customer_id: string | null; net_product_sales: string; processed_at: string | null; currency: string; country_code: string | null; exchange_rate: number };
 type Line = { order_id: string; title: string; variant_title: string | null; variant_gid: string | null; sku: string | null; current_quantity: number };
@@ -46,7 +47,7 @@ const trendPeriodKey = (value: string, timeZone: string, groupBy: string) => {
   return `${year}-${month}`;
 };
 
-export async function GET(request: Request) {
+async function handleGet(request: Request) {
   const params = new URL(request.url).searchParams;
   const attributionModel = params.get("attribution") === "first_touch" ? "first_touch" : "last_touch";
   const fromDate = params.get("from") ?? "";
@@ -247,3 +248,5 @@ export async function GET(request: Request) {
     rows,
   });
 }
+
+export const GET = timed("analytics/utm", handleGet);

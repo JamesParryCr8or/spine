@@ -6,13 +6,14 @@ import { convertDatedAmount, resolveDatedExchangeRate, type DatedExchangeRate } 
 import { monetary } from "@/lib/analytics/effective-cost";
 import { selectAllPages } from "@/lib/supabase/select-all";
 import { requireWorkspace } from "@/lib/workspace/server";
+import { timed } from "@/lib/server-timing";
 
 const isDate = (value: string | null): value is string => Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
 
 type SpendRow = { spend: string | number; currency: string };
 type MetaCampaignRow = SpendRow & { campaign_id: string; campaign_name: string; date_start: string };
 
-export async function GET(request: Request) {
+async function handleGet(request: Request) {
   const params = new URL(request.url).searchParams;
   const from = params.get("from");
   const to = params.get("to");
@@ -98,3 +99,5 @@ export async function GET(request: Request) {
     ...performance,
   });
 }
+
+export const GET = timed("analytics/campaigns", handleGet);

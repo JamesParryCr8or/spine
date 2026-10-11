@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 import { shopifyGraph } from "@/lib/shopify/graphql";
 import { requireWorkspace } from "@/lib/workspace/server";
+import { timed } from "@/lib/server-timing";
 
 type ShopifyRow = Record<string, string | number | null>;
 type ShopifyQlPayload = {
@@ -37,7 +38,7 @@ async function run(shop: string, token: string, query: string) {
   return result.shopifyqlQuery.tableData?.rows ?? [];
 }
 
-export async function GET(request: Request) {
+async function handleGet(request: Request) {
   const params = new URL(request.url).searchParams;
   const focus = params.get("focus");
   const from = params.get("from") ?? "";
@@ -117,3 +118,5 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Shopify report could not be loaded" }, { status: 502 });
   }
 }
+
+export const GET = timed("analytics/shopify-customer-reports", handleGet);

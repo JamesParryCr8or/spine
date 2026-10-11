@@ -8,6 +8,7 @@ import { bucketRepeatOrderGaps } from "@/lib/analytics/repeat-order-gaps";
 import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { selectAllPages } from "@/lib/supabase/select-all";
 import { selectOrdersByProcessedAt } from "@/lib/supabase/select-orders";
+import { timed } from "@/lib/server-timing";
 
 type Order = {
   id: string;
@@ -34,7 +35,7 @@ function mergeChunkPages<T>(chunkPages: Array<{ data: T[] | null; error: { messa
   return { data: chunkPages.flatMap((page) => page.data ?? []), error: null };
 }
 
-export async function GET(request: Request) {
+async function handleGet(request: Request) {
   const params = new URL(request.url).searchParams;
   const fromDate = params.get("from") ?? "";
   const toDate = params.get("to") ?? "";
@@ -301,3 +302,5 @@ export async function GET(request: Request) {
     },
   });
 }
+
+export const GET = timed("analytics/customers", handleGet);

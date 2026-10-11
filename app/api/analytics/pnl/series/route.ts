@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireWorkspace } from "@/lib/workspace/server";
 import { computePnl, contiguousSpans, loadPnlInputs, slicePnlInputs, type PnlInputs } from "@/lib/analytics/pnl-engine";
+import { timed } from "@/lib/server-timing";
 
 export const maxDuration = 60;
 
@@ -16,7 +17,7 @@ const maxSpans = 4;
  * Adjacent periods share one load of the underlying rows, so twelve monthly
  * columns cost one set of queries instead of twelve.
  */
-export async function GET(request: Request) {
+async function handleGet(request: Request) {
   const raw = new URL(request.url).searchParams.get("periods") ?? "";
   const periods = raw.split(",").filter(Boolean).map((value) => {
     const [start, end] = value.split("_");
@@ -48,3 +49,5 @@ export async function GET(request: Request) {
     }),
   });
 }
+
+export const GET = timed("analytics/pnl/series", handleGet);

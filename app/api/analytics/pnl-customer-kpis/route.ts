@@ -4,6 +4,7 @@ import { reportingPeriods, type ReportingGranularity } from "@/lib/analytics/rep
 import { createAdminClient } from "@/lib/supabase/admin";
 import { shopifyGraph } from "@/lib/shopify/graphql";
 import { requireWorkspace } from "@/lib/workspace/server";
+import { timed } from "@/lib/server-timing";
 
 export const maxDuration = 120;
 
@@ -36,7 +37,7 @@ const number = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-export async function GET(request: Request) {
+async function handleGet(request: Request) {
   const params = new URL(request.url).searchParams;
   const from = params.get("from") ?? "";
   const to = params.get("to") ?? "";
@@ -143,3 +144,5 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Shopify customer KPIs could not be loaded." }, { status: 502 });
   }
 }
+
+export const GET = timed("analytics/pnl-customer-kpis", handleGet);

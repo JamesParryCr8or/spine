@@ -13,6 +13,7 @@ import { convertDatedAmount, createCurrencyConversionCoverage, resolveDatedExcha
 import { reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { selectAllPages } from "@/lib/supabase/select-all";
 import { selectOrdersByProcessedAt } from "@/lib/supabase/select-orders";
+import { timed } from "@/lib/server-timing";
 
 type Order = { id: string; processed_at: string | null; currency: string; exchange_rate: number };
 type Line = { order_id: string; shopify_gid: string; variant_gid: string | null; sku: string | null; title: string; variant_title: string | null; current_quantity: number; net_sales: string; discounts: string };
@@ -43,7 +44,7 @@ const dayCountInclusive = (from: string, to: string) => Math.floor((Date.parse(`
 const laterDate = (left: string, right: string) => left > right ? left : right;
 const earlierDate = (left: string, right: string) => left < right ? left : right;
 
-export async function GET(request: Request) {
+async function handleGet(request: Request) {
   const params = new URL(request.url).searchParams;
   const fromDate = params.get("from") ?? "";
   const toDate = params.get("to") ?? "";
@@ -327,3 +328,4 @@ export async function GET(request: Request) {
   });
 }
 
+export const GET = timed("analytics/products", handleGet);
