@@ -251,13 +251,13 @@ Already solid: 98/98 tests pass, and CI runs typecheck, lint, test and build. Ev
 
 ## Phase 5: UI and design system
 
-- [ ] **5.1 [Sonnet] Design tokens and type scale.**
+- [~] **5.1 [Sonnet] Design tokens and type scale.** *Foundation done (11 Oct 2026):* `--ds-*` tokens in `app/globals.css` (canvas, surface, ink, muted at 5.9:1, line, accent, positive/negative/warning with soft backgrounds, radius, shadow) mapped in `tailwind.config.ts` as `ds-*` colours, `text-ds-label/small/body/title/display` (12/13/14/18/26 px), `shadow-ds`, `rounded-ds`. Global visible focus ring and reduced-motion rule added. The shadcn `--primary`/`--background` variables are still undefined (the auth pages style over them), so shadcn `Button` variants `default/outline/secondary/ghost` still have no colour; use the new `primary/soft/quiet/danger`. Hard-coded hex values in the old CSS migrate screen by screen.
   - Define CSS variables for surface, ink, muted, line, accent, positive, negative and warning, plus radius, spacing and shadow, and map them in `tailwind.config.ts`.
   - Replace hard-coded hex values screen by screen as each one is migrated.
   - Text sizes: 14px body, 12–13px secondary, 12px labels, never below 11px.
   - Keep text contrast at 4.5:1 or higher. For example, `#9aa1ae` on white is about 2.6:1.
 
-- [ ] **5.2 [Sonnet] Shared primitives on the existing shadcn/ui and Tailwind.**
+- [x] **5.2 [Sonnet] Shared primitives on the existing shadcn/ui and Tailwind.** *Done (11 Oct 2026):* `Button` gained `primary/soft/quiet/danger` variants, an `md` size and a `loading` prop; new `Panel`, `FormField` (+ `TextInput`, `SelectInput`, `FormGrid`), `StatCard` (delta, sparkline, skeleton), `DataTable` (sticky header, sortable, right-aligned numbers, CSV export, loading rows), `EmptyState`, `Modal` (native `<dialog>`: focus trap, Esc, focus return) and `Toast` (provider mounted in `app/protected/layout.tsx`). Expenses was rebuilt on them as the reference screen and its dead CSS removed. Not yet visually checked in a browser.
   Build these, then rebuild Expenses with them as the reference screen:
   - `Button`: one base style, which fixes the context-scoped `.primary` problem;
   - `Panel`: eyebrow, title, description, actions and a padded body;

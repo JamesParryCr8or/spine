@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 
 import { AnalyticsApp } from "@/components/analytics-app";
 import { QueryCacheScope } from "@/components/query-cache-scope";
+import { ToastProvider } from "@/components/ui/toast";
 import { requireWorkspace } from "@/lib/workspace/server";
 
 export const instant = false;
@@ -17,9 +18,9 @@ export default async function ProtectedLayout({ children }: { children: React.Re
   const storeId = workspace.ok ? workspace.store?.id ?? null : null;
   // The shell is the layout, so it stays mounted (and keeps its state) while
   // the URL changes between screens. The pages render nothing themselves.
-  return <>
+  return <ToastProvider>
     <QueryCacheScope userId={data.claims.sub} storeId={storeId} />
     <Suspense fallback={null}><AnalyticsApp /></Suspense>
     {children}
-  </>;
+  </ToastProvider>;
 }
