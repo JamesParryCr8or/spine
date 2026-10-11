@@ -4,8 +4,8 @@ import test from "node:test";
 import { computeCampaignPerformance, normalizeName, platformOf } from "../lib/analytics/campaign-performance.ts";
 import { campaignQuery, dateWindows, parseCampaignRows } from "../lib/analytics/campaign-rows.ts";
 
-const day = (extra = {}) => ({ sales_date: "2026-07-06", utm_source: "facebook", utm_medium: "paid_social", utm_campaign: "summer_sale", customer_type: "new", last_click_orders: 0, last_click_sales: 0, last_non_direct_orders: 2, last_non_direct_sales: 200, first_click_orders: 0, first_click_sales: 0, ...extra });
-const base = { model: "last_non_direct", platformSpend: [], adCampaigns: [], mappings: [], customSpend: [] };
+const day = (extra = {}) => ({ sales_date: "2026-07-06", utm_source: "facebook", utm_medium: "paid_social", utm_campaign: "summer_sale", customer_type: "new", orders: 2, net_sales: 200, ...extra });
+const base = { platformSpend: [], adCampaigns: [], mappings: [], customSpend: [] };
 
 test("platformOf only counts paid mediums as ad platforms", () => {
   assert.equal(platformOf("fb", "paid_social"), "meta");
@@ -47,23 +47,16 @@ test("manual mapping wins and unmatched spend is reported, not guessed", () => {
 test("spend shared across mediums of one campaign splits by sales", () => {
   const result = computeCampaignPerformance({
     ...base,
-    days: [day({ last_non_direct_sales: 300 }), day({ utm_medium: "cpc", last_non_direct_sales: 100 })],
+    days: [day({ net_sales: 300 }), day({ utm_medium: "cpc", net_sales: 100 })],
     adCampaigns: [{ platform: "meta", campaignId: "1", campaignName: "summer_sale", spend: 100 }],
   });
   assert.deepEqual(result.rows.map((row) => row.spend), [75, 25]);
 });
 
-test("attribution model picks its own measures", () => {
-  const days = [day({ last_click_orders: 5, last_click_sales: 500 })];
-  assert.equal(computeCampaignPerformance({ ...base, days, model: "last_click" }).totals.sales, 500);
-  assert.equal(computeCampaignPerformance({ ...base, days, model: "last_non_direct" }).totals.sales, 200);
-  assert.equal(computeCampaignPerformance({ ...base, days, model: "first_click" }).rows.length, 0);
-});
-
 test("untagged share, platform roas and blended roas", () => {
   const result = computeCampaignPerformance({
     ...base,
-    days: [day(), day({ utm_source: "", utm_medium: "", utm_campaign: "", last_non_direct_sales: 200 })],
+    days: [day(), day({ utm_source: "", utm_medium: "", utm_campaign: "", net_sales: 200 })],
     platformSpend: [{ platform: "meta", date: "2026-07-06", spend: 100 }],
   });
   assert.equal(result.totals.untaggedShare, 0.5);
@@ -78,13 +71,15 @@ test("normalizeName ignores case and punctuation", () => {
 
 test("parseCampaignRows drops empty rows, normalises and merges duplicate keys", () => {
   const ctx = { organizationId: "o", storeId: "s", currency: "GBP", now: "2026-07-10T00:00:00Z" };
-  const row = (extra) => ({ day: "2026-07-06", utm_source: "Facebook", utm_medium: "Paid_Social", utm_campaign: "Summer", new_or_returning_customer: "New", campaign_last_click_order_count: "1", campaign_last_click_total_sales: "£1,010.50", campaign_last_non_direct_click_order_count: "1", campaign_last_non_direct_click_total_sales: "10.00", campaign_first_click_order_count: "0", campaign_first_click_total_sales: "0", ...extra });
-  const rows = parseCampaignRows([row({}), row({ utm_source: "facebook " }), row({ campaign_last_click_order_count: "0", campaign_last_click_total_sales: "0", campaign_last_non_direct_click_order_count: "0", campaign_last_non_direct_click_total_sales: "0", utm_campaign: "empty" }), row({ day: "bad" })], ctx);
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].utm_source, "facebook");
-  assert.equal(rows[0].customer_type, "new");
-  assert.equal(rows[0].last_click_orders, 2);
-  assert.equal(rows[0].last_click_sales, 2021);
+  const row = (extra) => ({ day: "2026-07-06", order_utm_source: "Facebook", order_utm_medium: "Paid_Social", order_utm_campaign: "Summer", new_or_returning_customer: "New", orders: "1", net_sales: "£1,010.50", ...extra });
+  const rows = parseCampaignRows([row({}), row({ order_utm_source: "facebook " }), row({ orders: "0", net_sales: "0", order_utm_campaign: "empty" }), row({ day: "bad" }), row({ order_utm_source: "", order_utm_medium: "", order_utm_campaign: "", new_or_returning_customer: "" })], ctx);
+  assert.equal(rows.length, 2);
+  const tagged = rows.find((item) => item.utm_source === "facebook");
+  assert.equal(tagged.customer_type, "new");
+  assert.equal(tagged.orders, 2);
+  assert.equal(tagged.net_sales, 2021);
+  const untagged = rows.find((item) => item.utm_source === "");
+  assert.equal(untagged.customer_type, "unknown");
 });
 
 test("dateWindows covers the range newest first without gaps", () => {
@@ -94,7 +89,7 @@ test("dateWindows covers the range newest first without gaps", () => {
 
 test("campaignQuery asks for the daily UTM breakdown", () => {
   const query = campaignQuery("2026-01-01", "2026-01-31");
-  assert.match(query, /FROM campaign_sales/);
-  assert.match(query, /GROUP BY utm_source, utm_medium, utm_campaign, new_or_returning_customer/);
+  assert.match(query, /FROM sales/);
+  assert.match(query, /GROUP BY order_utm_source, order_utm_medium, order_utm_campaign, new_or_returning_customer/);
   assert.match(query, /TIMESERIES day/);
 });

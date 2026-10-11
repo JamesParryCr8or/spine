@@ -1,5 +1,5 @@
 /**
- * Campaign performance: joins ShopifyQL attributed sales with ad spend.
+ * Campaign performance: joins Shopify net sales by UTM with ad spend.
  * Pure (no I/O) so it is unit tested; relative imports only.
  *
  * Spend is only ever shown against sales when a link exists: an automatic
@@ -8,12 +8,11 @@
  */
 import { normalizeUtmSource } from "./utm-attribution.ts";
 
-export type AttributionModel = "last_non_direct" | "last_click" | "first_click";
 export type Platform = "meta" | "google" | "microsoft";
 
 export type CampaignDay = {
   sales_date: string; utm_source: string; utm_medium: string; utm_campaign: string; customer_type: "new" | "returning" | "unknown";
-  last_click_orders: number; last_click_sales: number; last_non_direct_orders: number; last_non_direct_sales: number; first_click_orders: number; first_click_sales: number;
+  orders: number; net_sales: number;
 };
 export type PlatformSpendDay = { platform: Platform; date: string; spend: number };
 export type AdCampaignSpend = { platform: Platform; campaignId: string; campaignName: string; spend: number };
@@ -65,12 +64,6 @@ function platformOfSourceOnly(source: string): Platform | null {
   return null;
 }
 
-const measures = {
-  last_non_direct: ["last_non_direct_orders", "last_non_direct_sales"],
-  last_click: ["last_click_orders", "last_click_sales"],
-  first_click: ["first_click_orders", "first_click_sales"],
-} as const;
-
 function weekStart(date: string) {
   const day = new Date(`${date}T00:00:00Z`);
   day.setUTCDate(day.getUTCDate() - ((day.getUTCDay() + 6) % 7));
@@ -79,21 +72,19 @@ function weekStart(date: string) {
 
 export function computeCampaignPerformance(input: {
   days: CampaignDay[];
-  model: AttributionModel;
   platformSpend: PlatformSpendDay[];
   adCampaigns: AdCampaignSpend[];
   mappings: CampaignMapping[];
   customSpend: CustomSpendRow[];
 }): CampaignPerformance {
-  const [ordersKey, salesKey] = measures[input.model];
   const groups = new Map<string, CampaignRow>();
   const weekly = new Map<string, WeekPoint>();
   let sales = 0, orders = 0, newOrders = 0, untaggedSales = 0;
 
   for (const day of input.days) {
-    const dayOrders = day[ordersKey], daySales = day[salesKey];
+    const dayOrders = day.orders, daySales = day.net_sales;
     if (dayOrders === 0 && daySales === 0) continue;
-    // Attributed sales are used as reported by Shopify (total sales incl. shipping and tax).
+    // Net sales as reported by Shopify (after discounts and returns, before shipping and tax).
     const source = normalizeUtmSource(day.utm_source, ""), medium = day.utm_medium.trim().toLowerCase(), campaign = day.utm_campaign.trim().toLowerCase();
     const key = [source, medium, campaign].join("\u0000");
     const row = groups.get(key) ?? { key, source, medium, campaign, platform: platformOf(source, medium), orders: 0, sales: 0, newOrders: 0, aov: 0, spend: null, spendLink: null, roas: null, cpa: null };
