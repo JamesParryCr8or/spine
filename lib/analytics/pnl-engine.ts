@@ -29,6 +29,9 @@ type ShopifyDaily = {
   orders: number; net_items_sold: number; total_payment_fees: string; cost_of_goods_sold: string; net_sales_without_cost_recorded: string;
 };
 
+/** Share of reported orders the import may be missing before a period stops using imported orders for costs. */
+export const importCoverageTolerance = 0.02;
+
 export type PnlStore = { id: string; currency: string; timezone: string | null };
 /** Inclusive store-local calendar dates; null leaves that side open. */
 export type PnlRange = { from: string | null; to: string | null };
@@ -241,7 +244,14 @@ export function slicePnlInputs(inputs: PnlInputs, store: PnlStore, period: PnlRa
 export function computePnl(inputs: PnlInputs, store: PnlStore) {
   const timeZone = store.timezone || "UTC";
   const { shopifyDaily, exchangeRates } = inputs;
-  const { included: includedOrders, coverage: currencyCoverage } = includeOrders(inputs.orders, exchangeRates, store.currency);
+  const { included: importedIncluded, coverage: currencyCoverage } = includeOrders(inputs.orders, exchangeRates, store.currency);
+  // Shopify's daily report counts every order. While the order import is still catching up, costing only
+  // the imported orders would understate COGS, fulfilment and postage against sales for all of them, so a
+  // period whose imported orders fall short of the reported count uses the Shopify-reported path instead.
+  const reportedOrders = shopifyDaily.reduce((total, day) => total + Math.max(day.orders, 0), 0);
+  const importCoversPeriod = reportedOrders === 0 || reportedOrders - inputs.orders.length <= Math.max(1, reportedOrders * importCoverageTolerance);
+  const usingImportedOrders = importedIncluded.length > 0 && (shopifyDaily.length === 0 || importCoversPeriod);
+  const includedOrders = usingImportedOrders ? importedIncluded : [];
   const ordersById = new Map(includedOrders.map((order) => [order.id, order]));
   const lines = inputs.lines.filter((line) => ordersById.has(line.order_id));
   const refundsRows = inputs.refunds.filter((refund) => ordersById.has(refund.order_id));
@@ -457,6 +467,7 @@ export function computePnl(inputs: PnlInputs, store: PnlStore) {
 
   return {
     hasData: shopifyDaily.length > 0 || includedOrders.length > 0,
+    orderCoverage: { reportedOrders, importedOrders: inputs.orders.length, usingImportedOrders },
     currency: store.currency,
     timezone: timeZone,
     currencyCoverage: currencyCoverage.summary(),
