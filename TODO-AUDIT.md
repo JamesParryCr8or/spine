@@ -266,7 +266,7 @@ Already solid: 98/98 tests pass, and CI runs typecheck, lint, test and build. Ev
   - `DataTable`: sticky header, right-aligned `tabular-nums`, sorting and CSV export;
   - `EmptyState` and `Toast`.
 
-- [ ] **5.3 [Haiku] Migrate the settings-type screens to the primitives.**
+- [~] **5.3 [Haiku] Migrate the settings-type screens to the primitives.** *Settings done (11 Oct 2026), with Expenses in 5.2: brand settings (brand deletion now uses a type-the-name confirmation dialog instead of `window.confirm`), cost defaults, daily refresh, weekly report, exchange rates and the credential audit table; saves now confirm with a toast. Still to migrate: Costs, Connections, Team, Reports.*
   Costs, Connections, Settings, Team and Reports, one or two per session. Follow the 5.2 Expenses pattern and delete each screen's old CSS from `globals.css`.
 
 - [ ] **5.4 [Sonnet] Redesign Overview.**
