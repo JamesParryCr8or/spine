@@ -145,6 +145,8 @@ export type PnlData = {
   currency: string;
   timezone: string;
   currencyCoverage: CurrencyCoverage;
+  /** How many of Shopify's reported orders the order import holds for this period. */
+  orderCoverage?: { reportedOrders: number; importedOrders: number; usingImportedOrders: boolean };
   marketingCurrencyCoverage: CurrencyConversionCoverage;
   transactionFeeCoverage?: { salesDays: number; reportedFeeDays: number; latestReportedFeeDate: string | null };
   metrics: { grossSales: number; discounts: number; refunds: number; netProductSales: number; shippingRevenue: number; tax: number; duties: number; totalSales: number; cogs: number; grossProfit: number; grossMargin: number | null; marketingSpend: number; metaMarketingSpend: number; googleMarketingSpend: number; bingMarketingSpend: number; transactionFees: number; shopifyPaymentFees: number; estimatedProcessorFees: number; estimatedShopifySurcharge: number; merchantShippingCosts: number; variantShippingCosts: number; shippingFallbackCosts: number; handlingCosts: number; fixedOperatingExpenses: number; variableOperatingExpenses: number; operatingExpenses: number; contributionMarginBeforeShipping: number; contributionMarginBeforeShippingPercentage: number | null; contributionMargin: number; contributionMarginPercentage: number | null; profitAfterOperatingCosts: number; profitAfterKnownCosts: number; profitAfterMarketingSpend: number; netProfit: number | null; netMargin: number | null; orders: number; unitsSold: number; missingCostLines: number; missingShippingLines: number; shippingOverrideLines: number; shippingFallbackLines: number; shippingFallbackRate: number | null; unallocatedOperatingCosts: number };
@@ -203,3 +205,12 @@ export type CustomerData = {
     journeyCountsByDepth: Array<{ depth: number; customers: number }>;
   };
 };
+
+/**
+ * Shown when only part of a period's orders are imported: costs then come from
+ * Shopify's reported figures for every order instead of costing the imported subset.
+ */
+export function OrderCoverageNotice({ coverage }: { coverage?: PnlData["orderCoverage"] }) {
+  if (!coverage || coverage.usingImportedOrders || coverage.importedOrders === 0) return null;
+  return <div className="connection-notice"><Info/><div><strong>Costs use Shopify&apos;s reported figures for this period</strong><span>Only {coverage.importedOrders.toLocaleString()} of {coverage.reportedOrders.toLocaleString()} orders are imported so far, so COGS comes from the costs Shopify records, with your default COGS rate for products it has no cost for. Costs added in Spine apply here once the order import has caught up.</span></div></div>;
+}

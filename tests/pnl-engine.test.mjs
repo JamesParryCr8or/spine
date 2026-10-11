@@ -216,3 +216,48 @@ test("contiguousSpans merges adjacent periods and keeps gaps apart", () => {
     { from: "2026-03-02", to: "2026-03-05" },
   ]);
 });
+
+// While the order import is catching up, imported orders must not be costed against sales for all orders.
+function coverageFixture(importedCount) {
+  const daily = Array.from({ length: 10 }, (_, offset) => ({
+    store_id: store.id, sales_date: `2026-05-${String(1 + offset).padStart(2, "0")}`, gross_sales: "1000", discounts: "0", sales_reversals: "0", net_sales: "1000",
+    shipping_charges: "0", taxes: "0", total_sales: "1000", orders: 10, net_items_sold: 10, total_payment_fees: "0",
+    cost_of_goods_sold: "400", net_sales_without_cost_recorded: "0",
+  }));
+  const orders = [], lines = [];
+  for (let index = 0; index < importedCount; index += 1) {
+    const id = `c${index}`;
+    orders.push({ id, store_id: store.id, processed_at: `2026-05-${String(1 + (index % 10)).padStart(2, "0")}T12:00:00Z`, cancelled_at: null, test: false, currency: "GBP", gross_sales: "100", discounts: "0", net_product_sales: "100", shipping_revenue: "0", tax: "0", duties: "0", total_sales: "100" });
+    lines.push({ id: `${id}-l`, order_id: id, variant_gid: null, sku: "X", current_quantity: 1, net_sales: "100" });
+  }
+  return {
+    shopify_sales_daily: daily, shopify_orders: orders, shopify_order_lines: lines,
+    store_cost_defaults: [{ store_id: store.id, fulfilment_amount: "2", fulfilment_basis: "orders", postage_amount: "5", postage_basis: "orders", default_cogs_percent: "35", currency: "GBP" }],
+  };
+}
+
+async function computeCoverage(importedCount) {
+  const loaded = await loadPnlInputs(fakeClient(coverageFixture(importedCount)), store, { from: "2026-05-01", to: "2026-05-10" });
+  assert.ok(loaded.ok, loaded.error);
+  return computePnl(loaded.inputs, store);
+}
+
+test("a partial order import costs sales from Shopify's reported COGS and order count, not the imported subset", async () => {
+  const pnl = await computeCoverage(40); // 40 of 100 reported orders imported
+  assert.equal(pnl.orderCoverage.usingImportedOrders, false);
+  assert.equal(pnl.orderCoverage.reportedOrders, 100);
+  assert.equal(pnl.orderCoverage.importedOrders, 40);
+  assert.equal(pnl.metrics.cogs, 4000); // Shopify's recorded COGS for all 100 orders, not 40 lines x 35%
+  assert.equal(pnl.metrics.netProductSales, 10000);
+});
+
+test("a complete order import uses the imported orders and default rates per imported order", async () => {
+  const pnl = await computeCoverage(100);
+  assert.equal(pnl.orderCoverage.usingImportedOrders, true);
+  assert.equal(pnl.metrics.cogs, 3500); // 100 lines x 100 x 35% default rate
+});
+
+test("coverage tolerates a couple of missing orders", async () => {
+  assert.equal((await computeCoverage(98)).orderCoverage.usingImportedOrders, true);
+  assert.equal((await computeCoverage(97)).orderCoverage.usingImportedOrders, false);
+});
