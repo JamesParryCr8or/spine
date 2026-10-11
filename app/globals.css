@@ -551,3 +551,5 @@ button { cursor:pointer; }
 .empty-action{margin-top:12px;height:38px;border:1px solid #6c5ce7;border-radius:8px;padding:0 16px;font-size:11px;font-weight:700;cursor:pointer}
 .unmatched-note{font-size:9px;line-height:1.5;grid-column:2/-1}
 .unmatched-note code{background:#f3f4f7;padding:1px 5px;border-radius:4px}
+.section-heading{margin:28px 0 12px}
+.section-heading h2{margin:4px 0 0;font-size:18px}
