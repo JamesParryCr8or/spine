@@ -1,56 +1,74 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { computeSalesInsights, storeDomainFromUrl } from "../lib/analytics/sales-insights.ts";
+import { buildSalesInsights, salesInsightQueries } from "../lib/analytics/sales-insights.ts";
 
-const order = (id, extra = {}) => ({ id, customerId: `c-${id}`, processedAt: "2026-07-10T09:30:00Z", source: "web", country: "GB", discountCodes: [], netSales: 100, discounts: 0, customerIndex: 1, storeDomain: null, ...extra });
-const line = (orderId, key, extra = {}) => ({ orderId, productKey: key, product: key.toUpperCase(), units: 1, netSales: 50, unitCost: 20, ...extra });
+const empty = { customers: [], hours: [], weekdays: [], products: [], countries: [], channels: [], discounts: [] };
 
-test("storeDomainFromUrl takes the host and drops www", () => {
-  assert.equal(storeDomainFromUrl("https://www.Hairmax.co.uk/products/laser?x=1"), "hairmax.co.uk");
-  assert.equal(storeDomainFromUrl("/products/laser"), null);
-  assert.equal(storeDomainFromUrl(null), null);
+test("queries are ShopifyQL aggregates over the requested window", () => {
+  const queries = salesInsightQueries("2026-01-01", "2026-03-31");
+  for (const query of Object.values(queries)) {
+    assert.match(query, /^FROM sales SHOW /);
+    assert.match(query, /SINCE 2026-01-01 UNTIL 2026-03-31/);
+  }
+  assert.match(queries.hours, /GROUP BY hour_of_day/);
+  assert.match(queries.weekdays, /GROUP BY day_of_week/);
 });
 
-test("hour and weekday use the store timezone", () => {
-  // 23:30 UTC on Friday 10 July is 00:30 Saturday in London (BST).
-  const result = computeSalesInsights([order("1", { processedAt: "2026-07-10T23:30:00Z" })], [], "Europe/London");
-  assert.equal(result.byHour[0].orders, 1);
-  assert.equal(result.byWeekday[5].orders, 1);
-  assert.equal(result.byWeekday[4].orders, 0);
+test("summary and repeat rate come from the new/returning split", () => {
+  const { summary, customerTypes } = buildSalesInsights({ ...empty, customers: [
+    { new_or_returning_customer: "New", orders: "6", net_sales: "£600.00", net_items_sold: "7" },
+    { new_or_returning_customer: "Returning", orders: "2", net_sales: "200", net_items_sold: "3" },
+    { new_or_returning_customer: "", orders: "2", net_sales: "200", net_items_sold: "2" },
+  ] });
+  assert.equal(summary.orders, 10);
+  assert.equal(summary.netSales, 1000);
+  assert.equal(summary.aov, 100);
+  assert.equal(summary.unitsPerOrder, 1.2);
+  assert.equal(summary.repeatRate, 0.25); // 2 of the 8 orders with a known customer type
+  assert.deepEqual(customerTypes.map((row) => row.label), ["New customer", "Repeat customer", "Guest / unknown"]);
 });
 
-test("combos count orders containing both products, once per order", () => {
-  const orders = [order("1"), order("2"), order("3")];
-  const lines = [line("1", "a"), line("1", "b"), line("1", "b"), line("2", "a"), line("2", "b"), line("3", "a")];
-  const { combos, summary } = computeSalesInsights(orders, lines, "UTC");
-  assert.equal(combos.length, 1);
-  assert.equal(combos[0].orders, 2);
-  assert.equal(combos[0].confidence, 1); // both b-orders also had a
-  assert.equal(summary.multiProductShare, 2 / 3);
+test("hour and weekday buckets use the shop's numbering (weekday 0 = Monday)", () => {
+  const { byHour, byWeekday } = buildSalesInsights({ ...empty,
+    hours: [{ hour_of_day: "9", orders: "3", net_sales: "300" }, { hour_of_day: "30", orders: "1", net_sales: "10" }],
+    weekdays: [{ day_of_week: "0", orders: "4", net_sales: "400" }, { day_of_week: "6", orders: "1", net_sales: "50" }] });
+  assert.equal(byHour[9].orders, 3);
+  assert.equal(byHour.reduce((total, bucket) => total + bucket.orders, 0), 3); // out-of-range hour ignored
+  assert.equal(byWeekday[0].sales, 400);
+  assert.equal(byWeekday[6].orders, 1);
 });
 
-test("a product with any unit missing a cost is not ranked for margin", () => {
-  const orders = [order("1"), order("2")];
-  const lines = [line("1", "a"), line("2", "a", { unitCost: null }), line("1", "b"), line("2", "b")];
-  const { margin } = computeSalesInsights(orders, lines, "UTC");
-  assert.deepEqual(margin.rows.map((row) => row.product), ["B"]);
-  assert.equal(margin.incompleteProducts, 1);
-  assert.equal(margin.rows[0].margin, 60);
+test("a product with any sale missing a cost is not ranked for margin", () => {
+  const { margin } = buildSalesInsights({ ...empty, products: [
+    { product_title: "A", net_items_sold: "10", net_sales: "1000", cost_of_goods_sold: "400", gross_profit: "600", net_sales_without_cost_recorded: "0" },
+    { product_title: "B", net_items_sold: "5", net_sales: "500", cost_of_goods_sold: "", gross_profit: "", net_sales_without_cost_recorded: "500" },
+    { product_title: "", net_items_sold: "1", net_sales: "50", cost_of_goods_sold: "", gross_profit: "", net_sales_without_cost_recorded: "50" },
+  ] });
+  assert.deepEqual(margin.rows.map((row) => row.product), ["A"]);
+  assert.equal(margin.rows[0].margin, 600);
   assert.equal(margin.rows[0].marginPct, 0.6);
+  assert.equal(margin.incompleteProducts, 1);
+  assert.equal(margin.costedShare, 1000 / 1500);
 });
 
-test("storefront domains rank by revenue and report coverage", () => {
-  const orders = [order("1", { storeDomain: "hairmax.co.uk", netSales: 300 }), order("2", { storeDomain: "hairmax.co.uk", netSales: 100 }), order("3", { storeDomain: "hairmax.eu", netSales: 50 }), order("4")];
-  const { domains } = computeSalesInsights(orders, [], "UTC");
-  assert.equal(domains.rows[0].domain, "hairmax.co.uk");
-  assert.equal(domains.rows[0].sales, 400);
-  assert.equal(domains.rows[0].orders, 2);
-  assert.equal(domains.rows[0].aov, 200);
-  assert.equal(domains.coverage, 0.75);
+test("discount codes report revenue and the discount given, and cap the discounted share", () => {
+  const { discountCodes, summary } = buildSalesInsights({ ...empty,
+    customers: [{ new_or_returning_customer: "New", orders: "4", net_sales: "400", net_items_sold: "4" }],
+    discounts: [
+      { discount_code: "", orders: "3", net_sales: "300", discounts: "0" },
+      { discount_code: "SAVE10", orders: "3", net_sales: "100", discounts: "-12.50" },
+      { discount_code: "VIP", orders: "2", net_sales: "50", discounts: "-5" },
+    ] });
+  assert.equal(discountCodes[0].label, "No discount code");
+  assert.equal(discountCodes.find((row) => row.label === "SAVE10").discounts, 12.5);
+  assert.equal(summary.discountedShare, 1); // 5 code-uses over 4 orders is capped
 });
 
-test("repeat rate ignores orders with unknown customer index", () => {
-  const orders = [order("1", { customerIndex: 1 }), order("2", { customerIndex: 3 }), order("3", { customerIndex: null })];
-  assert.equal(computeSalesInsights(orders, [], "UTC").summary.repeatRate, 0.5);
+test("rankings drop empty rows and name blanks", () => {
+  const { countries, channels } = buildSalesInsights({ ...empty,
+    countries: [{ shipping_country: "", orders: "1", net_sales: "10" }, { shipping_country: "United Kingdom", orders: "5", net_sales: "500" }, { shipping_country: "France", orders: "0", net_sales: "0" }],
+    channels: [{ sales_channel: "Online Store", orders: "2", net_sales: "200" }] });
+  assert.deepEqual(countries.map((row) => row.label), ["United Kingdom", "Unknown"]);
+  assert.equal(channels[0].sales, 200);
 });
