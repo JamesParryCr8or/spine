@@ -9,7 +9,7 @@ import { campaignQuery, dateWindows, parseCampaignRows, type ShopifyQlRow as Cam
 type Store = { id: string; organization_id: string; shopify_domain?: string | null; currency: string };
 type ShopifyQlRow = Record<string, string | number | null>;
 type ShopifyQlResult = { shopifyqlQuery: { tableData: { rows: ShopifyQlRow[] } | null; parseErrors: string[] } };
-type GoogleAdsRow = { segments?: { date?: string }; customer?: { currencyCode?: string }; metrics?: { costMicros?: string; impressions?: string; clicks?: string } };
+type GoogleAdsRow = { segments?: { date?: string }; customer?: { currencyCode?: string }; campaign?: { id?: string; name?: string }; metrics?: { costMicros?: string; impressions?: string; clicks?: string } };
 type GoogleAdsPayload = Array<{ results?: GoogleAdsRow[] }>;
 
 const freshAfter = () => new Date(Date.now() - 15 * 60 * 1000).toISOString();
@@ -283,7 +283,11 @@ async function refreshMeta(supabase: SupabaseClient, store: Store, from: string,
 }
 
 async function refreshGoogle(supabase: SupabaseClient, store: Store, from: string, to: string) {
-  if (!await needsRefresh(supabase, "google_ads_insights_daily", store.id, "insight_date", from, to)) return;
+  const [accountNeeds, campaignNeeds] = await Promise.all([
+    needsRefresh(supabase, "google_ads_insights_daily", store.id, "insight_date", from, to),
+    needsRefresh(supabase, "google_ads_campaign_insights_daily", store.id, "insight_date", from, to),
+  ]);
+  if (!accountNeeds && !campaignNeeds) return;
   const [{ data: connection }, refreshToken, { data: managers }] = await Promise.all([
     supabase.from("data_connections").select("external_account_id,external_account_name").eq("store_id", store.id).eq("provider", "google_ads").eq("status", "connected").maybeSingle(),
     readSecret(supabase, store.id, "google_ads"),
@@ -301,21 +305,24 @@ async function refreshGoogle(supabase: SupabaseClient, store: Store, from: strin
   const tokenPayload = await tokenResponse.json().catch(() => ({})) as { access_token?: string; error_description?: string };
   if (!tokenResponse.ok || !tokenPayload.access_token) throw new Error(tokenPayload.error_description ?? "Google Ads authorization could not be refreshed");
   const customerId = connection.external_account_id.replace(/\D/g, "");
-  const gaql = `SELECT segments.date, customer.currency_code, metrics.cost_micros, metrics.impressions, metrics.clicks FROM customer WHERE segments.date BETWEEN '${from}' AND '${to}' ORDER BY segments.date`;
   const loginCandidates = [undefined, ...(managers ?? []).map((manager) => manager.customer_id as string)];
-  let payload: GoogleAdsPayload | null = null;
-  let failure = "Google Ads spend could not be refreshed";
-  for (const loginCustomerId of loginCandidates) {
-    const response = await fetch(`https://googleads.googleapis.com/v25/customers/${customerId}/googleAds:searchStream`, {
-      method: "POST", cache: "no-store", body: JSON.stringify({ query: gaql }),
-      headers: { Authorization: `Bearer ${tokenPayload.access_token}`, "developer-token": developerToken, "Content-Type": "application/json", ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}) },
-    });
-    const candidate = await response.json().catch(() => []) as GoogleAdsPayload | { error?: { message?: string } };
-    if (response.ok && Array.isArray(candidate)) { payload = candidate; break; }
-    failure = (!Array.isArray(candidate) ? candidate.error?.message : null) ?? failure;
-  }
-  if (!payload) throw new Error(failure);
+  // Runs one Google Ads search, trying the account first and then each manager (login-customer-id) until one is allowed.
+  const search = async (gaql: string) => {
+    let failure = "Google Ads spend could not be refreshed";
+    for (const loginCustomerId of loginCandidates) {
+      const response = await fetch(`https://googleads.googleapis.com/v25/customers/${customerId}/googleAds:searchStream`, {
+        method: "POST", cache: "no-store", body: JSON.stringify({ query: gaql }),
+        headers: { Authorization: `Bearer ${tokenPayload.access_token}`, "developer-token": developerToken, "Content-Type": "application/json", ...(loginCustomerId ? { "login-customer-id": loginCustomerId } : {}) },
+      });
+      const candidate = await response.json().catch(() => []) as GoogleAdsPayload | { error?: { message?: string } };
+      if (response.ok && Array.isArray(candidate)) return candidate;
+      failure = (!Array.isArray(candidate) ? candidate.error?.message : null) ?? failure;
+    }
+    throw new Error(failure);
+  };
   const now = new Date().toISOString();
+  // Account totals first (existing behaviour), then campaign rows for the UTM spend matching.
+  const payload = accountNeeds ? await search(`SELECT segments.date, customer.currency_code, metrics.cost_micros, metrics.impressions, metrics.clicks FROM customer WHERE segments.date BETWEEN '${from}' AND '${to}' ORDER BY segments.date`) : [];
   const rows = payload.flatMap((page) => page.results ?? []).flatMap((row) => row.segments?.date ? [{
     organization_id: store.organization_id, store_id: store.id, customer_id: customerId,
     customer_name: connection.external_account_name, insight_date: row.segments.date,
@@ -325,6 +332,20 @@ async function refreshGoogle(supabase: SupabaseClient, store: Store, from: strin
   if (rows.length) {
     const { error } = await supabase.from("google_ads_insights_daily").upsert(rows, { onConflict: "store_id,customer_id,insight_date" });
     if (error) throw error;
+  }
+  if (campaignNeeds) {
+    const campaignPayload = await search(`SELECT campaign.id, campaign.name, segments.date, customer.currency_code, metrics.cost_micros, metrics.impressions, metrics.clicks FROM campaign WHERE segments.date BETWEEN '${from}' AND '${to}' ORDER BY segments.date`);
+    const campaignRows = campaignPayload.flatMap((page) => page.results ?? []).flatMap((row) => row.segments?.date && row.campaign?.id ? [{
+      organization_id: store.organization_id, store_id: store.id, customer_id: customerId,
+      campaign_id: String(row.campaign.id), campaign_name: row.campaign.name ?? String(row.campaign.id),
+      insight_date: row.segments.date, spend: numeric(row.metrics?.costMicros) / 1_000_000,
+      impressions: Math.round(numeric(row.metrics?.impressions)), clicks: Math.round(numeric(row.metrics?.clicks)),
+      currency: row.customer?.currencyCode ?? store.currency, synced_at: now,
+    }] : []);
+    for (let index = 0; index < campaignRows.length; index += 500) {
+      const { error } = await supabase.from("google_ads_campaign_insights_daily").upsert(campaignRows.slice(index, index + 500), { onConflict: "store_id,customer_id,campaign_id,insight_date" });
+      if (error) throw error;
+    }
   }
 }
 

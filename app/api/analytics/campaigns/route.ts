@@ -23,7 +23,7 @@ export async function GET(request: Request) {
   const { supabase, store } = workspace;
   if (!store) return NextResponse.json({ error: "No store is configured" }, { status: 404 });
 
-  const [rateResult, dayResult, stateResult, mappingResult, customResult, metaAccount, googleAccount, bingAccount, metaCampaigns] = await Promise.all([
+  const [rateResult, dayResult, stateResult, mappingResult, customResult, metaAccount, googleAccount, bingAccount, googleCampaigns, metaCampaigns] = await Promise.all([
     supabase.from("exchange_rates").select("base_currency,quote_currency,rate,effective_date").eq("store_id", store.id).eq("quote_currency", store.currency).order("effective_date", { ascending: true }),
     selectAllPages<CampaignDay>((range) => supabase.from("shopify_campaign_daily")
       .select("sales_date,utm_source,utm_medium,utm_campaign,customer_type,orders,net_sales")
@@ -36,9 +36,10 @@ export async function GET(request: Request) {
     selectAllPages<SpendRow & { date_start: string }>((range) => supabase.from("meta_ad_insights_daily").select("date_start,spend,currency").eq("store_id", store.id).gte("date_start", from).lte("date_start", to).order("date_start", { ascending: true }).order("account_id", { ascending: true }).range(range.from, range.to)),
     selectAllPages<SpendRow & { insight_date: string }>((range) => supabase.from("google_ads_insights_daily").select("insight_date,spend,currency").eq("store_id", store.id).gte("insight_date", from).lte("insight_date", to).order("insight_date", { ascending: true }).order("customer_id", { ascending: true }).range(range.from, range.to)),
     selectAllPages<SpendRow & { insight_date: string }>((range) => supabase.from("bing_ads_insights_daily").select("insight_date,spend,currency").eq("store_id", store.id).gte("insight_date", from).lte("insight_date", to).order("insight_date", { ascending: true }).order("account_id", { ascending: true }).range(range.from, range.to)),
+    selectAllPages<{ campaign_id: string; campaign_name: string; insight_date: string; spend: string | number; currency: string }>((range) => supabase.from("google_ads_campaign_insights_daily").select("campaign_id,campaign_name,insight_date,spend,currency").eq("store_id", store.id).gte("insight_date", from).lte("insight_date", to).order("insight_date", { ascending: true }).order("campaign_id", { ascending: true }).range(range.from, range.to)),
     selectAllPages<MetaCampaignRow>((range) => supabase.from("meta_campaign_insights_daily").select("campaign_id,campaign_name,date_start,spend,currency").eq("store_id", store.id).gte("date_start", from).lte("date_start", to).order("date_start", { ascending: true }).order("campaign_id", { ascending: true }).range(range.from, range.to)),
   ]);
-  const failure = rateResult.error?.message ?? dayResult.error ?? stateResult.error?.message ?? mappingResult.error?.message ?? customResult.error?.message ?? metaAccount.error ?? googleAccount.error ?? bingAccount.error ?? metaCampaigns.error;
+  const failure = rateResult.error?.message ?? dayResult.error ?? stateResult.error?.message ?? mappingResult.error?.message ?? customResult.error?.message ?? metaAccount.error ?? googleAccount.error ?? bingAccount.error ?? metaCampaigns.error ?? googleCampaigns.error;
   if (failure) return NextResponse.json({ error: failure }, { status: 500 });
 
   const rates = (rateResult.data ?? []) as DatedExchangeRate[];
@@ -70,6 +71,14 @@ export async function GET(request: Request) {
     const spend = toStore(row, row.spend_date);
     return spend === null ? [] : [{ source: row.source, medium: row.medium, campaign: row.campaign, spend }];
   });
+
+  for (const row of googleCampaigns.rows) {
+    const spend = toStore(row, row.insight_date);
+    if (spend === null) continue;
+    const key = `google:${row.campaign_id}`;
+    const existing = campaignTotals.get(key);
+    campaignTotals.set(key, { platform: "google", campaignId: row.campaign_id, campaignName: row.campaign_name, spend: (existing?.spend ?? 0) + spend });
+  }
 
   const performance = computeCampaignPerformance({
     days: dayResult.rows,

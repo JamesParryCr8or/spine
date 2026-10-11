@@ -111,7 +111,7 @@ export function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: strin
   if (!data) return <>{controls}<PanelState status="loading" message="Matching campaigns to spend…" lines={5}/></>;
 
   const { totals, coverage } = data;
-  const tools = <details className="panel report-panel setup-tools"><summary><div><span className="eyebrow">SETUP</span><h2>Tracking links, spend mapping and custom spend</h2></div></summary><UtmTools currency={data.currency} targets={targets} summary={`${money.format(coverage.matchedSpend)} of ${money.format(coverage.campaignSpend)} Meta campaign spend matched · ${money.format(coverage.customSpend)} custom spend`} onChanged={() => setRetryToken((value) => value + 1)}/></details>;
+  const tools = <details className="panel report-panel setup-tools"><summary><div><span className="eyebrow">SETUP</span><h2>Tracking links, spend mapping and custom spend</h2></div></summary><UtmTools currency={data.currency} targets={targets} summary={`${money.format(coverage.matchedSpend)} of ${money.format(coverage.campaignSpend)} campaign spend matched · ${money.format(coverage.customSpend)} custom spend`} onChanged={() => setRetryToken((value) => value + 1)}/></details>;
 
   if (!data.hasData) return <>{controls}<PanelState status="empty" title="No campaign data for this period" message={data.synced ? "No orders were found in this period. Try a wider range." : "Campaign data has not been pulled from Shopify yet. Click Sync now: the first sync backfills two years."}/>{tools}</>;
 
@@ -123,7 +123,7 @@ export function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: strin
   const maxPlatformSales = Math.max(0, ...data.platforms.map((platform) => Math.max(platform.taggedSales, platform.spend)));
   const maxSource = Math.max(0, ...data.sources.slice(0, 10).map((source) => source.sales));
   const sortHeader = (key: SortKey, label: string) => <th><button className={`sort-button${sort.key === key ? " active" : ""}`} onClick={() => setSort((current) => ({ key, direction: current.key === key ? (current.direction === 1 ? -1 : 1) : -1 }))}>{label}{sort.key === key ? (sort.direction === -1 ? " ↓" : " ↑") : ""}</button></th>;
-  const label = (row: CampaignRow) => row.campaign || (row.source || row.medium ? "(no campaign)" : "Direct / untagged");
+  const label = (row: CampaignRow) => row.adCampaignName && row.adCampaignName !== row.campaign ? row.adCampaignName : row.campaign || (row.source || row.medium ? "(no campaign)" : "Direct / untagged");
   const exportRows = [["Campaign", "Source", "Medium", "Orders", "Sales", "New-customer orders", "Spend", "Spend link", "ROAS", "Cost per order"],
     ...filtered.map((row) => [label(row), row.source, row.medium, row.orders, row.sales, row.newOrders, row.spend ?? "", row.spendLink ?? "", row.roas === null ? "" : row.roas.toFixed(2), row.cpa === null ? "" : row.cpa.toFixed(2)])];
 
@@ -161,7 +161,7 @@ export function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: strin
         <div className="filter-row"><div className="search"><Search/><input value={search} onChange={(event) => { setSearch(event.target.value); setLimit(25); }} placeholder="Find a campaign, source or medium..."/></div><div className="segmented">{(["all", "matched", "unmatched"] as const).map((key) => <button key={key} className={spendFilter === key ? "active" : ""} onClick={() => { setSpendFilter(key); setLimit(25); }}>{key === "all" ? "All" : key === "matched" ? "With spend" : "No spend match"}</button>)}</div></div>
         <div className="table-scroll"><table className="data-table"><thead><tr><th>Campaign</th>{sortHeader("orders", "Orders")}{sortHeader("sales", "Sales")}{sortHeader("spend", "Spend")}{sortHeader("roas", "ROAS")}<th>Cost / order</th><th>New customers</th></tr></thead>
           <tbody>{shown.length === 0 ? <tr><td colSpan={7} className="empty-row">No campaigns match.</td></tr> : shown.map((row) => <tr key={row.key}>
-            <td><strong>{label(row)}</strong><small>{row.source || "(none)"} / {row.medium || "(none)"}</small></td>
+            <td><strong>{label(row)}</strong><small>{row.source || "(none)"} / {row.medium || "(none)"}{row.adCampaignName && row.adCampaignName !== row.campaign ? ` · ${row.campaign}` : ""}</small></td>
             <td>{row.orders.toLocaleString()}</td>
             <td><strong>{money.format(row.sales)}</strong></td>
             <td>{row.spend === null ? <span className="muted">Not matched</span> : <><strong>{money.format(row.spend)}</strong>{row.spendLink && <small className={`link-badge ${row.spendLink}`}>{linkLabels[row.spendLink]}</small>}</>}</td>
@@ -173,12 +173,14 @@ export function UTMAnalysis({ reportRunId, initialRange }: { reportRunId?: strin
       </article>
 
       <article className="panel report-panel insight-panel wide">
-        <div className="panel-head"><div><span className="eyebrow">SPEND MATCHING</span><h2>Meta spend not linked to a campaign</h2></div></div>
-        <span className="report-note insight-note">{money.format(coverage.matchedSpend)} of {money.format(coverage.campaignSpend)} Meta campaign spend is linked to UTM campaigns, automatically by name or ID, or by your mapping. Unlinked spend is not added to any campaign&apos;s ROAS.</span>
+        <div className="panel-head"><div><span className="eyebrow">SPEND MATCHING</span><h2>Ad spend not linked to a campaign</h2></div></div>
+        <span className="report-note insight-note">{money.format(coverage.matchedSpend)} of {money.format(coverage.campaignSpend)} campaign-level ad spend (Meta and Google) is linked to UTM campaigns, automatically by name or ID, or by your mapping. Unlinked spend is not added to any campaign&apos;s ROAS.</span>
         {coverage.unmatched.length ? <ul className="unmatched-list">{coverage.unmatched.slice(0, 8).map((campaign) => <li key={campaign.campaignId}>
-          <div><strong>{campaign.campaignName}</strong><span>{money.format(campaign.spend)} spend</span></div>
-          <select aria-label={`UTM campaign for ${campaign.campaignName}`} value={mapDraft[campaign.campaignId] ?? ""} onChange={(event) => setMapDraft((current) => ({ ...current, [campaign.campaignId]: event.target.value }))}><option value="">Map to a UTM campaign…</option>{targets.map((target) => <option key={target.value} value={target.value}>{target.label}</option>)}</select>
-          <button disabled={!mapDraft[campaign.campaignId]} onClick={() => void saveMapping(campaign.campaignId)}>Save</button>
+          <div><strong>{campaign.campaignName}</strong><span>{platformLabels[campaign.platform]} · {money.format(campaign.spend)} spend</span></div>
+          {campaign.platform === "meta" ? <>
+            <select aria-label={`UTM campaign for ${campaign.campaignName}`} value={mapDraft[campaign.campaignId] ?? ""} onChange={(event) => setMapDraft((current) => ({ ...current, [campaign.campaignId]: event.target.value }))}><option value="">Map to a UTM campaign…</option>{targets.map((target) => <option key={target.value} value={target.value}>{target.label}</option>)}</select>
+            <button disabled={!mapDraft[campaign.campaignId]} onClick={() => void saveMapping(campaign.campaignId)}>Save</button>
+          </> : <span className="muted unmatched-note">No UTM campaign uses this {platformLabels[campaign.platform]} campaign&apos;s name or ID. Tag its links with <code>{campaign.campaignId}</code> or the campaign name.</span>}
         </li>)}</ul> : <PanelState status="empty" title="All Meta campaign spend is linked" message="Nothing to map for this period."/>}
         {mapStatus && <div className="insight-foot"><Info/>{mapStatus}</div>}
         {data.spendCoverage.excludedRows ? <div className="insight-foot"><Info/>{String(data.spendCoverage.excludedRows)} spend rows were left out because no exchange rate is set for their currency.</div> : null}
