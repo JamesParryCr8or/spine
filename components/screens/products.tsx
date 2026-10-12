@@ -1,59 +1,156 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Download, Info, Package, Search } from "lucide-react";
-import { type DrilldownContext, type FinanceDatePreset, financeDateRange, FinanceDateControls, downloadCsv, useReportRun, type ProductData } from "@/components/analytics/shared";
-import { PanelState } from "@/components/ui/panel-state";
+import { type ReactNode, useEffect, useState } from "react";
+import { Package, Search } from "lucide-react";
+import { type DrilldownContext, type FinanceDatePreset, financeDateRange, FinanceDateControls, useReportRun } from "@/components/analytics/shared";
+import { Button } from "@/components/ui/button";
+import { type Column, DataTable } from "@/components/ui/data-table";
+import { EmptyState } from "@/components/ui/empty-state";
+import { TextInput } from "@/components/ui/form-field";
+import { Panel } from "@/components/ui/panel";
+import { PanelState, UpdatingChip } from "@/components/ui/panel-state";
+import { StatCard } from "@/components/ui/stat-card";
+import { fetchJson, peekJson } from "@/lib/queries/client";
+import { useResetOnChange } from "@/lib/use-reset-on-change";
+import type { ProductPerformance, ProductRow, TrendPoint, VariantRow } from "@/lib/analytics/product-performance";
+
+type ProductsData = ProductPerformance & { currency: string; timezone: string; period: { from: string; to: string } };
+
+const percent = (value: number, digits = 0) => `${(value * 100).toFixed(digits)}%`;
+const earliestDate = "2015-01-01";
+const monthLabel = (month: string) => new Intl.DateTimeFormat("en-GB", { month: "short", year: "2-digit", timeZone: "UTC" }).format(new Date(`${month}-01T00:00:00Z`));
+
+function MonthlyChart({ points, money }: { points: TrendPoint[]; money: (value: number) => string }) {
+  const max = Math.max(0, ...points.map((point) => point.netSales));
+  return <div className="trend-chart" role="img" aria-label="Monthly net sales">
+    {points.map((point) => <div key={point.month} title={`${monthLabel(point.month)}: ${money(point.netSales)} net sales, ${point.units.toLocaleString()} units`}>
+      <span className="pair"><b className="sales" style={{ height: `${max > 0 ? Math.max(2, (point.netSales / max) * 100) : 0}%` }}/></span>
+      <small>{monthLabel(point.month)}</small>
+    </div>)}
+  </div>;
+}
 
 export function Products({ openCosts, reportRunId, initialRange }: { openCosts: (sku: string | null) => void; reportRunId?: string; initialRange?: DrilldownContext }) {
   const finishReportRun = useReportRun(reportRunId);
-  const [data, setData] = useState<ProductData | null>(null);
-  const [comparisonData, setComparisonData] = useState<ProductData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState("all");
-  const [fromDate, setFromDate] = useState(initialRange?.from || "");
-  const [toDate, setToDate] = useState(initialRange?.to || "");
-  const [datePreset, setDatePreset] = useState<FinanceDatePreset>(initialRange ? "custom" : "all_imported");
-  const [selectedProductKey, setSelectedProductKey] = useState<string | null>(null);
+  const [data, setData] = useState<ProductsData | null>(null);
+  const [fromDate, setFromDate] = useState(initialRange?.from || financeDateRange("last_365_days").from);
+  const [toDate, setToDate] = useState(initialRange?.to || financeDateRange("last_365_days").to);
+  const [datePreset, setDatePreset] = useState<FinanceDatePreset>(initialRange?.from ? "custom" : "last_365_days");
+  const [loadError, setLoadError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [retryToken, setRetryToken] = useState(0);
+  const [search, setSearch] = useState(initialRange?.search ?? "");
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const effectiveFrom = fromDate || earliestDate;
+  const effectiveTo = toDate || new Date().toISOString().slice(0, 10);
+  useResetOnChange(`${effectiveFrom}|${effectiveTo}|${retryToken}`, () => { setData(null); setLoadError(""); setSelected(null); });
   useEffect(() => {
-    const params = new URLSearchParams();
-    if (fromDate) params.set("from", fromDate);
-    if (toDate) params.set("to", toDate);
-    let comparisonUrl: string | null = null;
-    if (fromDate && toDate) {
-      const start = new Date(`${fromDate}T00:00:00Z`);
-      const end = new Date(`${toDate}T00:00:00Z`);
-      const days = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
-      const previousEnd = new Date(start); previousEnd.setUTCDate(previousEnd.getUTCDate() - 1);
-      const previousStart = new Date(previousEnd); previousStart.setUTCDate(previousStart.getUTCDate() - days + 1);
-      comparisonUrl = `/api/analytics/products?from=${previousStart.toISOString().slice(0, 10)}&to=${previousEnd.toISOString().slice(0, 10)}`;
-    }
-    Promise.all([
-      fetch(`/api/analytics/products${params.size ? `?${params}` : ""}`).then(async (response) => response.ok ? response.json() as Promise<ProductData> : null),
-      comparisonUrl ? fetch(comparisonUrl).then(async (response) => response.ok ? response.json() as Promise<ProductData> : null) : Promise.resolve(null),
-    ])
-      .then(([payload, comparison]) => { setData(payload); setComparisonData(comparison); finishReportRun(payload ? "completed" : "failed", payload?.products.length ?? null); })
-      .catch(() => { setData(null); setComparisonData(null); finishReportRun("failed", null, "Product data could not be loaded"); })
-      .finally(() => setLoading(false));
-  }, [fromDate, toDate, finishReportRun]);
-  const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: data?.currency || "GBP", maximumFractionDigits: 0 });
-  const products = data?.products ?? [];
-  const selectedProduct = products.find((product) => product.key === selectedProductKey) ?? products[0] ?? null;
-  const comparisonByKey = new Map((comparisonData?.products ?? []).map((product) => [product.key, product]));
-  const percentChange = (current: number, previous: number) => previous ? (current - previous) / Math.abs(previous) * 100 : null;
-  const visibleProducts = products.filter((product) => `${product.product} ${product.variant} ${product.sku ?? ""}`.toLowerCase().includes(search.trim().toLowerCase()) && (filter === "all" || filter === "missing" && product.missingCostUnits > 0 || filter === "low-margin" && product.contributionMargin !== null && product.contributionMargin < 0.3 || filter === "loss-making" && product.contributionProfit < 0));
-  const exportProducts = () => downloadCsv("product-profitability.csv", [["Report", "Product profitability"], ["Period", data?.period ? `${data.period.start} to ${data.period.end}` : "No imported orders"], ["Timezone", data?.timezone || "UTC"], ["Currency", data?.currency || "GBP"], ["Filters", [search.trim() ? `Search: ${search.trim()}` : "", filter !== "all" ? `Margin filter: ${filter}` : ""].filter(Boolean).join(" · ") || "None"], ["Shared-cost allocation", "Payment fees and ad spend are proportional to product net revenue in the selected period"], ["Generated at", new Date().toISOString()], [], ["Product", "Variant", "SKU", "Units", "Sales after discounts", "Discounts", "Refunds", "Net revenue", "COGS", "Gross profit", "Gross margin", "Shipping", "Handling", "Payment fees", "Marketing allocation", "Contribution profit", "Contribution margin"], ...visibleProducts.map((product) => [product.product, product.variant, product.sku || "", product.units, product.revenue, product.discounts, product.refunds, product.netRevenue, product.cogs, product.grossProfit, product.margin === null ? "" : product.margin, product.shippingCosts, product.handlingCosts, product.transactionFeeAllocation, product.marketingAllocation, product.contributionProfit, product.contributionMargin === null ? "" : product.contributionMargin])]);
+    const url = `/api/analytics/product-performance?${new URLSearchParams({ from: effectiveFrom, to: effectiveTo })}`;
+    const controller = new AbortController();
+    void (async () => {
+      // Paint the last real numbers immediately, then refresh behind them.
+      const cached = await peekJson<ProductsData>(url);
+      if (controller.signal.aborted) return;
+      if (cached) { setData(cached.data); if (!cached.fresh) setRefreshing(true); }
+      try {
+        const payload = await fetchJson<ProductsData>(url, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        setData(payload);
+        finishReportRun("completed", payload.totals.products);
+      } catch (reason) {
+        if (controller.signal.aborted) return;
+        if (!cached) { setLoadError(reason instanceof Error ? reason.message : "Product data could not be loaded"); finishReportRun("failed", null, "Product data could not be loaded"); }
+      } finally {
+        if (!controller.signal.aborted) setRefreshing(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [effectiveFrom, effectiveTo, retryToken, finishReportRun]);
+
+  const applyPreset = (preset: FinanceDatePreset) => {
+    setDatePreset(preset);
+    if (preset === "custom") return;
+    const range = financeDateRange(preset);
+    setFromDate(range.from); setToDate(range.to);
+  };
+  const controls = <FinanceDateControls preset={datePreset} from={fromDate} to={toDate} onPreset={applyPreset} onFrom={(value) => { setDatePreset("custom"); setFromDate(value); }} onTo={(value) => { setDatePreset("custom"); setToDate(value); }}/>;
+
+  if (loadError) return <>{controls}<PanelState status="error" title="Product data could not be loaded" message={loadError} onRetry={() => setRetryToken((value) => value + 1)}/></>;
+  if (!data) return <>{controls}<div className="insight-kpis-loading grid gap-3 sm:grid-cols-2 lg:grid-cols-5">{Array.from({ length: 5 }, (_, index) => <StatCard key={index} label="Loading" value="" loading/>)}</div><PanelState status="loading" message="Loading product sales from Shopify…" lines={4}/></>;
+  if (data.products.length === 0) return <>{controls}<PanelState status="empty" title="No product sales in this period" message="Widen the date range, or connect Shopify and run a sync."/></>;
+
+  const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: data.currency, maximumFractionDigits: 0 });
+  const { totals } = data;
+  const needle = search.trim().toLowerCase();
+  const rows = needle ? data.products.filter((product) => product.product.toLowerCase().includes(needle)) : data.products;
+  const missingCostProducts = data.products.filter((product) => product.grossProfit === null).length;
+
+  const costCell = (value: number | null, render: (amount: number) => ReactNode) => value === null ? <span className="text-ds-warning">Cost missing</span> : render(value);
+  const columns: Column<ProductRow>[] = [
+    { key: "product", header: "Product", sortValue: (row) => row.product, render: (row) => <button type="button" onClick={() => setSelected(row.product)} className={`text-left font-semibold hover:text-ds-accent-strong ${selected === row.product ? "text-ds-accent-strong" : ""}`}>{row.product}</button> },
+    { key: "units", header: "Units", numeric: true, sortValue: (row) => row.units, render: (row) => row.units.toLocaleString() },
+    { key: "gross", header: "Gross sales", numeric: true, sortValue: (row) => row.grossSales, render: (row) => money.format(row.grossSales) },
+    { key: "discounts", header: "Discounts", numeric: true, sortValue: (row) => row.discounts, render: (row) => row.discounts ? money.format(-row.discounts) : "—" },
+    { key: "refunds", header: "Refunds", numeric: true, sortValue: (row) => row.refunds, render: (row) => row.refunds ? money.format(-row.refunds) : "—" },
+    { key: "net", header: "Net sales", numeric: true, sortValue: (row) => row.netSales, render: (row) => <strong className="font-semibold">{money.format(row.netSales)}</strong> },
+    { key: "cogs", header: "COGS", numeric: true, sortValue: (row) => row.cogs, render: (row) => costCell(row.cogs, (amount) => money.format(amount)), csv: (row) => row.cogs ?? "" },
+    { key: "profit", header: "Gross profit", numeric: true, sortValue: (row) => row.grossProfit, render: (row) => costCell(row.grossProfit, (amount) => <strong className="font-semibold">{money.format(amount)}</strong>), csv: (row) => row.grossProfit ?? "" },
+    { key: "margin", header: "Margin", numeric: true, sortValue: (row) => row.marginPct, render: (row) => row.marginPct === null ? "—" : percent(row.marginPct, 1), csv: (row) => row.marginPct === null ? "" : (row.marginPct * 100).toFixed(1) },
+  ];
+
+  const selectedProduct = selected ? data.products.find((product) => product.product === selected) ?? null : null;
+  const trendPoints = selectedProduct ? data.trend[selectedProduct.product] ?? [] : [];
+  const variantColumns: Column<VariantRow>[] = [
+    { key: "variant", header: "Variant", sortValue: (row) => row.variant, render: (row) => <span className="font-semibold">{row.variant}</span> },
+    { key: "units", header: "Units", numeric: true, sortValue: (row) => row.units, render: (row) => row.units.toLocaleString() },
+    { key: "refunds", header: "Refunds", numeric: true, sortValue: (row) => row.refunds, render: (row) => row.refunds ? money.format(-row.refunds) : "—" },
+    { key: "net", header: "Net sales", numeric: true, sortValue: (row) => row.netSales, render: (row) => <strong className="font-semibold">{money.format(row.netSales)}</strong> },
+    { key: "profit", header: "Gross profit", numeric: true, sortValue: (row) => row.grossProfit, render: (row) => costCell(row.grossProfit, (amount) => money.format(amount)), csv: (row) => row.grossProfit ?? "" },
+    { key: "margin", header: "Margin", numeric: true, sortValue: (row) => row.marginPct, render: (row) => row.marginPct === null ? "—" : percent(row.marginPct, 1), csv: (row) => row.marginPct === null ? "" : (row.marginPct * 100).toFixed(1) },
+  ];
+  const trendColumns: Column<TrendPoint>[] = [
+    { key: "month", header: "Month", sortValue: (row) => row.month, render: (row) => monthLabel(row.month) },
+    { key: "units", header: "Units", numeric: true, sortValue: (row) => row.units, render: (row) => row.units.toLocaleString() },
+    { key: "net", header: "Net sales", numeric: true, sortValue: (row) => row.netSales, render: (row) => money.format(row.netSales) },
+  ];
+
   return <>
-    <FinanceDateControls preset={datePreset} from={fromDate} to={toDate} onPreset={(preset) => { setDatePreset(preset); if (preset !== "custom") { const range = financeDateRange(preset); setFromDate(range.from); setToDate(range.to); } }} onFrom={(value) => { setDatePreset("custom"); setFromDate(value); }} onTo={(value) => { setDatePreset("custom"); setToDate(value); }}/>
-    {loading ? <PanelState status="loading" message="Calculating product profitability…"/> : data && !data.hasData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to see product profitability</strong><span>Revenue, costs, and contribution margin become available after your first order sync.</span></div></div> : null}{data?.marketingCurrencyCoverage.convertedRows ? <div className="connection-notice"><Info/><div><strong>{data.marketingCurrencyCoverage.convertedRows.toLocaleString()} advertising spend rows converted to {data.currency}</strong><span>Converted spend is allocated across products by net revenue.</span></div></div> : null}{data?.marketingCurrencyCoverage.excludedRows ? <div className="connection-notice"><Info/><div><strong>{data.marketingCurrencyCoverage.excludedRows.toLocaleString()} advertising spend rows excluded</strong><span>Add dated exchange rates before treating product contribution profit as complete.</span></div></div> : null}
-    {selectedProduct?.trend.length ? <section className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">PRODUCT TREND</span><h2>{selectedProduct.product} · {selectedProduct.variant}</h2></div><span className="report-note">Monthly net revenue and units for the current date selection.</span></div><div className="table-scroll"><table className="data-table"><thead><tr><th>Month</th><th>Units</th><th>Sales after discounts</th><th>Refunds</th><th>Net revenue</th></tr></thead><tbody>{selectedProduct.trend.map((period) => <tr key={period.period}><td><strong>{period.period}</strong></td><td>{period.units.toLocaleString()}</td><td>{formatter.format(period.revenue)}</td><td>{period.refunds ? formatter.format(-period.refunds) : "—"}</td><td><strong>{formatter.format(period.netRevenue)}</strong></td></tr>)}</tbody></table></div></section> : null}
-    <section className="panel report-panel">
-      <div className="panel-head"><div><span className="eyebrow">PRODUCT PERFORMANCE</span><h2>Product profitability</h2></div><div className="feature-actions"><span className="report-note">Payment fees and marketing spend are allocated by product net revenue. Effective-dated product, shipping, and handling costs use each order date.</span><button className="export-button" disabled={!data?.products.length} onClick={exportProducts}><Download/> Export CSV</button></div></div>
-      {data?.hasData ? <>
-        <div className="filter-row"><div className="search"><Search/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search products or SKU..."/></div><select aria-label="Product filter" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">All products</option><option value="missing">Missing costs</option><option value="low-margin">Contribution margin under 30%</option><option value="loss-making">Loss-making contribution</option></select></div>
-        <div className="table-scroll"><table className="data-table"><thead><tr><th>Product / variant</th><th>SKU</th><th>Units</th><th>Sales after discounts</th><th>Refunds</th><th>Net revenue</th><th>COGS</th><th>Gross profit</th><th>Gross margin</th><th>Shipping</th><th>Handling</th><th>Payment fees</th><th>Marketing</th><th>Contribution profit</th><th>Contribution margin</th><th>Contribution vs previous</th><th/></tr></thead><tbody>{visibleProducts.length ? visibleProducts.map((product) => { const previous = comparisonByKey.get(product.key); const change = previous ? percentChange(product.contributionProfit, previous.contributionProfit) : null; return <tr key={product.key}><td><strong>{product.product}</strong><small>{product.variant}</small></td><td>{product.sku || "—"}</td><td>{product.units.toLocaleString()}</td><td><strong>{formatter.format(product.revenue)}</strong>{product.discounts > 0 && <small>{formatter.format(product.discounts)} discounts</small>}</td><td>{product.refunds ? formatter.format(-product.refunds) : "—"}</td><td><strong>{formatter.format(product.netRevenue)}</strong></td><td>{product.missingCostUnits ? <span className="cost-warning">{product.missingCostUnits.toLocaleString()} units missing cost</span> : formatter.format(product.cogs)}</td><td>{product.missingCostUnits ? "—" : <strong>{formatter.format(product.grossProfit)}</strong>}</td><td>{product.margin === null ? "—" : `${(product.margin * 100).toFixed(1)}%`}</td><td>{formatter.format(product.shippingCosts)}</td><td>{formatter.format(product.handlingCosts)}</td><td>{formatter.format(product.transactionFeeAllocation)}</td><td>{formatter.format(product.marketingAllocation)}</td><td>{product.missingCostUnits ? "—" : <strong>{formatter.format(product.contributionProfit)}</strong>}</td><td>{product.contributionMargin === null ? "—" : `${(product.contributionMargin * 100).toFixed(1)}%`}</td><td>{comparisonData ? previous ? change === null ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(1)}%` : "New" : "Select both dates"}</td><td><div className="feature-actions"><button onClick={() => setSelectedProductKey(product.key)}>Trend</button><button onClick={() => openCosts(product.sku)}>Costs</button></div></td></tr>; }) : <tr><td colSpan={17} className="empty-row">No products match that filter.</td></tr>}</tbody></table></div>
-      </> : <div className="cost-empty"><Package/><strong>Product report ready</strong><span>Connect Shopify and run your first order sync to populate this report.</span></div>}
+    {controls}
+    <UpdatingChip show={refreshing}/>
+    <section className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <StatCard label="Net sales" value={money.format(totals.netSales)} hint={`${totals.products.toLocaleString()} products sold`}/>
+      <StatCard label="Units sold" value={totals.units.toLocaleString()}/>
+      <StatCard label="Refunds" value={money.format(-totals.refunds)} hint={totals.grossSales > 0 ? `${percent(totals.refunds / totals.grossSales, 1)} of gross sales` : undefined}/>
+      <StatCard label="Gross profit" value={totals.grossProfit === null ? "—" : money.format(totals.grossProfit)} hint={totals.grossProfit === null ? "No product has a full cost yet" : "Products with a full cost only"}/>
+      <StatCard label="Margin" value={totals.marginPct === null ? "—" : percent(totals.marginPct, 1)} hint={`${percent(totals.costedShare)} of sales have a recorded cost`}/>
     </section>
+
+    <Panel eyebrow="Product performance" title="Sales, refunds and gross profit" description="Straight from Shopify for the chosen period. Cost and margin show only for products where every sale has a recorded cost; click a product for its monthly trend and variants."
+      actions={<div className="relative w-64 max-w-full"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ds-muted" aria-hidden="true"/><TextInput className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search products…" aria-label="Search products"/></div>} flush>
+      <DataTable caption="Product performance" columns={columns} rows={rows} rowKey={(row) => row.product} exportName="product-performance.csv" maxHeight="640px"
+        empty={<EmptyState icon={<Package/>} title="No products match" description="Try a different search."/>}/>
+      {missingCostProducts > 0 && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-ds-line bg-ds-canvas px-5 py-3 text-ds-small text-ds-muted">
+        <span>{missingCostProducts.toLocaleString()} product{missingCostProducts === 1 ? " has" : "s have"} sales without a recorded cost, so no profit is shown for {missingCostProducts === 1 ? "it" : "them"}. Add unit costs in Shopify to fill them in.</span>
+        <Button variant="quiet" size="sm" onClick={() => openCosts(null)}>Open Costs</Button>
+      </div>}
+    </Panel>
+
+    {selectedProduct && <Panel eyebrow="Selected product" title={selectedProduct.product} description={`${selectedProduct.orders.toLocaleString()} orders · ${selectedProduct.units.toLocaleString()} units · ${money.format(selectedProduct.netSales)} net sales in this period`}
+      actions={<Button variant="quiet" size="sm" onClick={() => setSelected(null)}>Close</Button>} flush>
+      {trendPoints.length ? <>
+        <MonthlyChart points={trendPoints} money={(value) => money.format(value)}/>
+        {data.trendTruncated && <p className="px-5 pb-3 text-ds-small text-ds-muted">This is a partial view: Shopify returned more months and products than fit in one request.</p>}
+        <DataTable caption={`Monthly sales for ${selectedProduct.product}`} columns={trendColumns} rows={trendPoints} rowKey={(row) => row.month}/>
+      </> : <EmptyState title="No monthly sales in the last 12 months" description="Monthly trend covers the last 12 months of the chosen period."/>}
+      {selectedProduct.variants.length > 1 && <div className="border-t border-ds-line">
+        <h3 className="px-5 pb-2 pt-4 text-ds-body font-semibold text-ds-ink">Variants</h3>
+        <DataTable caption={`Variants of ${selectedProduct.product}`} columns={variantColumns} rows={selectedProduct.variants} rowKey={(row) => row.variant}/>
+      </div>}
+    </Panel>}
+
+    <Panel eyebrow="Not shown here" title="Ad spend, shipping and fees per product">
+      <p className="max-w-[75ch] text-ds-small text-ds-muted">Shopify cannot tie ad spend, shipping or payment fees to an individual product, so spreading them by revenue would only give every product the same percentage and say nothing about which ones really earn. For return on ad spend, see UTM Analysis, which matches spend to campaigns.</p>
+    </Panel>
   </>;
 }
