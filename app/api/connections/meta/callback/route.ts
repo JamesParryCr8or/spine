@@ -1,21 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { discoverMetaAccounts, importMetaInsights } from "@/lib/connections/meta";
 import { requireWorkspace } from "@/lib/workspace/server";
 import { canManageConnections } from "@/lib/workspace/permissions";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { metaStateCookie, metaPendingCookie, metaCookieOptions, openMetaSession, sealMetaSession } from "@/lib/connections/meta-oauth";
 
-const stateCookie = "spine_meta_oauth_state";
+export const maxDuration = 60;
 
 const callbackUrl = (request: NextRequest) => process.env.META_OAUTH_REDIRECT_URI
   ?? new URL("/api/connections/meta/callback", request.url).toString();
 
-const redirectToApp = (request: NextRequest, status: "connected" | "error", message?: string) => {
+const redirectToApp = (request: NextRequest, status: "select" | "error", message?: string) => {
   const url = new URL("/protected/connections", request.url);
   url.searchParams.set("metaOAuth", status);
   if (message) url.searchParams.set(status === "error" ? "metaError" : "metaAccount", message);
   const response = NextResponse.redirect(url);
-  response.cookies.set(stateCookie, "", { path: "/", maxAge: 0 });
+  response.cookies.set(metaStateCookie, "", { ...metaCookieOptions, maxAge: 0 });
+  response.cookies.set(metaPendingCookie, "", { ...metaCookieOptions, maxAge: 0 });
   return response;
 };
 
@@ -30,9 +30,8 @@ export async function GET(request: NextRequest) {
 
   const code = request.nextUrl.searchParams.get("code");
   const state = request.nextUrl.searchParams.get("state");
-  const savedState = request.cookies.get(stateCookie)?.value;
-  const [expectedState, savedLookback] = savedState?.split(".") ?? [];
-  if (!code || !state || !expectedState || state !== expectedState) {
+  const session = openMetaSession(request.cookies.get(metaStateCookie)?.value, process.env.META_APP_SECRET ?? "", "state", { userId: workspace.userId, storeId: workspace.store.id, organizationId: workspace.membership.organizationId });
+  if (!code || !state || !session || state !== session.nonce) {
     return redirectToApp(request, "error", "Your Facebook connection could not be verified. Please try Connect Facebook again.");
   }
 
@@ -48,7 +47,7 @@ export async function GET(request: NextRequest) {
       redirect_uri: redirectUri,
       code,
     });
-    const tokenResponse = await fetch(`https://graph.facebook.com/v22.0/oauth/access_token?${tokenParams}`, { cache: "no-store" });
+    const tokenResponse = await fetch(`https://graph.facebook.com/v22.0/oauth/access_token?${tokenParams}`, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
     const tokenPayload = await tokenResponse.json().catch(() => ({})) as { access_token?: string; error?: { message?: string } };
     if (!tokenResponse.ok || !tokenPayload.access_token) throw new Error(tokenPayload.error?.message ?? "Meta could not complete Facebook sign-in.");
 
@@ -58,37 +57,16 @@ export async function GET(request: NextRequest) {
       client_secret: appSecret,
       fb_exchange_token: tokenPayload.access_token,
     });
-    const extensionResponse = await fetch(`https://graph.facebook.com/v22.0/oauth/access_token?${extensionParams}`, { cache: "no-store" });
+    const extensionResponse = await fetch(`https://graph.facebook.com/v22.0/oauth/access_token?${extensionParams}`, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
     const extensionPayload = await extensionResponse.json().catch(() => ({})) as { access_token?: string; error?: { message?: string } };
     if (!extensionResponse.ok || !extensionPayload.access_token) {
       throw new Error(extensionPayload.error?.message ?? "Meta could not extend the Facebook connection.");
     }
 
-    const accessToken = extensionPayload.access_token;
-    const accounts = await discoverMetaAccounts(accessToken);
-    const account = accounts[0];
-    if (!account) throw new Error("No Meta ad accounts are available to this Facebook account.");
-
-    const { error: connectionError } = await workspace.supabase.rpc("save_data_connection", {
-      connection_provider: "meta",
-      requested_store_id: workspace.store.id,
-      access_token: accessToken,
-      account_id: account.id,
-      account_name: account.name ?? null,
-    });
-    if (connectionError) throw new Error(connectionError.message);
-
-    const lookbackMonths = Number(savedLookback);
-    await importMetaInsights({
-      supabase: workspace.membership.role === "connector" ? createAdminClient() : workspace.supabase,
-      organizationId: workspace.membership.organizationId,
-      store: workspace.store,
-      account,
-      accessToken,
-      lookbackMonths: Number.isInteger(lookbackMonths) && lookbackMonths >= 1 && lookbackMonths <= 36 ? lookbackMonths : 12,
-    });
-
-    return redirectToApp(request, "connected", account.name ?? account.id);
+    const response = redirectToApp(request, "select");
+    response.cookies.set(metaPendingCookie, sealMetaSession({ ...session, expires: Date.now() + 600_000, accessToken: extensionPayload.access_token }, appSecret, "pending"), metaCookieOptions);
+    response.headers.set("Cache-Control", "no-store");
+    return response;
   } catch (cause) {
     return redirectToApp(request, "error", cause instanceof Error ? cause.message : "Facebook could not be connected.");
   }

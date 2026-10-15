@@ -11,6 +11,8 @@ import { reportingDateKey, reportingRangeToUtc } from "./reporting-range.ts";
 import { calculateProfitAndLoss } from "./profit-and-loss.ts";
 import { selectAllPages } from "../supabase/select-all.ts";
 import { selectOrdersByProcessedAt } from "../supabase/select-orders.ts";
+import { billingPeriodCosts, estimateBillingCosts, type BillingCost, type BillingCoverage, type BillingEstimateSettings } from "./billing-costs.ts";
+import { loadBillingEstimates } from "../shopify/billing-estimates.ts";
 
 type Order = { id: string; processed_at: string | null; gross_sales: string; discounts: string; net_product_sales: string; shipping_revenue: string; tax: string; duties: string; total_sales: string; currency: string; exchange_rate: number };
 type RawOrder = Omit<Order, "exchange_rate">;
@@ -52,6 +54,10 @@ export type PnlInputs = {
   variants: Variant[];
   productCosts: EffectiveCost[];
   operatingCosts: CustomCost[];
+  billingCharges?: BillingCost[];
+  billingCoverage?: BillingCoverage[];
+  billingEstimateSettings?: BillingEstimateSettings;
+  billingToday?: string;
   paymentFeeRules: PaymentFeeRuleRow[];
   productShippingCosts: ProductShippingCostRow[];
   storeCostDefault: StoreCostDefault | null;
@@ -162,7 +168,7 @@ export async function loadPnlInputs(
     return query.order(dateColumn, { ascending: true }).order("id", { ascending: true }).range(page.from, page.to) as unknown as PromiseLike<{ data: Record<string, string>[] | null; error: { message: string } | null }>;
   }, pageSize);
 
-  const [lineResult, refundResult, transactionResult, variantResult, costResult, operatingCostResult, paymentFeeRuleResult, productShippingCostResult, gatewayResult, metaResult, googleResult, bingResult, storeCostDefaultResult, estimateSettingsResult, microsoftResult] = await Promise.all([
+  const [lineResult, refundResult, transactionResult, variantResult, costResult, operatingCostResult, paymentFeeRuleResult, productShippingCostResult, gatewayResult, metaResult, googleResult, bingResult, storeCostDefaultResult, estimateSettingsResult, microsoftResult, billingResult] = await Promise.all([
     byOrderChunk<Line>("shopify_order_lines", "order_id,variant_gid,sku,current_quantity,net_sales"),
     byOrderChunk<Refund>("shopify_refunds", "order_id,total_refunded"),
     byOrderChunk<Transaction>("shopify_transactions", "order_id,fee_amount,fee_tax,currency,status,gateway,amount,processed_at_shopify,created_at_shopify"),
@@ -185,8 +191,9 @@ export async function loadPnlInputs(
     supabase.from("store_cost_defaults").select("fulfilment_amount,fulfilment_basis,postage_amount,postage_basis,default_cogs_percent,currency").eq("store_id", store.id).maybeSingle(),
     supabase.from("payment_fee_estimate_settings").select("shopify_plan,plan_override,default_percentage_rate,default_fixed_fee,surcharge_rate_override").eq("store_id", store.id).maybeSingle(),
     supabase.from("data_connections").select("status,last_error").eq("store_id", store.id).eq("provider", "bing_ads").maybeSingle(),
+    loadBillingEstimates(supabase, store.id),
   ]);
-  const pagedError = [lineResult, refundResult, transactionResult, variantResult, costResult, operatingCostResult, paymentFeeRuleResult, productShippingCostResult, gatewayResult, metaResult, googleResult, bingResult]
+  const pagedError = [lineResult, refundResult, transactionResult, variantResult, costResult, operatingCostResult, paymentFeeRuleResult, productShippingCostResult, gatewayResult, metaResult, googleResult, bingResult, billingResult]
     .find((result) => result.error)?.error;
   if (pagedError) return { ok: false, error: pagedError };
   if (storeCostDefaultResult.error) return { ok: false, error: storeCostDefaultResult.error.message };
@@ -206,6 +213,10 @@ export async function loadPnlInputs(
       variants: variantResult.rows,
       productCosts: costResult.rows,
       operatingCosts: operatingCostResult.rows,
+      billingCharges: billingResult.charges,
+      billingCoverage: billingResult.coverage,
+      billingEstimateSettings: billingResult.settings,
+      billingToday: reportingDateKey(new Date(), store.timezone || "Europe/London"),
       paymentFeeRules: paymentFeeRuleResult.rows,
       productShippingCosts: productShippingCostResult.rows,
       storeCostDefault: storeCostDefaultResult.data as StoreCostDefault | null,
@@ -410,13 +421,15 @@ export function computePnl(inputs: PnlInputs, store: PnlStore) {
   const marketingCoverage = marketingCurrencyCoverage.summary();
   const marketingSpendAvailable = marketingCoverage.includedRows > 0 && marketingCoverage.excludedRows === 0;
 
-  let fixedOperatingExpenses = 0;
+  const billingCosts = billingPeriodCosts(inputs.billingCharges ?? [], store.currency, exchangeRates, inputs.range.from ?? rangeStart, inputs.range.to ?? rangeEnd);
+  const billingEstimate = estimateBillingCosts(inputs.billingCharges ?? [], store.currency, exchangeRates, inputs.billingCoverage ?? [], inputs.billingEstimateSettings ?? { enabled: true, overrides: {} }, inputs.billingToday ?? reportingDateKey(new Date(), store.timezone || "Europe/London"), inputs.range.from ?? rangeStart, inputs.range.to ?? rangeEnd);
+  let fixedOperatingExpenses = billingCosts.total + billingEstimate.total;
   let variableOperatingExpenses = 0;
   let merchantShippingCosts = variantShippingCosts + defaultPostageCosts;
   let handlingCosts = defaultFulfilmentCosts;
   let shippingCostsAvailable = Boolean(usableStoreCostDefault);
   let handlingCostsAvailable = Boolean(usableStoreCostDefault);
-  let unallocatedOperatingCosts = 0;
+  let unallocatedOperatingCosts = billingCosts.missingRates + billingEstimate.missingRates;
   for (const cost of inputs.operatingCosts) {
     if (!rangeStart || !rangeEnd || cost.currency !== store.currency) {
       unallocatedOperatingCosts += 1;
@@ -475,7 +488,7 @@ export function computePnl(inputs: PnlInputs, store: PnlStore) {
     microsoftAdsImportError: microsoftConnection?.last_error ?? null,
     transactionFeeCoverage: { salesDays: salesDays.length, reportedFeeDays: reportedFeeDays.length, latestReportedFeeDate: reportedFeeDays.at(-1)?.sales_date ?? null },
     calculatedAt: new Date().toISOString(),
-    metrics: { ...totals, refunds, cogs, ...calculated, marketingSpend, metaMarketingSpend, googleMarketingSpend, bingMarketingSpend, transactionFees, shopifyPaymentFees, estimatedProcessorFees: externalPaymentFees.processorFees, estimatedShopifySurcharge: externalPaymentFees.shopifySurcharge, merchantShippingCosts, variantShippingCosts, shippingFallbackCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, orders: shopifyDaily.length ? shopifyDaily.reduce((total, day) => total + day.orders, 0) : includedOrders.length, unitsSold: dailyUnitCount || totalOrderUnits, missingCostLines, missingShippingLines: shippingCoverage.missingLines, shippingOverrideLines: shippingCoverage.overrideLines, shippingFallbackLines: shippingCoverage.fallbackLines, shippingFallbackRate: shippingCoverage.fallbackRate, unallocatedOperatingCosts },
+    metrics: { shopifyBillingActuals: billingCosts.total, shopifyBillingEstimates: billingEstimate.total, ...totals, refunds, cogs, ...calculated, marketingSpend, metaMarketingSpend, googleMarketingSpend, bingMarketingSpend, transactionFees, shopifyPaymentFees, estimatedProcessorFees: externalPaymentFees.processorFees, estimatedShopifySurcharge: externalPaymentFees.shopifySurcharge, merchantShippingCosts, variantShippingCosts, shippingFallbackCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, orders: shopifyDaily.length ? shopifyDaily.reduce((total, day) => total + day.orders, 0) : includedOrders.length, unitsSold: dailyUnitCount || totalOrderUnits, missingCostLines, missingShippingLines: shippingCoverage.missingLines, shippingOverrideLines: shippingCoverage.overrideLines, shippingFallbackLines: shippingCoverage.fallbackLines, shippingFallbackRate: shippingCoverage.fallbackRate, unallocatedOperatingCosts },
     externalPaymentFees: { ...externalPaymentFees, available: gatewayPaymentDays.length > 0 },
     period: rangeStart && rangeEnd ? { start: rangeStart, end: rangeEnd } : null,
     availability: { marketingSpend: marketingSpendAvailable, metaMarketingSpend: metaInsights.length > 0, googleMarketingSpend: googleInsights.length > 0, bingMarketingSpend: bingInsights.length > 0 || (microsoftConnection?.status === "connected" && !microsoftConnection.last_error), transactionFees: transactionFeesAvailable, transactionFeesComplete, shippingCosts: shippingCostsAvailable, handlingCosts: handlingCostsAvailable, operatingExpenses: true, netProfit: netProfitAvailable },

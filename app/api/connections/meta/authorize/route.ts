@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireWorkspace } from "@/lib/workspace/server";
 import { canManageConnections } from "@/lib/workspace/permissions";
 
-const stateCookie = "spine_meta_oauth_state";
+import { metaStateCookie, metaPendingCookie, metaCookieOptions, sealMetaSession } from "@/lib/connections/meta-oauth";
 
 const errorRedirect = (request: NextRequest, message: string) => {
   const url = new URL("/protected/connections", request.url);
@@ -20,6 +20,8 @@ export async function GET(request: NextRequest) {
   if (!workspace.ok) return workspace.response;
   if (!canManageConnections(workspace.membership.role)) return NextResponse.json({ error: "Connection management access is required" }, { status: 403 });
 
+  if (!workspace.store) return errorRedirect(request, "Select a brand before connecting Meta.");
+
   const appId = process.env.META_APP_ID;
   if (!appId || !process.env.META_APP_SECRET) {
     return errorRedirect(request, "Meta OAuth has not been configured yet. Add the Meta app ID and secret in the Spine production environment.");
@@ -28,13 +30,10 @@ export async function GET(request: NextRequest) {
   const requestedMonths = Number(request.nextUrl.searchParams.get("lookbackMonths"));
   const lookbackMonths = Number.isInteger(requestedMonths) && requestedMonths >= 1 && requestedMonths <= 36 ? requestedMonths : 12;
   const state = crypto.randomUUID();
-  const response = NextResponse.redirect(new URL(`https://www.facebook.com/v22.0/dialog/oauth?client_id=${encodeURIComponent(appId)}&redirect_uri=${encodeURIComponent(callbackUrl(request))}&state=${encodeURIComponent(state)}&response_type=code&scope=ads_read,read_insights`));
-  response.cookies.set(stateCookie, `${state}.${lookbackMonths}`, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 10 * 60,
-  });
+  const url = new URL("https://www.facebook.com/v22.0/dialog/oauth");
+  url.search = new URLSearchParams({ client_id: appId, redirect_uri: callbackUrl(request), state, response_type: "code", scope: "ads_read,read_insights", ...(process.env.META_LOGIN_CONFIG_ID ? { config_id: process.env.META_LOGIN_CONFIG_ID } : {}) }).toString();
+  const response = NextResponse.redirect(url);
+  response.cookies.set(metaStateCookie, sealMetaSession({ nonce: state, userId: workspace.userId, storeId: workspace.store.id, organizationId: workspace.membership.organizationId, expires: Date.now() + 600_000, lookbackMonths }, process.env.META_APP_SECRET, "state"), metaCookieOptions);
+  response.cookies.set(metaPendingCookie, "", { ...metaCookieOptions, maxAge: 0 });
   return response;
 }

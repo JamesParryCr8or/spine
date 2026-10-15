@@ -1,3 +1,5 @@
+import { cookies } from "next/headers";
+import { metaPendingCookie, metaCookieOptions, openMetaSession } from "@/lib/connections/meta-oauth";
 import { NextResponse } from "next/server";
 
 import { discoverMetaAccounts, importMetaInsights } from "@/lib/connections/meta";
@@ -5,6 +7,8 @@ import { requireWorkspace } from "@/lib/workspace/server";
 import { withStoreJobLock } from "@/lib/workspace/job-lock";
 import { canManageConnections } from "@/lib/workspace/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
+
+export const maxDuration = 300;
 
 async function context() {
   const workspace = await requireWorkspace();
@@ -69,7 +73,7 @@ export async function GET() {
       syncedAt: latest?.[0]?.synced_at ?? null,
     };
   }
-  return NextResponse.json({ connection, sync });
+  return NextResponse.json({ connection, sync, oauthConfigured: Boolean(process.env.META_APP_ID && process.env.META_APP_SECRET) });
 }
 
 export const POST = withStoreJobLock("meta_import", 300, handlePost);
@@ -80,15 +84,18 @@ async function handlePost(request: Request) {
   if (!canManageConnections(result.membership.role)) return NextResponse.json({ error: "Connection management access is required" }, { status: 403 });
   const { supabase, membership, store } = result;
 
-  const body = await request.json().catch(() => null) as { accessToken?: string; accountId?: string; lookbackMonths?: number } | null;
+  const body = await request.json().catch(() => null) as { accessToken?: string; accountId?: string; lookbackMonths?: number; oauth?: boolean } | null;
   const requestedLookback = Number(body?.lookbackMonths);
   const lookbackMonths = Number.isInteger(requestedLookback) && requestedLookback >= 1 && requestedLookback <= 36 ? requestedLookback : 36;
-  const accessToken = body?.accessToken?.trim();
+  const session = body?.oauth ? openMetaSession((await cookies()).get(metaPendingCookie)?.value, process.env.META_APP_SECRET ?? "", "pending", { userId: result.userId, storeId: store.id, organizationId: membership.organizationId }) : null;
+  if (body?.oauth && !session?.accessToken) return NextResponse.json({ error: "Sign-in expired or the selected brand changed. Connect with Meta again." }, { status: 400 });
+  if (body?.oauth && !body.accountId) return NextResponse.json({ error: "Choose an ad account" }, { status: 400 });
+  const accessToken = body?.oauth ? session?.accessToken : body?.accessToken?.trim();
   if (!accessToken) return NextResponse.json({ error: "Access token is required to import Meta spend" }, { status: 400 });
 
   let accounts;
   try {
-    accounts = await discoverMetaAccounts(accessToken);
+    accounts = await discoverMetaAccounts(accessToken, true);
   } catch (cause) {
     return NextResponse.json({ error: cause instanceof Error ? cause.message : "Meta rejected this access token" }, { status: 400 });
   }
@@ -111,7 +118,7 @@ async function handlePost(request: Request) {
   try {
     const sync = await importMetaInsights({ supabase: membership.role === "connector" ? createAdminClient() : supabase, organizationId: membership.organizationId, store, account, accessToken, lookbackMonths });
     const saved = Array.isArray(data) ? data[0] : data;
-    return NextResponse.json({
+    const response = NextResponse.json({
       connection: {
         provider: saved?.provider ?? "meta",
         status: saved?.status ?? "connected",
@@ -121,6 +128,8 @@ async function handlePost(request: Request) {
       },
       sync,
     });
+    response.cookies.set(metaPendingCookie, "", { ...metaCookieOptions, maxAge: 0 });
+    return response;
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : "Meta connection saved but spend could not be imported";
     return NextResponse.json({ error: message }, { status: 400 });

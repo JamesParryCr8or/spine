@@ -14,6 +14,7 @@ import { estimatedTransactionFee } from "@/lib/analytics/transaction-fees";
 import { shopifyThirdPartyRate } from "@/lib/analytics/external-payment-fees";
 import { invalidateCachedJson } from "@/lib/analytics/client-response-cache";
 import { CircleDollarSign, Plus, WalletCards, Trash2 } from "lucide-react";
+import { ShopifyBillImport } from "@/components/shopify-bill-import";
 
 type OperatingCost = { id: string; name: string; category: string; amount: string; currency: string; cadence: string; allocation_basis: string; effective_from: string; effective_to: string | null; notes: string | null };
 
@@ -152,6 +153,7 @@ export function Expenses() {
       </div>
     </div>
     {error && <PanelState status="error" title="That did not work" message={error}/>}
+    <ShopifyBillImport canEdit={canEdit}/>
 
     <Panel eyebrow="Cost schedule" title="Operating expenses" flush>
       <DataTable caption="Operating expenses" columns={columnsForCosts} rows={costs} rowKey={(cost) => cost.id} loading={initialLoading} exportName="operating-expenses.csv"

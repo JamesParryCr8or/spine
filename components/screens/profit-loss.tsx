@@ -40,6 +40,8 @@ const pnlRowDescriptions: Record<string, string> = {
   "Variant shipping overrides": "Shipping and fulfilment costs allocated from product or variant-specific rules.",
   "Merchant shipping and fulfilment": "Total merchant shipping and fulfilment costs, including fallback and variant-specific costs.",
   "Handling and pick/pack": "Handling costs allocated from the configured per-order, per-unit, or other applicable rule.",
+  "Shopify bills — actual (included above)": "Imported Shopify charges included in fixed operating costs. This is a breakdown, not an additional deduction.",
+  "Shopify bills — estimated (included above)": "Daily estimates for uncovered days in the current month, using up to 12 complete imported months. Included in fixed operating costs; actual imports replace them.",
   "Fixed operating costs": "Fixed operating expenses allocated to the selected dates using their effective dates and cadence.",
   "Variable operating costs": "Variable operating expenses allocated using their configured basis, such as orders, units, or revenue.",
   "Operating expenses": "Fixed plus variable operating expenses.",
@@ -265,6 +267,8 @@ export function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey 
     ["Estimated external processor fees", pnl.externalPaymentFees?.available ? signed(-pnl.metrics.estimatedProcessorFees) : "Not imported"],
     ["Estimated Shopify third-party fees", !pnl.externalPaymentFees?.available ? "Not imported" : pnl.externalPaymentFees.surchargeRate !== null ? signed(-pnl.metrics.estimatedShopifySurcharge) : "Select Shopify plan"],
     ["Fixed operating costs", signed(-pnl.metrics.fixedOperatingExpenses)],
+    ["Shopify bills — actual (included above)", signed(-(pnl.metrics.shopifyBillingActuals ?? 0))],
+    ["Shopify bills — estimated (included above)", signed(-(pnl.metrics.shopifyBillingEstimates ?? 0))],
     ["Variable operating costs", signed(-pnl.metrics.variableOperatingExpenses)],
     ["Operating expenses", signed(-pnl.metrics.operatingExpenses)],
     ["Profit after known costs", signed(pnl.metrics.profitAfterKnownCosts)],
@@ -306,6 +310,8 @@ export function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey 
     { section: "Shipping and handling", label: "Merchant shipping and fulfilment", value: (data) => data.availability.shippingCosts ? (-data.metrics.merchantShippingCosts) : "Coverage needed" },
     { section: "Shipping and handling", label: "Handling and pick/pack", value: (data) => data.availability.handlingCosts ? (-data.metrics.handlingCosts) : "Coverage needed" },
     { section: "Custom expenses", label: "Fixed operating costs", value: (data) => (-data.metrics.fixedOperatingExpenses) },
+    { section: "Custom expenses", label: "Shopify bills — actual (included above)", value: data => -(data.metrics.shopifyBillingActuals ?? 0) },
+    { section: "Custom expenses", label: "Shopify bills — estimated (included above)", value: data => -(data.metrics.shopifyBillingEstimates ?? 0) },
     { section: "Custom expenses", label: "Variable operating costs", value: (data) => (-data.metrics.variableOperatingExpenses) },
     { section: "Custom expenses", label: "Operating expenses", value: (data) => (-data.metrics.operatingExpenses) },
     { section: "Contribution and net profit", label: "Profit after known costs", value: (data) => (data.metrics.profitAfterKnownCosts) },
@@ -336,7 +342,7 @@ export function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey 
     ["PROFIT AFTER MARKETING", pnl.availability.marketingSpend ? formatter.format(pnl.metrics.profitAfterMarketingSpend) : "—", pnl.availability.marketingSpend ? "Meta, Google Ads + Microsoft Ads spend included" : "Import ad spend"],
     ["CONTRIBUTION MARGIN", pnl.availability.marketingSpend && pnl.availability.shippingCosts && pnl.availability.handlingCosts ? formatter.format(pnl.metrics.contributionMargin) : pnl.availability.marketingSpend ? formatter.format(pnl.metrics.contributionMarginBeforeShipping) : "—", pnl.availability.marketingSpend && pnl.availability.shippingCosts && pnl.availability.handlingCosts ? `${pnl.metrics.contributionMarginPercentage === null ? "—" : `${(pnl.metrics.contributionMarginPercentage * 100).toFixed(1)}%`} after shipping and handling` : pnl.availability.marketingSpend ? `${pnl.metrics.contributionMarginBeforeShippingPercentage === null ? "—" : `${(pnl.metrics.contributionMarginBeforeShippingPercentage * 100).toFixed(1)}%`} before shipping and handling` : "Import ad spend"],
   ] : [];
-  const totalRows = new Set([3, 5, 9, 15, 16, 20, 21, 22, 25, 27, 28]);
+  const totalRows = new Set([3, 5, 9, 17, 18, 22, 23, 24, 27, 29, 30]);
   const reconciliationIssues = pnl ? [
     pnl.metrics.missingCostLines > 0 ? `${pnl.metrics.missingCostLines.toLocaleString()} product lines need costs` : null,
     pnl.metrics.missingShippingLines > 0 ? `${pnl.metrics.missingShippingLines.toLocaleString()} product lines need shipping costs` : null,

@@ -18,6 +18,9 @@ export function Connections({ leadGeneration = false, canManage = false }: { lea
   const [showMetaSetup, setShowMetaSetup] = useState(false);
   const [showShopifySetup, setShowShopifySetup] = useState(false);
   const [showToken, setShowToken] = useState(false);
+  const [metaOAuthPending, setMetaOAuthPending] = useState(false);
+  const [metaOAuthConfigured, setMetaOAuthConfigured] = useState<boolean | null>(null);
+  const [manualMeta, setManualMeta] = useState(false);
   const [token, setToken] = useState("");
   const [accountId, setAccountId] = useState("");
   const [metaAccounts, setMetaAccounts] = useState<Array<{ id: string; name: string; currency: string | null; accountStatus: number | null }>>([]);
@@ -69,15 +72,17 @@ export function Connections({ leadGeneration = false, canManage = false }: { lea
   }, []);
 
   useEffect(() => {
+    const selectingMeta = new URLSearchParams(window.location.search).get("metaOAuth") === "select";
     fetch("/api/connections/meta")
       .then((response) => response.ok ? response.json() : null)
       .then((payload) => {
+        setMetaOAuthConfigured(payload?.oauthConfigured ?? null);
         if (!payload?.connection) return;
         setMetaConnected(payload.connection.status === "connected");
         setMetaConnectionStatus(payload.connection.status === "connected" ? "connected" : payload.connection.status === "error" ? "error" : "disconnected");
         setMetaConnectionError(payload.connection.last_error ?? "");
         if (payload.connection.status === "error" && payload.connection.last_error) setConnectionError(payload.connection.last_error);
-        setAccountId(payload.connection.external_account_id ?? "");
+        if (!selectingMeta) setAccountId(payload.connection.external_account_id ?? "");
         setMetaAccountName(payload.connection.external_account_name ?? "");
         setMetaLastSync(payload.sync ?? null);
       })
@@ -124,7 +129,20 @@ export function Connections({ leadGeneration = false, canManage = false }: { lea
     const timeout = window.setTimeout(() => {
       setShowMetaSetup(true);
       if (status === "connected") setMetaSyncResult(`Connected through Facebook${message ? ` to ${message}` : ""}. Your selected spend history has been imported.`);
-      else setConnectionError(message || "Facebook could not be connected.");
+      else if (status === "select") {
+        setMetaOAuthPending(true);
+        setLoadingMetaAccounts(true);
+        setAccountId("");
+        fetch("/api/connections/meta/accounts", { cache: "no-store" }).then(async (response) => {
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.error ?? "Could not load ad accounts");
+          setMetaAccounts(payload.accounts ?? []);
+          setMetaLookbackMonths(String(payload.lookbackMonths ?? 12));
+          if (payload.accounts?.length === 1) setAccountId(payload.accounts[0].id);
+          if (!payload.accounts?.length) setConnectionError("Meta did not grant access to any ad accounts. Reconnect and grant access to the account you want to import.");
+        }).catch((error) => setConnectionError(error instanceof Error ? error.message : "Could not load ad accounts"))
+          .finally(() => setLoadingMetaAccounts(false));
+      } else setConnectionError(message || "Facebook could not be connected.");
       window.history.replaceState({}, "", "/protected/connections");
     }, 0);
     return () => window.clearTimeout(timeout);
@@ -165,27 +183,34 @@ export function Connections({ leadGeneration = false, canManage = false }: { lea
   };
 
   const saveMeta = async () => {
-    if (!token.trim() || !accountId) return;
+    if ((!metaOAuthPending && !token.trim()) || !accountId) return;
     setSavingConnection(true);
     setConnectionError("");
-    const response = await fetch("/api/connections/meta", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accessToken: token.trim(), accountId: accountId.trim(), lookbackMonths: Number(metaLookbackMonths) }),
-    });
-    const payload = await response.json();
-    setSavingConnection(false);
-    if (!response.ok) {
-      setConnectionError(payload.error ?? "Could not connect Meta Ads");
-      return;
-    }
-    setMetaConnected(true);
-    setMetaConnectionStatus("connected");
-    setMetaConnectionError("");
-    setMetaAccountName(payload.connection?.external_account_name ?? "");
-    setAccountId(payload.connection?.external_account_id ?? accountId);
-    setMetaSyncResult(`${payload.sync?.importedDays ?? 0} daily Meta spend records imported (${payload.sync?.range?.since ?? "selected"} to ${payload.sync?.range?.until ?? "today"})`);
-    setToken("");
+    try {
+      const response = await fetch("/api/connections/meta", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...(metaOAuthPending ? { oauth: true } : { accessToken: token.trim() }), accountId: accountId.trim(), lookbackMonths: Number(metaLookbackMonths) }),
+      });
+      const payload = await response.json();
+      setSavingConnection(false);
+      if (!response.ok) {
+        setConnectionError(payload.error ?? "Could not connect Meta Ads");
+        return;
+      }
+      setMetaConnected(true);
+      setMetaConnectionStatus("connected");
+      setMetaConnectionError("");
+      setMetaAccountName(payload.connection?.external_account_name ?? "");
+      setAccountId(payload.connection?.external_account_id ?? accountId);
+      setMetaSyncResult(`${payload.sync?.importedDays ?? 0} daily Meta spend records imported (${payload.sync?.range?.since ?? "selected"} to ${payload.sync?.range?.until ?? "today"})`);
+      setToken("");
+      setMetaOAuthPending(false);
+      setMetaAccounts([]);
+      setMetaLastSync({ importedDays: payload.sync?.importedDays ?? 0, latestDate: payload.sync?.range?.until ?? null, syncedAt: new Date().toISOString() });
+    } catch {
+      setConnectionError("Could not complete the import. Please try again.");
+    } finally { setSavingConnection(false); }
   };
 
   const disconnectMeta = async () => {
@@ -293,12 +318,15 @@ export function Connections({ leadGeneration = false, canManage = false }: { lea
       <button className="modal-close" onClick={()=>setShowMetaSetup(false)}><X/></button>
       <div className="modal-brand">{integrationLogo("Meta Ads")}<div><span className="eyebrow">DATA CONNECTION</span><h2>Connect Meta Ads</h2></div></div>
       <p className="modal-intro">Connect with Facebook to grant Spine read-only access to your Meta Ads account. There is no Graph API Explorer token to copy and your Facebook password never reaches Spine.</p>
-      <div className="connection-notice meta-oauth-notice"><Info/><div><strong>Connect your own Facebook account</strong><span>Choose the Meta ad account you manage, then Spine securely saves the approved connection and imports its daily spend.</span></div><button className="primary" disabled={savingConnection} onClick={connectMetaWithFacebook}><ExternalLink/>{metaConnectionStatus === "error" ? "Reconnect Facebook" : "Connect Facebook"}</button></div>
+      <div className="connection-notice meta-oauth-notice"><Info/><div><strong>Connect your own Facebook account</strong><span>Choose the Meta ad account you manage, then Spine securely saves the approved connection and imports its daily spend.</span></div><button className="primary" disabled={savingConnection || metaOAuthConfigured === false} onClick={connectMetaWithFacebook}><ExternalLink/>{metaConnectionStatus === "error" ? "Reconnect with Meta" : "Connect with Meta"}</button></div>
       {metaConnectionStatus === "error" && metaConnectionError && <div className="connection-error" role="alert">{metaConnectionError}</div>}
       {metaConnected && metaAccountName && <div className="connected-account"><span/><div><small>CURRENT ACCOUNT</small><strong>{metaAccountName}</strong>{metaLastSync ? <small>{metaLastSync.importedDays.toLocaleString()} daily spend records · latest {metaLastSync.latestDate ? new Date(`${metaLastSync.latestDate}T00:00:00Z`).toLocaleDateString("en-GB") : "date unavailable"}</small> : <small>Spend data has not been imported yet.</small>}</div></div>}
-      <div className="help-card"><Info/><div><strong>Alternative for agency-managed accounts</strong><p>Use a Meta system-user token only if your business manages the connection centrally. For normal use, choose <b>Connect Facebook</b> above.</p><a className="meta-developer-link" href="https://developers.facebook.com/tools/explorer" target="_blank" rel="noreferrer"><ExternalLink/>Open Graph API Explorer</a></div></div>
+      {metaOAuthConfigured === false && <div className="connection-error">Meta sign-in needs the existing app credentials configured by your Spine administrator.</div>}
+      {metaOAuthPending && <p role="status">{loadingMetaAccounts ? "Loading your Meta ad accounts…" : "Signed in with Meta. Choose the ad account to connect below."}</p>}
+      <button type="button" disabled={savingConnection} onClick={() => { setManualMeta(!manualMeta); setMetaOAuthPending(false); setMetaAccounts([]); setAccountId(""); }}>{manualMeta ? "Hide manual token option" : "Use a manual token instead"}</button>
+      {manualMeta && <><div className="help-card"><Info/><div><strong>Alternative for agency-managed accounts</strong><p>Use a Meta system-user token only if your business manages the connection centrally. For normal use, choose <b>Connect with Meta</b> above.</p><a className="meta-developer-link" href="https://developers.facebook.com/tools/explorer" target="_blank" rel="noreferrer"><ExternalLink/>Open Graph API Explorer</a></div></div>
       <label className="form-field"><span>System-user token <small>Optional alternative</small><b className="tooltip-trigger">?<em>Use this only for a centrally managed Meta system user with ads_read and read_insights.</em></b></span><div className="secret-input"><KeyRound/><input value={token} onChange={(event)=>{setToken(event.target.value);setMetaAccounts([]);setAccountId("");setMetaAccountSearch("");setConnectionError("");}} type={showToken?"text":"password"} placeholder="EAAB..." autoComplete="off"/><button onClick={()=>setShowToken(!showToken)}>{showToken?<EyeOff/>:<Eye/>}</button></div></label>
-      <div className="meta-account-discovery"><button type="button" disabled={!token.trim() || loadingMetaAccounts} onClick={() => void loadMetaAccounts()}>{loadingMetaAccounts ? "Loading accounts…" : metaAccounts.length ? "Reload ad accounts" : "Find ad accounts"}</button><small>{metaAccounts.length ? `${metaAccounts.length} account${metaAccounts.length === 1 ? "" : "s"} available to this token.` : "Enter your token, then load the ad accounts it can access."}</small></div>
+      <div className="meta-account-discovery"><button type="button" disabled={!token.trim() || loadingMetaAccounts} onClick={() => void loadMetaAccounts()}>{loadingMetaAccounts ? "Loading accounts…" : metaAccounts.length ? "Reload ad accounts" : "Find ad accounts"}</button><small>{metaAccounts.length ? `${metaAccounts.length} account${metaAccounts.length === 1 ? "" : "s"} available to this token.` : "Enter your token, then load the ad accounts it can access."}</small></div></>}
       <label className="form-field"><span>Search Meta ad accounts</span><div className="meta-account-search"><Search aria-hidden="true"/><input type="search" value={metaAccountSearch} onChange={(event) => setMetaAccountSearch(event.target.value)} placeholder={metaAccounts.length ? "Filter by account name, currency or ID" : "Load accounts to search"} disabled={!metaAccounts.length} /></div></label>
       <div className="meta-account-results" role="listbox" aria-label="Meta ad accounts" aria-disabled={!metaAccounts.length}>
         {!metaAccounts.length ? <span className="meta-account-empty">Load accounts to choose an ad account.</span> : filteredMetaAccounts.length ? filteredMetaAccounts.map((account) => {
@@ -312,7 +340,7 @@ export function Connections({ leadGeneration = false, canManage = false }: { lea
       <label className="form-field"><span>Spend history to import</span><select value={metaLookbackMonths} onChange={(event)=>setMetaLookbackMonths(event.target.value)}><option value="3">Last 3 months</option><option value="6">Last 6 months</option><option value="12">Last 12 months</option><option value="24">Last 24 months</option><option value="36">Last 36 months</option></select><small>New connections default to the last 365 days. Meta supports up to 37 months when you need more history.</small></label>
       <div className="permission-note"><KeyRound/><span><strong>Required permissions:</strong> ads_read, read_insights</span></div>
       {metaSyncResult && <div className="connected-account"><span/><div><small>SPEND IMPORT COMPLETE</small><strong>{metaSyncResult}</strong></div></div>}{connectionError && <div className="connection-error">{connectionError}</div>}
-      <div className="modal-actions">{metaConnected&&<button className="danger-button" disabled={savingConnection} onClick={disconnectMeta}>Disconnect</button>}<button onClick={()=>setShowMetaSetup(false)}>Cancel</button><button className="primary" disabled={!token.trim() || !accountId || savingConnection} onClick={saveMeta}>{savingConnection?"Importing…":metaConnected?"Save manual token":"Save manual token"}</button></div>
+      <div className="modal-actions">{metaConnected&&<button className="danger-button" disabled={savingConnection} onClick={disconnectMeta}>Disconnect</button>}<button onClick={()=>setShowMetaSetup(false)}>Cancel</button><button className="primary" disabled={(!metaOAuthPending && !token.trim()) || !accountId || savingConnection || loadingMetaAccounts} onClick={saveMeta}>{savingConnection?"Importing…":manualMeta?"Save manual token":"Connect account & import"}</button></div>
     </section></div>}
     {showGhlSetup && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !savingConnection) setShowGhlSetup(false); }}><section className="connection-modal ghl-connection-modal" role="dialog" aria-modal="true" aria-labelledby="ghl-connection-title" onMouseDown={(event) => event.stopPropagation()}>
       <button type="button" className="modal-close" aria-label="Close GoHighLevel connection" onClick={() => !savingConnection && setShowGhlSetup(false)}><X/></button>
