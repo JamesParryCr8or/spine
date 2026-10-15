@@ -38,9 +38,9 @@ class MetaAccountDiscoveryError extends Error {
   constructor(message: string, code?: number) { super(message); this.code = code; }
 }
 
-async function metaAccountEdge(accessToken: string, edge: "adaccounts" | "assigned_ad_accounts", includeAllPages: boolean) {
+async function metaAccountEdge(accessToken: string, edge: "adaccounts" | "assigned_ad_accounts", includeAllPages: boolean, nodeId = "me") {
   const accounts: MetaAccount[] = [];
-  let next: string | undefined = `https://graph.facebook.com/${graphVersion}/me/${edge}?fields=id,name,account_status,currency,timezone_name&limit=100`;
+  let next: string | undefined = `https://graph.facebook.com/${graphVersion}/${nodeId}/${edge}?fields=id,name,account_status,currency,timezone_name&limit=100`;
   for (let page = 0; next && page < (includeAllPages ? 10 : 1); page++) {
     const url = new URL(next);
     if (url.origin !== "https://graph.facebook.com") throw new Error("Meta returned an unexpected pagination URL");
@@ -56,6 +56,60 @@ async function metaAccountEdge(accessToken: string, edge: "adaccounts" | "assign
   return accounts;
 }
 
+type MetaTokenGrant = {
+  app_id?: string; is_valid?: boolean; user_id?: string; type?: string;
+  scopes?: string[]; granular_scopes?: { scope?: string; target_ids?: string[] }[];
+};
+
+async function metaTokenGrant(accessToken: string): Promise<MetaTokenGrant | null> {
+  const appId = process.env.META_APP_ID;
+  const appSecret = process.env.META_APP_SECRET;
+  if (!appId || !appSecret) return null;
+  const url = new URL(`https://graph.facebook.com/${graphVersion}/debug_token`);
+  url.searchParams.set("input_token", accessToken);
+  const response = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${appId}|${appSecret}` }, cache: "no-store", signal: AbortSignal.timeout(20_000),
+  });
+  const payload = await response.json().catch(() => ({})) as { data?: MetaTokenGrant; error?: { code?: number } };
+  if (!response.ok || !payload.data) throw new Error("Meta could not inspect the business sign-in. Sign in with Meta again.");
+  if (!payload.data.is_valid) throw new Error("Meta sign-in has expired or was revoked. Sign in with Meta again.");
+  if (payload.data.app_id !== appId) throw new Error("This Meta token belongs to a different app. Use Connect with Meta to authorize Spine.");
+  return payload.data;
+}
+
+async function grantedMetaAccounts(accessToken: string, grant: MetaTokenGrant, includeAllPages: boolean) {
+  if (grant.scopes && !grant.scopes.some(scope => scope === "ads_read" || scope === "ads_management")) {
+    throw new Error("Meta did not grant ads_read. Add it to the login configuration, then sign in with Meta again.");
+  }
+  const ids = [...new Set((grant.granular_scopes ?? [])
+    .filter(scope => scope.scope === "ads_read" || scope.scope === "ads_management")
+    .flatMap(scope => scope.target_ids ?? []).filter(id => /^(act_)?[0-9]+$/.test(id)))];
+  // Operational evidence for this flow without recording credentials or asset IDs.
+  console.info({ event: "meta_business_account_discovery", tokenType: grant.type ?? "unknown",
+    grantedAccountCount: ids.length, hasSystemUser: Boolean(grant.user_id) });
+  if (!ids.length) {
+    if (!grant.user_id || !/^[0-9]+$/.test(grant.user_id)) {
+      throw new Error("Meta returned no ad account grants or system-user identity. Sign in again and approve at least one ad account.");
+    }
+    return metaAccountEdge(accessToken, "assigned_ad_accounts", includeAllPages, grant.user_id);
+  }
+  if (ids.length > 1000) throw new Error("Meta returned more than 1,000 approved accounts. Narrow the approved assets and try again.");
+  const accounts: MetaAccount[] = [];
+  // Request only IDs in this token's ad permissions, never all business assets.
+  for (let start = 0; start < ids.length; start += 5) {
+    accounts.push(...await Promise.all(ids.slice(start, start + 5).map(async id => {
+      const accountId = id.startsWith("act_") ? id : `act_${id}`;
+      const response = await fetch(`https://graph.facebook.com/${graphVersion}/${accountId}?fields=id,name,account_status,currency,timezone_name`, {
+        headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store", signal: AbortSignal.timeout(20_000),
+      });
+      const payload = await response.json().catch(() => ({})) as MetaAccount & { error?: { message?: string; code?: number } };
+      if (!response.ok || payload.error || !payload.id) throw new MetaAccountDiscoveryError(payload.error?.message ?? "Meta could not load an approved ad account", payload.error?.code);
+      return { id: payload.id, name: payload.name, currency: payload.currency, account_status: payload.account_status, timezone_name: payload.timezone_name };
+    })));
+  }
+  return accounts;
+}
+
 export async function discoverMetaAccounts(accessToken: string, includeAllPages = false) {
   let userError: MetaAccountDiscoveryError | undefined;
   try {
@@ -68,6 +122,12 @@ export async function discoverMetaAccounts(accessToken: string, includeAllPages 
     userError = error;
   }
   try {
+    // Business tokens can reject the me alias entirely. Resolve their granted
+    // assets or explicit system-user ID with the issuing app, on the server.
+    if (userError) {
+      const grant = await metaTokenGrant(accessToken);
+      if (grant) return await grantedMetaAccounts(accessToken, grant, includeAllPages);
+    }
     return await metaAccountEdge(accessToken, "assigned_ad_accounts", includeAllPages);
   } catch (error) {
     if (!userError && error instanceof MetaAccountDiscoveryError && [10, 100, 200].includes(error.code ?? 0)) return [];

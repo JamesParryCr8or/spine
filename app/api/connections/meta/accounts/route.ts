@@ -7,6 +7,8 @@ import { discoverMetaAccounts } from "@/lib/connections/meta";
 import { requireWorkspace } from "@/lib/workspace/server";
 import { canManageConnections } from "@/lib/workspace/permissions";
 
+export const maxDuration = 120;
+
 export async function POST(request: Request) {
   const workspace = await requireWorkspace();
   if (!workspace.ok) return workspace.response;
