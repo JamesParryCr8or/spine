@@ -2,54 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireWorkspace } from "@/lib/workspace/server";
 
-type ReportingRun = {
-  status: "running" | "completed" | "failed";
-  results: Array<{ source: string; status: "fulfilled" | "rejected"; message?: string }> | null;
-  completed_at: string | null;
-  created_at: string;
-  error_message: string | null;
-};
-
-// Reporting sources, and the data_connections provider that has to be
-// connected for each one to mean anything.
-const reportingSources = [
-  { source: "shopify", provider: "shopify", label: "Shopify sales" },
-  { source: "shopify_payments", provider: "shopify", label: "Payment fees" },
-  { source: "shopify_campaigns", provider: "shopify", label: "Campaigns" },
-  { source: "shopify_orders", provider: "shopify", label: "Shopify orders" },
-  { source: "meta", provider: "meta", label: "Meta" },
-  { source: "google_ads", provider: "google_ads", label: "Google Ads" },
-  { source: "bing_ads", provider: "bing_ads", label: "Microsoft Ads" },
-  { source: "gohighlevel", provider: "gohighlevel", label: "GoHighLevel" },
-];
-
-/**
- * Per-source state of the background reporting refresh (reporting_sync_runs),
- * limited to sources whose connection is set up. lastRefreshedAt is the newest
- * finished run in which that source succeeded.
- */
-function reportingFreshness(connections: Array<{ provider: string; status: string }>, runs: ReportingRun[]) {
-  const connected = new Set(connections.filter((connection) => connection.status === "connected").map((connection) => connection.provider));
-  const finished = runs.filter((run) => run.status !== "running");
-  return {
-    running: runs[0]?.status === "running",
-    lastRunAt: finished[0]?.completed_at ?? null,
-    sources: reportingSources.filter((item) => connected.has(item.provider)).flatMap((item): Array<{ source: string; label: string; status: "ok" | "failed" | "pending"; lastRefreshedAt: string | null; message: string | null }> => {
-      const latest = finished.find((run) => run.results?.some((candidate) => candidate.source === item.source));
-      // GoHighLevel only appears in results once a stage is configured.
-      if (!latest) return item.source === "gohighlevel" ? [] : [{ source: item.source, label: item.label, status: "pending" as const, lastRefreshedAt: null, message: null }];
-      const result = latest.results!.find((candidate) => candidate.source === item.source)!;
-      const lastSuccess = finished.find((run) => run.results?.some((candidate) => candidate.source === item.source && candidate.status === "fulfilled"));
-      return [{
-        source: item.source,
-        label: item.label,
-        status: result.status === "fulfilled" ? "ok" as const : "failed" as const,
-        lastRefreshedAt: lastSuccess?.completed_at ?? null,
-        message: result.message ?? null,
-      }];
-    }),
-  };
-}
+import { reportingFreshness, type ReportingRun } from "@/lib/analytics/reporting-freshness";
 
 export async function GET() {
   const result = await requireWorkspace();
@@ -94,7 +47,7 @@ export async function GET() {
       .maybeSingle(),
     supabase
       .from("data_connections")
-      .select("provider,status")
+      .select("provider,status,external_account_id")
       .eq("store_id", store.id),
     supabase
       .from("reporting_sync_runs")
@@ -106,13 +59,24 @@ export async function GET() {
   const error = connectionResult.error ?? successfulResult.error ?? latestResult.error ?? connectionsResult.error ?? reportingResult.error;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  let metaImportedAt: string | null = null;
+  const metaConnection = connectionsResult.data?.find(connection => connection.provider === "meta" && connection.status === "connected");
+  if (metaConnection?.external_account_id) {
+    const accountId = metaConnection.external_account_id.replace(/^act_/, "");
+    const { data: metaImport, error: metaImportError } = await supabase.from("meta_ad_insights_daily")
+      .select("synced_at").eq("store_id", store.id).in("account_id", [accountId, `act_${accountId}`])
+      .order("synced_at", { ascending: false }).limit(1).maybeSingle();
+    if (metaImportError) return NextResponse.json({ error: metaImportError.message }, { status: 500 });
+    metaImportedAt = metaImport?.synced_at ?? null;
+  }
+
   const completed = successfulResult.data;
   const latest = latestResult.data;
   const interrupted =
     latest?.status === "running" &&
     Date.parse(latest.updated_at) < Date.now() - 6 * 60 * 1000;
   return NextResponse.json({
-    reporting: reportingFreshness(connectionsResult.data ?? [], (reportingResult.data ?? []) as ReportingRun[]),
+    reporting: reportingFreshness(connectionsResult.data ?? [], (reportingResult.data ?? []) as ReportingRun[], { meta: metaImportedAt }),
     connected: connectionResult.data?.status === "connected",
     storeName: store.name ?? null,
     lastSuccessfulSync: completed?.completed_at ?? null,
