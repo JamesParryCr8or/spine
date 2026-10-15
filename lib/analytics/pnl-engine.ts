@@ -133,7 +133,7 @@ export async function loadPnlInputs(
       return query.order("sales_date", { ascending: true }).range(page.from, page.to);
     }, pageSize),
     selectAllPages<DatedExchangeRate>((page) => supabase.from("exchange_rates")
-      .select("base_currency,quote_currency,rate,effective_date")
+      .select("base_currency,quote_currency,rate,effective_date,notes")
       .eq("store_id", store.id).eq("quote_currency", store.currency)
       .order("effective_date", { ascending: true }).order("base_currency", { ascending: true })
       .range(page.from, page.to), pageSize),

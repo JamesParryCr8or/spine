@@ -261,3 +261,25 @@ test("coverage tolerates a couple of missing orders", async () => {
   assert.equal((await computeCoverage(98)).orderCoverage.usingImportedOrders, true);
   assert.equal((await computeCoverage(97)).orderCoverage.usingImportedOrders, false);
 });
+
+test("billed expenses reduce report profit once; FX, exclusions and daily series agree", async () => {
+  const loaded = await loadPnlInputs(fakeClient(coverageFixture(100)), store, { from: "2026-05-01", to: "2026-05-10" });
+  assert.ok(loaded.ok, loaded.error);
+  const base = computePnl(loaded.inputs, store);
+  const charge = { bill_number: "123", charge_date: "2026-05-05", amount: "100", currency: "USD", original_amount: null, original_currency: null, include_in_pnl: true };
+  const inputs = { ...loaded.inputs, billingEstimateSettings: { enabled: false, overrides: {} }, billingCharges: [charge, { ...charge, bill_number: null }, { ...charge, include_in_pnl: false }] };
+  const missing = computePnl(inputs, store);
+  assert.equal(missing.metrics.unallocatedOperatingCosts, base.metrics.unallocatedOperatingCosts + 1);
+  assert.equal(missing.availability.netProfit, false);
+  inputs.exchangeRates = [{ base_currency: "USD", quote_currency: "GBP", rate: "0.75", effective_date: "2026-05-05" }];
+  const converted = computePnl(inputs, store);
+  assert.equal(converted.metrics.shopifyBillingActuals, 75);
+  assert.equal(converted.metrics.operatingExpenses - base.metrics.operatingExpenses, 75);
+  assert.equal(base.metrics.profitAfterMarketingSpend - converted.metrics.profitAfterMarketingSpend, 75);
+  let dailyExpenses = 0;
+  for (let day = 1; day <= 10; day++) {
+    const date = `2026-05-${String(day).padStart(2, "0")}`;
+    dailyExpenses += computePnl(slicePnlInputs(inputs, store, { from: date, to: date }), store).metrics.shopifyBillingActuals;
+  }
+  assert.equal(dailyExpenses, converted.metrics.shopifyBillingActuals);
+});

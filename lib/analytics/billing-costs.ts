@@ -8,7 +8,10 @@ export type BillingCost = {
 export function billingReportingAmount(charge: BillingCost, currency: string, rates: DatedExchangeRate[]) {
   if (charge.currency === currency) return Number(charge.amount);
   if (charge.original_currency === currency && charge.original_amount !== null) return Number(charge.original_amount);
-  const rate = resolveDatedExchangeRate(rates, charge.currency, currency, charge.charge_date);
+  // Automatic observations are stored for a particular charge date. Do not
+  // carry them indefinitely into dates the provider has not published yet.
+  const usable = rates.filter(r => !r.notes?.startsWith("Frankfurter daily reference rate") || r.effective_date === charge.charge_date);
+  const rate = resolveDatedExchangeRate(usable, charge.currency, currency, charge.charge_date);
   return rate === null ? null : convertDatedAmount(Number(charge.amount), rate, currency);
 }
 

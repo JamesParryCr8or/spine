@@ -1,6 +1,7 @@
 import { LoginForm } from "@/components/login-form";
 import { createClient } from "@/lib/supabase/server";
-import { BarChart3, Check, Sparkles, TrendingUp } from "lucide-react";
+import { Check, Sparkles, TrendingUp } from "lucide-react";
+import { SpineLogo } from "@/components/spine-logo";
 import { redirect } from "next/navigation";
 import { safeAuthRedirect } from "@/lib/auth/redirect";
 
@@ -18,7 +19,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ n
       <div className="auth-orb auth-orb-two" />
       <main className="auth-shell">
         <aside className="auth-story">
-          <div className="auth-brand"><span><BarChart3 /></span>Spine</div>
+          <div className="auth-brand"><SpineLogo light /></div>
           <div className="auth-story-copy">
             <div className="auth-kicker"><Sparkles /> Ecommerce intelligence, simplified</div>
             <h1>Know what your store <em>really</em> earns.</h1>
@@ -36,7 +37,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ n
           <small className="auth-story-foot">Built for profitable ecommerce growth.</small>
         </aside>
         <section className="auth-form-side">
-          <div className="auth-mobile-brand"><span><BarChart3 /></span>Spine</div>
+          <div className="auth-mobile-brand"><SpineLogo /></div>
           <LoginForm next={safeAuthRedirect(typeof next === "string" ? next : null)} />
           <p className="auth-legal">By continuing, you agree to secure and responsible use of your connected store data.</p>
         </section>

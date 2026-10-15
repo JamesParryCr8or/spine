@@ -3,6 +3,7 @@ export type DatedExchangeRate = {
   quote_currency: string;
   rate: string;
   effective_date: string;
+  notes?: string | null;
 };
 
 const normalizedCurrency = (currency: string | null | undefined) => currency?.trim().toUpperCase() || "UNKNOWN";

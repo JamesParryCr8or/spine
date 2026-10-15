@@ -7,6 +7,9 @@ import { loadBillingEstimates } from "@/lib/shopify/billing-estimates";
 import { validDate } from "@/lib/revenue/schema";
 import { reportingDateKey } from "@/lib/analytics/reporting-range";
 import type { DatedExchangeRate } from "@/lib/analytics/exchange-rate";
+import { syncBillingFx } from "@/lib/shopify/billing-fx";
+
+export const maxDuration = 120;
 
 async function context() {
   const workspace = await requireWorkspace();
@@ -21,11 +24,12 @@ export async function GET(request: Request) {
   const [result, fx, estimates] = await Promise.all([
     w.supabase.from("shopify_billing_charges").select("*", { count: "exact" })
       .eq("store_id", store.id).order("charge_date", { ascending: false }).order("id").range(Math.floor(page) * 50, Math.floor(page) * 50 + 49),
-    selectAllPages<DatedExchangeRate>(page => w.supabase.from("exchange_rates").select("base_currency,quote_currency,rate,effective_date").eq("store_id", store.id).eq("quote_currency", store.currency).order("effective_date").order("id").range(page.from, page.to)),
+    selectAllPages<DatedExchangeRate>(page => w.supabase.from("exchange_rates").select("base_currency,quote_currency,rate,effective_date,notes").eq("store_id", store.id).eq("quote_currency", store.currency).order("effective_date").order("id").range(page.from, page.to)),
     loadBillingEstimates(w.supabase, store.id),
   ]);
   if (result.error || fx.error || estimates.error) return NextResponse.json({ error: result.error?.message || fx.error || estimates.error }, { status: 500 });
   return NextResponse.json({ storeId: store.id, storeName: store.name, currency: store.currency, totalCount: result.count,
+    missingRates: estimates.charges.filter(c => c.include_in_pnl && c.bill_number && billingReportingAmount(c, store.currency, fx.rows) === null).length,
     estimateSettings: estimates.settings,
     estimates: estimateBillingCosts(estimates.charges, store.currency, fx.rows, estimates.coverage, estimates.settings, reportingDateKey(new Date(), store.timezone || "Europe/London"), null, null),
     charges: (result.data ?? []).map(c => ({ ...c, reporting_amount: billingReportingAmount(c as BillingCost, store.currency, fx.rows) })) });
@@ -54,11 +58,13 @@ export async function POST(request: Request) {
       charges: charges.map(c => ({ ...c, include_in_pnl: included.has(c.category) })),
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json(data);
+    const rates = await selectAllPages<DatedExchangeRate>(page => w.supabase.from("exchange_rates").select("base_currency,quote_currency,rate,effective_date,notes").eq("store_id", store.id).eq("quote_currency", store.currency).order("id").range(page.from, page.to));
+    const fx = rates.error ? { added: 0, warnings: [rates.error] } : await syncBillingFx(w.supabase, charges.map(c => ({ ...c, include_in_pnl: included.has(c.category) })), store.currency, rates.rows, { storeId: store.id, organizationId: w.membership.organization_id, userId: w.userId });
+    return NextResponse.json({ ...data, fx });
   }
   const [existing, fx] = await Promise.all([
     selectAllPages<{ charge_key: string; bill_number: string | null; include_in_pnl: boolean }>(page => w.supabase.from("shopify_billing_charges").select("charge_key,bill_number,include_in_pnl").eq("store_id", store.id).order("id").range(page.from, page.to)),
-    selectAllPages<DatedExchangeRate>(page => w.supabase.from("exchange_rates").select("base_currency,quote_currency,rate,effective_date").eq("store_id", store.id).eq("quote_currency", store.currency).order("effective_date").order("id").range(page.from, page.to)),
+    selectAllPages<DatedExchangeRate>(page => w.supabase.from("exchange_rates").select("base_currency,quote_currency,rate,effective_date,notes").eq("store_id", store.id).eq("quote_currency", store.currency).order("effective_date").order("id").range(page.from, page.to)),
   ]);
   if (existing.error || fx.error) return NextResponse.json({ error: existing.error || fx.error }, { status: 500 });
   const prior = new Map(existing.rows.map(c => [c.charge_key, c]));

@@ -36,6 +36,7 @@ export function ShopifyBillImport({ canEdit }: { canEdit: boolean }) {
   const [file, setFile] = useState<{ csv: string; filename: string } | null>(null);
   const [includeCategories, setIncludeCategories] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [fxLoading, setFxLoading] = useState(false);
   const [error, setError] = useState("");
   const [detail, setDetail] = useState<Charge | null>(null);
   const [page, setPage] = useState(0);
@@ -43,7 +44,23 @@ export function ShopifyBillImport({ canEdit }: { canEdit: boolean }) {
   const [exportFrom, setExportFrom] = useState("");
   const [exportTo, setExportTo] = useState("");
   async function load(targetPage = 0) { setSaved(await payload(await fetch(`${endpoint}?page=${targetPage}`))); }
-  useEffect(() => { let active = true; fetch(endpoint).then(payload).then(data => { if (active) setSaved(data); }).catch(reason => { if (active) setError(reason.message); }); return () => { active = false; }; }, []);
+  useEffect(() => {
+    let active = true;
+    async function initialLoad() {
+      const data = await payload(await fetch(endpoint));
+      if (!active) return;
+      setSaved(data);
+      if (canEdit && data.missingRates) {
+        setFxLoading(true);
+        const fx = await payload(await fetch(`${endpoint}/fx`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ storeId: data.storeId }) }));
+        invalidateCachedJson("/api/analytics/");
+        const refreshed = await payload(await fetch(endpoint));
+        if (active) { setSaved(refreshed); if (fx.warnings?.length) setError(fx.warnings.join(" ")); }
+      }
+    }
+    void initialLoad().catch(reason => { if (active) setError(reason.message); }).finally(() => { if (active) setFxLoading(false); });
+    return () => { active = false; };
+  }, [canEdit]);
   async function choose(selected: File | undefined) {
     if (!selected) return;
     setError(""); setPreview(null); setFile(null); setReviewed(false); setBusy(true); setPage(0);
@@ -63,6 +80,8 @@ export function ShopifyBillImport({ canEdit }: { canEdit: boolean }) {
       const result = await payload(await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...file, action: "import", storeId: preview.storeId, includeCategories, exportFrom, exportTo }) }));
       invalidateCachedJson("/api/analytics/pnl");
       setPreview(null); setFile(null); setPage(0); await load();
+      invalidateCachedJson("/api/analytics/");
+      if (result.fx?.warnings?.length) setError(`Charges saved. ${result.fx.warnings.join(" ")}`);
       toast({ title: `${result.added} charges imported · ${result.promoted} updated · ${result.skipped} duplicates skipped`, tone: "success" });
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Import failed"); }
     finally { setBusy(false); }
@@ -103,6 +122,7 @@ export function ShopifyBillImport({ canEdit }: { canEdit: boolean }) {
     { key: "bill", header: "Bill", render: c => c.bill_number ?? "Unbilled" },
     { key: "description", header: "Charge", render: c => <><strong>{c.description}</strong><span className="block text-ds-muted">{c.category.replaceAll("_", " ")}</span></> },
     { key: "amount", header: "Billed amount", numeric: true, render: c => money(c.amount, c.currency) },
+    { key: "converted", header: `${data?.currency ?? "Reporting"} cost`, numeric: true, render: c => c.reporting_amount == null ? "—" : money(c.reporting_amount, data!.currency) },
     { key: "pnl", header: "P&L", render: c => !c.bill_number ? "Pending bill" : !included(c) ? "Excluded" : c.reporting_amount === null ? "Needs exchange rate" : "Included" },
     ...(preview ? [{ key: "status", header: "Import", render: (c: Charge) => c.status }] : []),
     { key: "actions", header: "Review", render: c => <div className="flex gap-2"><Button variant="quiet" size="sm" onClick={() => setDetail(c)}>Details</Button>{!preview && canEdit && <Button variant="quiet" size="sm" disabled={busy} onClick={() => void toggle(c)}>{c.include_in_pnl ? "Exclude" : "Include"}</Button>}</div> },
@@ -111,10 +131,13 @@ export function ShopifyBillImport({ canEdit }: { canEdit: boolean }) {
     <div className="flex flex-col gap-4">
       {error && <PanelState status="error" title="Could not complete the request" message={error}/>}
       <label className="text-ds-small font-medium">Shopify charges CSV
-        <input className="mt-2 block w-full rounded border border-ds-line p-3" type="file" accept=".csv,text/csv" disabled={!canEdit || busy} onChange={event => { void choose(event.target.files?.[0]); event.target.value = ""; }}/>
+        <input className="mt-2 block w-full rounded border border-ds-line p-3" type="file" accept=".csv,text/csv" disabled={!canEdit || busy || fxLoading} onChange={event => { void choose(event.target.files?.[0]); event.target.value = ""; }}/>
       </label>
       {busy && <p role="status">Processing charges…</p>}
+      {fxLoading && <p role="status">Fetching historical exchange rates and updating profit costs…</p>}
       {data && <p className="text-ds-small"><strong>{data.storeName}</strong> · {data.totalCount} charges{preview ? ` · ${preview.unbilledCount} unbilled` : ""}</p>}
+      {!preview && saved && <p className="text-ds-small text-ds-muted">Foreign-currency bills use automatic historical reference rates from Frankfurter, cached by charge date. Shopify’s original {saved.currency} amounts and rates entered for the same date take priority. Reference conversions exclude bank fees. Included billed costs reduce net profit in both P&amp;L and Overview.</p>}
+      {!preview && !!saved?.missingRates && <p role="status" className="text-ds-small">{saved.missingRates} included billed charges still need exchange rates and are excluded from profit totals until converted. Check the FX warning or add a dated rate in Settings.</p>}
       {!preview && saved?.estimateSettings && saved.estimates && <fieldset className="rounded border border-ds-line p-4">
         <legend className="px-2 font-semibold">Current-month estimates</legend>
         <label className="flex items-center gap-2"><input type="checkbox" disabled={busy || !canEdit} checked={saved.estimateSettings.enabled} onChange={event => void saveEstimates(event.target.checked, saved.estimateSettings!.overrides)}/>Estimate recent costs automatically</label>
@@ -133,7 +156,7 @@ export function ShopifyBillImport({ canEdit }: { canEdit: boolean }) {
           })}
         </fieldset>
         <p className="text-ds-small text-ds-muted">Payment and shipping charges can overlap existing fees and estimates. Existing imported charges keep their P&amp;L selection. Unbilled charges stay out of P&amp;L until a later export assigns a bill. No exchange rate is guessed.</p>
-        {!!preview.missingRates && <p role="status" className="text-ds-small">{preview.missingRates} billed charges need a dated exchange rate to appear in {preview.currency} P&amp;L. All source data will still be saved. Add exchange rates in Settings.</p>}
+        {!!preview.missingRates && <p role="status" className="text-ds-small">Historical exchange rates will be fetched automatically when importing these {preview.missingRates} billed charges. Any unavailable conversions remain flagged for review.</p>}
         <p className="text-ds-small text-ds-muted">The table previews the first 100 charges. Category totals and import counts cover the complete file.</p>
         <p className="text-ds-small text-ds-muted">Shopify provides no unique charge ID in this export. Matching uses charge details and repeated-row counts. Import complete date ranges; review identical charges if exporting partial bills.</p>
         <label className="flex gap-2 text-ds-small"><input type="checkbox" checked={reviewed} disabled={busy} onChange={event => setReviewed(event.target.checked)}/>This is the complete export for these dates. I have reviewed categories and overlapping manually entered expenses or fee estimates.</label>

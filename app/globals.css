@@ -10,8 +10,12 @@ button { cursor:pointer; }
 .app-shell { min-height:100vh; display:flex; background:#f6f7fb; }
 .sidebar { width:244px; position:fixed; inset:0 auto 0 0; background:var(--navy); color:#fff; padding:24px 16px 18px; display:flex; flex-direction:column; z-index:30; }
 .brand { display:flex; align-items:center; gap:11px; padding:0 8px 22px; font-size:19px; letter-spacing:-.4px; }
-.brand-mark { display:grid; place-items:center; width:34px; height:34px; overflow:hidden; border-radius:10px; background:linear-gradient(145deg,#7c66ff,#5744dc); box-shadow:0 9px 28px #6c5ce766; }
-.brand-mark img { width:34px; height:34px; object-fit:cover; transform:scale(1.32); }
+.spine-logo { position:relative; display:block; flex:none; width:156px; height:48px; overflow:hidden; }
+.spine-logo img { position:absolute; width:233.04px; max-width:none; height:auto; left:-39px; top:-23.64px; }
+.spine-logo-light img { filter:brightness(0) invert(1); }
+.auth-brand > .spine-logo,.auth-mobile-brand > .spine-logo { width:156px; height:48px; display:block; border-radius:0; background:none; box-shadow:none; }
+.brand-identity { display:flex; flex-direction:column; }
+.brand-identity small { margin-left:50px; }
 .brand > span:nth-child(2){display:flex;flex-direction:column;line-height:1.05}.brand b{font-weight:800}.brand small{margin-top:4px;font-size:8px;letter-spacing:.3px;color:#9aa5bb;font-weight:600}.mobile-close{display:none}
 .store-switcher { color:white; width:100%; border:1px solid #2a3245; background:#181f30; border-radius:10px; padding:11px; display:flex; align-items:center; gap:10px; text-align:left; margin-bottom:24px; }
 .store-switcher select,.store-switcher select option{color:#172033;background:#fff;color-scheme:light}
