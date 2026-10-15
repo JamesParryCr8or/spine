@@ -8,6 +8,7 @@ import { fetchJson, peekJson } from "@/lib/queries/client";
 import { BarChart3, CircleDollarSign, Download, ExternalLink, Info, Megaphone, Package, Settings, Sparkles, TrendingUp, Users, WalletCards } from "lucide-react";
 import { OrderCoverageNotice, type View, type DrilldownContext, default365DayRange, type FinanceDatePreset, financeDateRange, Trend, downloadCsv, useReportRun, type CurrencyCoverage, type CurrencyConversionCoverage, type PnlData, type PnlPeriodData, pnlSeriesKey, fetchPnlSeries, type UtmData, type ProductData, type CustomerData } from "@/components/analytics/shared";
 import { PanelState, UpdatingChip } from "@/components/ui/panel-state";
+import styles from "./overview-loading.module.css";
 
 type OverviewWidgetId = "channel" | "products" | "customers" | "costs";
 
@@ -121,7 +122,9 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
   const [datePreset, setDatePreset] = useState<FinanceDatePreset>("last_365_days");
   const [granularity, setGranularity] = useState<ReportingGranularity>("monthly");
   const [trendData, setTrendData] = useState<PnlPeriodData[]>([]);
-  const [trendLoading, setTrendLoading] = useState(false);
+  const [trendLoading, setTrendLoading] = useState(true);
+  const [trendError, setTrendError] = useState(false);
+  const [trendRetry, setTrendRetry] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -242,10 +245,11 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
     return () => controller.abort();
   }, [finishReportRun, fromDate, toDate, retryToken]);
 
+  useResetOnChange(`${fromDate}|${toDate}|${granularity}|${pnlSummary?.period?.start ?? "pending"}|${pnlSummary?.period?.end ?? ""}|${trendRetry}`, () => { setTrendLoading(true); setTrendError(false); });
   useEffect(() => {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => {
-      if (!pnlSummary?.period || !pnlSummary.hasData) { setTrendData([]); return; }
+      if (!pnlSummary?.period || !pnlSummary.hasData) { setTrendData([]); setTrendLoading(false); return; }
       const periodStart = fromDate || pnlSummary.period.start;
       const periodEnd = toDate || pnlSummary.period.end;
       const dailyDays = Math.floor((Date.parse(periodEnd + "T00:00:00Z") - Date.parse(periodStart + "T00:00:00Z")) / 86400000) + 1;
@@ -259,11 +263,11 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
             return data ? [{ period, data }] : [];
           }));
         })
-        .catch((error) => { if (error instanceof Error && error.name !== "AbortError") setTrendData([]); })
+        .catch(() => { if (!controller.signal.aborted) { setTrendData([]); setTrendError(true); } })
         .finally(() => { if (!controller.signal.aborted) setTrendLoading(false); });
     }, 0);
     return () => { window.clearTimeout(timeout); controller.abort(); };
-  }, [fromDate, toDate, granularity, pnlSummary]);
+  }, [fromDate, toDate, granularity, pnlSummary, trendRetry]);
 
   const hasLiveData = Boolean(liveData?.hasData);
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: liveData?.currency || "GBP", maximumFractionDigits: 0 });
@@ -404,7 +408,6 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
 
   return <>
     <section className="filter-row pnl-period finance-date-controls"><label>Period<select aria-label="Date period" value={datePreset} onChange={(event) => applyDatePreset(event.target.value as FinanceDatePreset)}><option value="last_7_days">Last 7 days (today)</option><option value="last_7_complete_days">Last 7 complete days</option><option value="last_30_days">Last 30 days (today)</option><option value="last_30_complete_days">Last 30 complete days</option><option value="last_90_days">Last 90 days</option><option value="last_365_days">Last 365 days</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="this_month">This month</option><option value="last_month">Last month</option><option value="all_imported">All imported data</option><option value="custom">Custom dates</option></select></label><label>From<input type="date" value={fromDate} onChange={(event) => { setDatePreset("custom"); setLoading(true); setFromDate(event.target.value); }}/></label><label>To<input type="date" value={toDate} onChange={(event) => { setDatePreset("custom"); setLoading(true); setToDate(event.target.value); }}/></label><label>Group by<select aria-label="Overview trend granularity" value={granularity} onChange={(event) => setGranularity(event.target.value as ReportingGranularity)}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></label>{fromDate && toDate ? <span className="report-note">Compared with the immediately preceding period.</span> : null}</section>
-    {trendLoading && !loading ? <PanelState status="loading" message="Calculating trend periods…"/> : null}
     <UpdatingChip show={refreshing}/>
     {!loading && loadError ? <PanelState status="error" title="Your Shopify summary could not be loaded" message="Check your connection and try again." onRetry={() => setRetryToken((token) => token + 1)}/> : null}
     {!loading && !loadError && !hasLiveData && liveData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to start your live dashboard</strong><span>Live sales and orders will appear here after your first sync.</span></div></div> : null}
@@ -420,7 +423,11 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
     <section className="dashboard-grid">
       <article className="panel chart-panel finance-chart-panel" style={{ order: 0 }}>
         <div className="panel-head"><div><span className="eyebrow">PERFORMANCE</span><h2>Revenue, costs and profit</h2></div><div className="finance-legend"><span><i className="legend-revenue"/>Revenue</span><span><i className="legend-cogs"/>COGS</span><span><i className="legend-meta"/>Facebook</span><span><i className="legend-google"/>Google</span><span><i className="legend-microsoft"/>Microsoft Ads</span><span><i className="legend-fees"/>Fees</span><span><i className="legend-shipping"/>Shipping</span><span><i className="legend-operating"/>Operating</span><span><i className="legend-profit"/>Profit</span></div></div>
-        <FinanceTrendChart points={trendSeries} formatter={formatter} onOpen={(point) => onDrilldown("Profit & Loss", { from: point.start, to: point.end })}/>
+        {loading || trendLoading ? <div className={styles.loading} role="status" aria-live="polite" aria-label="Loading revenue, costs and profit">
+          <div className={styles.bars} aria-hidden="true">{[26, 44, 34, 58, 42, 68, 52].map((height, index) => <span key={index} style={{ height, animationDelay: `${index * 110}ms` }}/>)}</div>
+          <strong>Bringing your numbers together</strong>
+          <span>Loading revenue, costs and profit…</span>
+        </div> : trendError ? <PanelState status="error" title="The chart could not be loaded" message="Try loading your revenue and profit trend again." onRetry={() => setTrendRetry(value => value + 1)}/> : <FinanceTrendChart points={trendSeries} formatter={formatter} onOpen={(point) => onDrilldown("Profit & Loss", { from: point.start, to: point.end })}/>}
         {trendSeries.some((point) => !point.complete) ? <span className="report-note">Profit is provisional where cost coverage is incomplete. Hover a period for the full revenue and cost bridge.</span> : null}
       </article>
       <article className="panel health-panel" style={{ order: 1 }}><div className="panel-head"><div><span className="eyebrow">DATA HEALTH</span><h2>{hasLiveData ? "Imported store data" : "Store readiness"}</h2></div><span className="score">{hasLiveData ? "LIVE" : "86%"}</span></div>

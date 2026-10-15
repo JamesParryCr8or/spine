@@ -1,0 +1,23 @@
+.loading {
+  min-height: 330px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  padding: 32px 16px;
+}
+
+.loading strong { color: #263047; font-size: 14px; font-weight: 600; }
+.loading > span { color: #7c8496; font-size: 12px; }
+.bars { display: flex; align-items: flex-end; gap: 7px; height: 76px; margin-bottom: 15px; }
+.bars span {
+  width: 10px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #a99bff, #6c5ce7);
+  transform-origin: bottom;
+  animation: breathe 1.3s ease-in-out infinite alternate;
+}
+@keyframes breathe { from { transform: scaleY(.45); opacity: .45; } to { transform: scaleY(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .bars span { animation: none; } }
