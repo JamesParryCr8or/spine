@@ -8,7 +8,7 @@ export const staleTimeMs = 5 * 60_000;
 /** Cached responses survive reloads for a day, so a returning visit paints the last real numbers immediately. */
 export const gcTimeMs = 24 * 60 * 60_000;
 /** Bump to discard every persisted cache after a response-shape change. */
-const schemaVersion = "1";
+const schemaVersion = "2";
 const storageKey = "spine-query-cache";
 
 let queryClient: QueryClient | null = null;

@@ -8,6 +8,7 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { PanelState } from "@/components/ui/panel-state";
 import { useToast } from "@/components/ui/toast";
 import { invalidateCachedJson } from "@/lib/analytics/client-response-cache";
+import { billingCostBucket } from "@/lib/analytics/billing-costs";
 
 type Charge = {
   id?: string; charge_key: string; bill_number: string | null; charge_date: string;
@@ -123,7 +124,7 @@ export function ShopifyBillImport({ canEdit }: { canEdit: boolean }) {
     { key: "description", header: "Charge", render: c => <><strong>{c.description}</strong><span className="block text-ds-muted">{c.category.replaceAll("_", " ")}</span></> },
     { key: "amount", header: "Billed amount", numeric: true, render: c => money(c.amount, c.currency) },
     { key: "converted", header: `${data?.currency ?? "Reporting"} cost`, numeric: true, render: c => c.reporting_amount == null ? "—" : money(c.reporting_amount, data!.currency) },
-    { key: "pnl", header: "P&L", render: c => !c.bill_number ? "Pending bill" : !included(c) ? "Excluded" : c.reporting_amount === null ? "Needs exchange rate" : "Included" },
+    { key: "pnl", header: "P&L", render: c => !c.bill_number ? "Pending bill" : !included(c) ? "Excluded" : c.reporting_amount === null ? "Needs exchange rate" : `Included · ${billingCostBucket(c.category) === "marketing" ? "Marketing" : billingCostBucket(c.category) === "variable" ? "Variable costs" : "Fixed costs"}` },
     ...(preview ? [{ key: "status", header: "Import", render: (c: Charge) => c.status }] : []),
     { key: "actions", header: "Review", render: c => <div className="flex gap-2"><Button variant="quiet" size="sm" onClick={() => setDetail(c)}>Details</Button>{!preview && canEdit && <Button variant="quiet" size="sm" disabled={busy} onClick={() => void toggle(c)}>{c.include_in_pnl ? "Exclude" : "Include"}</Button>}</div> },
   ];

@@ -21,6 +21,12 @@ export function billingItemKey(charge: BillingCost) {
   return JSON.stringify([charge.category ?? "other", charge.raw?.App?.trim() || ""]);
 }
 export function fixedBillingCategory(category: string) { return category === "application_fee" || category === "subscription_fee"; }
+export const affiliateBillingCategories = ["shopify_collabs_commission", "shopify_collabs_processing_fee"];
+export function billingCostBucket(category = "other"): "fixed" | "variable" | "marketing" {
+  if (affiliateBillingCategories.includes(category)) return "marketing";
+  if (["order_commission", "shopify_tax", "transaction_fee", "shipping_label", "shipping_fee", "application_usage", "application_usage_fee"].includes(category)) return "variable";
+  return "fixed";
+}
 const dateKey = (date: Date) => date.toISOString().slice(0, 10);
 const shift = (day: string, count: number) => dateKey(new Date(Date.parse(`${day}T00:00:00Z`) + count * 86400000));
 function days(from: string, to: string) {
@@ -48,7 +54,7 @@ export function estimateBillingCosts(charges: BillingCost[], currency: string, r
     const group = groups.get(key);
     if (group) group.push(charge); else groups.set(key, [charge]);
   }
-  let total = 0, missingRates = 0;
+  let total = 0, fixed = 0, variable = 0, marketing = 0, missingRates = 0;
   const items = [...groups.entries()].map(([key, rows]) => {
     const category = rows[0].category ?? "other";
     const label = rows[0].raw?.App?.trim() || category.replaceAll("_", " ");
@@ -67,16 +73,27 @@ export function estimateBillingCosts(charges: BillingCost[], currency: string, r
     const estimated = settings.enabled && enabled && dailyAverage !== null ? dailyAverage * estimateDays : 0;
     if (settings.enabled && enabled && estimateDays && missing) missingRates++;
     total += estimated;
+    const bucket = billingCostBucket(category);
+    if (bucket === "marketing") marketing += estimated;
+    else if (bucket === "variable") variable += estimated;
+    else fixed += estimated;
     return { key, label, category, enabled, monthlyAverage, dailyAverage, estimateDays, estimated, missingRates: missing };
   });
-  return { total, missingRates, monthsUsed: historicalMonths.length, items, today, monthStart: start };
+  return { total, fixed, variable, marketing, missingRates, monthsUsed: historicalMonths.length, items, today, monthStart: start };
 }
 export function billingPeriodCosts(charges: BillingCost[], currency: string, rates: DatedExchangeRate[], from: string | null, to: string | null) {
-  let total = 0, missingRates = 0;
+  let total = 0, fixed = 0, variable = 0, marketing = 0, missingRates = 0;
   for (const charge of charges) {
     if (!charge.include_in_pnl || !charge.bill_number || !from || !to || charge.charge_date < from || charge.charge_date > to) continue;
     const amount = billingReportingAmount(charge, currency, rates);
-    if (amount === null) missingRates++; else total += amount;
+    if (amount === null) missingRates++;
+    else {
+      total += amount;
+      const bucket = billingCostBucket(charge.category);
+      if (bucket === "marketing") marketing += amount;
+      else if (bucket === "variable") variable += amount;
+      else fixed += amount;
+    }
   }
-  return { total, missingRates };
+  return { total, fixed, variable, marketing, missingRates };
 }

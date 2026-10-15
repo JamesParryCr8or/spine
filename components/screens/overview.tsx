@@ -18,7 +18,7 @@ const overviewWidgetLabels: Record<OverviewWidgetId, string> = { channel: "Chann
 
 type FinanceTrendPoint = {
   label: string; start: string; end: string; revenue: number; profit: number; complete: boolean;
-  cogs: number; metaMarketing: number; googleMarketing: number; bingMarketing: number; paymentFees: number; paymentFeesAvailable: boolean; shipping: number; operating: number;
+  cogs: number; metaMarketing: number; googleMarketing: number; bingMarketing: number; affiliateMarketing: number; paymentFees: number; paymentFeesAvailable: boolean; shipping: number; operating: number;
 };
 
 function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrendPoint[]; formatter: Intl.NumberFormat; onOpen: (point: FinanceTrendPoint) => void }) {
@@ -31,7 +31,7 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
   const labelEvery = Math.max(1, Math.ceil(points.length / 8));
   const dataMaximum = Math.max(
     ...points.flatMap((point) => [point.revenue, Math.abs(point.profit)]),
-    ...points.map((point) => point.cogs + point.metaMarketing + point.googleMarketing + point.bingMarketing + point.paymentFees + point.shipping + point.operating),
+    ...points.map((point) => point.cogs + point.metaMarketing + point.googleMarketing + point.bingMarketing + point.paymentFees + point.shipping + point.operating + point.affiliateMarketing),
     1,
   );
   const niceStep = (value: number) => {
@@ -58,7 +58,7 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
   const positiveTicks = [0, 1, 2, 3, 4].map((index) => ({ index, y: zeroY - (zeroY - top) * index / 4, value: axisStep * index }));
   const negativeTicks = [1, 2, 3, 4].map((index) => ({ index, y: zeroY + (bottom - zeroY) * index / 4, value: -axisStep * index }));
   const line = points.map((point, index) => `${left + step * index + step / 2},${y(point.profit)}`).join(" ");
-  const costColors = ["#f59e0b", "#1877f2", "#34a853", "#0f766e", "#a855f7", "#06b6d4", "#64748b"];
+  const costColors = ["#f59e0b", "#1877f2", "#34a853", "#0f766e", "#a855f7", "#06b6d4", "#64748b", "#ec4899"];
   const active = hovered === null ? null : points[hovered];
   return <div className="finance-chart">
     <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Revenue, costs and profit over time">
@@ -69,7 +69,7 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
         const center = left + step * index + step / 2;
         const barWidth = Math.min(30, step * .44);
         const revenueTop = y(point.revenue);
-        const costs = [point.cogs, point.metaMarketing, point.googleMarketing, point.bingMarketing, point.paymentFees, point.shipping, point.operating];
+        const costs = [point.cogs, point.metaMarketing, point.googleMarketing, point.bingMarketing, point.paymentFees, point.shipping, point.operating, point.affiliateMarketing];
         let currentY = zeroY;
         return <g key={`${point.start}-${index}`} onMouseEnter={() => setHovered(index)} onMouseLeave={() => setHovered(null)} onFocus={() => setHovered(index)} onBlur={() => setHovered(null)} onClick={() => onOpen(point)} tabIndex={0} role="button" aria-label={`${point.label}: revenue ${formatter.format(point.revenue)}, costs ${formatter.format(costs.reduce((sum,value)=>sum+value,0))}, profit ${formatter.format(point.profit)}`}>
           <rect x={center-barWidth/2} y={revenueTop} width={barWidth} height={Math.max(zeroY-revenueTop,1)} rx="4" className="finance-revenue"/>
@@ -86,7 +86,7 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
       <polyline points={line} className="finance-profit-line"/>
       {points.map((point,index) => <circle key={point.start} cx={left+step*index+step/2} cy={y(point.profit)} r={hovered===index?5:3.5} className="finance-profit-dot"/>)}
     </svg>
-    {active ? <div className="finance-tooltip"><strong>{active.label}</strong><span>Revenue <b>{formatter.format(active.revenue)}</b></span><span>COGS <b>-{formatter.format(active.cogs)}</b></span><span>Facebook ads <b>-{formatter.format(active.metaMarketing)}</b></span><span>Google Ads <b>-{formatter.format(active.googleMarketing)}</b></span><span>Microsoft Ads <b>-{formatter.format(active.bingMarketing)}</b></span><span>Payment fees <b>{active.paymentFeesAvailable ? `-${formatter.format(active.paymentFees)}` : "Not available"}</b></span><span>Shipping & handling <b>-{formatter.format(active.shipping)}</b></span><span>Operating costs <b>-{formatter.format(active.operating)}</b></span><span className="tooltip-profit">{active.complete ? "Net profit" : "Provisional profit"} <b>{formatter.format(active.profit)}</b></span></div> : null}
+    {active ? <div className="finance-tooltip"><strong>{active.label}</strong><span>Revenue <b>{formatter.format(active.revenue)}</b></span><span>COGS <b>-{formatter.format(active.cogs)}</b></span><span>Facebook ads <b>-{formatter.format(active.metaMarketing)}</b></span><span>Google Ads <b>-{formatter.format(active.googleMarketing)}</b></span><span>Microsoft Ads <b>-{formatter.format(active.bingMarketing)}</b></span><span>Affiliate commissions &amp; fees <b>-{formatter.format(active.affiliateMarketing)}</b></span><span>Payment fees <b>{active.paymentFeesAvailable ? `-${formatter.format(active.paymentFees)}` : "Not available"}</b></span><span>Shipping & handling <b>-{formatter.format(active.shipping)}</b></span><span>Operating costs <b>-{formatter.format(active.operating)}</b></span><span className="tooltip-profit">{active.complete ? "Net profit" : "Provisional profit"} <b>{formatter.format(active.profit)}</b></span></div> : null}
   </div>;
 }
 
@@ -297,11 +297,11 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
     { label: "Average order value", value: formatter.format(liveData.metrics.averageOrderValue), ...moneyDelta(liveData.metrics.averageOrderValue, comparisonData?.metrics.averageOrderValue, "Net product sales"), hint: `${liveData.metrics.orders.toLocaleString()} completed orders` },
     { label: "Gross sales", value: formatter.format(liveData.metrics.grossSales), ...moneyDelta(liveData.metrics.grossSales, comparisonData?.metrics.grossSales, "Before discounts"), hint: `${formatter.format(liveData.metrics.discounts)} discounts` },
     { label: "Shipping revenue", value: formatter.format(liveData.metrics.shippingRevenue), ...moneyDelta(liveData.metrics.shippingRevenue, comparisonData?.metrics.shippingRevenue, "Shopify orders"), hint: "Excludes tax and duties" },
-    { label: "Blended CAC", value: liveData.metrics.blendedCac === null ? "—" : formatter.format(liveData.metrics.blendedCac), ...moneyDelta(liveData.metrics.blendedCac, comparisonData?.metrics.blendedCac, "Ad spend ÷ new customers", true), hint: `${liveData.metrics.newCustomers.toLocaleString()} first-observed customers` },
-    { label: "Blended MER", value: liveData.metrics.blendedMer === null ? "—" : `${liveData.metrics.blendedMer.toFixed(2)}x`, ...ratioDelta(liveData.metrics.blendedMer, comparisonData?.metrics.blendedMer, "Net sales ÷ ad spend"), hint: liveData.metrics.marketingSpend ? `${formatter.format(liveData.metrics.marketingSpend)} imported spend` : "Connect ad spend" },
-    { label: "New-customer ROAS", value: liveData.metrics.newCustomerRoas === null ? "—" : `${liveData.metrics.newCustomerRoas.toFixed(2)}x`, ...ratioDelta(liveData.metrics.newCustomerRoas, comparisonData?.metrics.newCustomerRoas, "First observed order sales"), hint: "Uses Meta, Google and Microsoft spend for the imported window" },
+    { label: "Blended CAC", value: liveData.metrics.blendedCac === null ? "—" : formatter.format(liveData.metrics.blendedCac), ...moneyDelta(liveData.metrics.blendedCac, comparisonData?.metrics.blendedCac, "Marketing cost ÷ new customers", true), hint: `${liveData.metrics.newCustomers.toLocaleString()} first-observed customers` },
+    { label: "Blended MER", value: liveData.metrics.blendedMer === null ? "—" : `${liveData.metrics.blendedMer.toFixed(2)}x`, ...ratioDelta(liveData.metrics.blendedMer, comparisonData?.metrics.blendedMer, "Net sales ÷ marketing cost"), hint: liveData.metrics.marketingSpend ? `${formatter.format(liveData.metrics.marketingSpend)} imported spend` : "Connect ad spend" },
+    { label: "New-customer ROAS", value: liveData.metrics.newCustomerRoas === null ? "—" : `${liveData.metrics.newCustomerRoas.toFixed(2)}x`, ...ratioDelta(liveData.metrics.newCustomerRoas, comparisonData?.metrics.newCustomerRoas, "First observed order sales"), hint: "Uses ad spend and affiliate fees for the imported window" },
     { label: "Gross profit", value: pnlSummary?.hasData ? formatter.format(pnlSummary.metrics.grossProfit) : "—", ...moneyDelta(pnlSummary?.hasData ? pnlSummary.metrics.grossProfit : null, pnlComparison?.hasData ? pnlComparison.metrics.grossProfit : null, "Net product sales less refunds and COGS"), hint: pnlSummary?.metrics.missingCostLines ? `${pnlSummary.metrics.missingCostLines.toLocaleString()} lines need costs` : "Product costs covered" },
-    { label: "Marketing cost", value: pnlSummary?.availability.marketingSpend ? formatter.format(pnlSummary.metrics.marketingSpend) : "—", ...moneyDelta(pnlSummary?.availability.marketingSpend ? pnlSummary.metrics.marketingSpend : null, pnlComparison?.availability.marketingSpend ? pnlComparison.metrics.marketingSpend : null, "Imported ad spend", true), hint: pnlSummary?.availability.marketingSpend ? "Meta + Google + Microsoft Ads" : "Connect ad spend" },
+    { label: "Marketing cost", value: pnlSummary?.availability.marketingSpend ? formatter.format(pnlSummary.metrics.marketingSpend) : "—", ...moneyDelta(pnlSummary?.availability.marketingSpend ? pnlSummary.metrics.marketingSpend : null, pnlComparison?.availability.marketingSpend ? pnlComparison.metrics.marketingSpend : null, "Imported ad spend", true), hint: pnlSummary?.availability.marketingSpend ? "Ads + affiliate commissions" : "Connect ad spend" },
     { label: "Postage cost", value: pnlSummary?.availability.shippingCosts ? formatter.format(pnlSummary.metrics.merchantShippingCosts) : "—", ...moneyDelta(pnlSummary?.availability.shippingCosts ? pnlSummary.metrics.merchantShippingCosts : null, pnlComparison?.availability.shippingCosts ? pnlComparison.metrics.merchantShippingCosts : null, "Delivery and product shipping costs", true), hint: pnlSummary?.availability.shippingCosts ? "Product overrides and store postage" : "Complete postage costs" },
     { label: "Warehouse fulfilment", value: pnlSummary?.availability.handlingCosts ? formatter.format(pnlSummary.metrics.handlingCosts) : "—", ...moneyDelta(pnlSummary?.availability.handlingCosts ? pnlSummary.metrics.handlingCosts : null, pnlComparison?.availability.handlingCosts ? pnlComparison.metrics.handlingCosts : null, "Fulfilment cost by order or unit", true), hint: pnlSummary?.availability.handlingCosts ? "Store fulfilment default applied" : "Set fulfilment cost" },
     { label: "Contribution margin", value: pnlSummary?.availability.marketingSpend && pnlSummary.availability.shippingCosts && pnlSummary.availability.handlingCosts ? formatter.format(pnlSummary.metrics.contributionMargin) : "—", ...moneyDelta(pnlSummary?.availability.marketingSpend && pnlSummary.availability.shippingCosts && pnlSummary.availability.handlingCosts ? pnlSummary.metrics.contributionMargin : null, pnlComparison?.availability.marketingSpend && pnlComparison.availability.shippingCosts && pnlComparison.availability.handlingCosts ? pnlComparison.metrics.contributionMargin : null, "After variable direct costs"), hint: pnlSummary?.availability.shippingCosts && pnlSummary?.availability.handlingCosts ? "Shipping and handling included" : "Complete shipping and handling costs" },
@@ -316,6 +316,7 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
       metaMarketing: data.metrics.metaMarketingSpend,
       googleMarketing: data.metrics.googleMarketingSpend,
       bingMarketing: data.metrics.bingMarketingSpend,
+      affiliateMarketing: data.metrics.affiliateMarketingSpend ?? 0,
       paymentFees: data.metrics.transactionFees,
       paymentFeesAvailable: data.availability.transactionFees,
       shipping: data.metrics.merchantShippingCosts + data.metrics.handlingCosts,
@@ -427,7 +428,7 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
     </button>)}</section>
     <section className="dashboard-grid">
       <article className="panel chart-panel finance-chart-panel" style={{ order: 0 }}>
-        <div className="panel-head"><div><span className="eyebrow">PERFORMANCE</span><h2>Revenue, costs and profit</h2></div><div className="finance-legend"><span><i className="legend-revenue"/>Revenue</span><span><i className="legend-cogs"/>COGS</span><span><i className="legend-meta"/>Facebook</span><span><i className="legend-google"/>Google</span><span><i className="legend-microsoft"/>Microsoft Ads</span><span><i className="legend-fees"/>Fees</span><span><i className="legend-shipping"/>Shipping</span><span><i className="legend-operating"/>Operating</span><span><i className="legend-profit"/>Profit</span></div></div>
+        <div className="panel-head"><div><span className="eyebrow">PERFORMANCE</span><h2>Revenue, costs and profit</h2></div><div className="finance-legend"><span><i className="legend-revenue"/>Revenue</span><span><i className="legend-cogs"/>COGS</span><span><i className="legend-meta"/>Facebook</span><span><i className="legend-google"/>Google</span><span><i className="legend-microsoft"/>Microsoft Ads</span><span><i className="legend-fees"/>Fees</span><span><i className="legend-shipping"/>Shipping</span><span><i className="legend-operating"/>Operating</span><span><i style={{ background: "#ec4899" }}/>Affiliates</span><span><i className="legend-profit"/>Profit</span></div></div>
         {loading || trendLoading ? <div className={styles.loading} role="status" aria-live="polite" aria-label="Loading revenue, costs and profit">
           <div className={styles.bars} aria-hidden="true">{[26, 44, 34, 58, 42, 68, 52].map((height, index) => <span key={index} style={{ height, animationDelay: `${index * 110}ms` }}/>)}</div>
           <strong>Bringing your numbers together</strong>

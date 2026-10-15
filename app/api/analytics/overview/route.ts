@@ -7,6 +7,7 @@ import { calculateAcquisitionMetrics } from "@/lib/analytics/acquisition";
 import { classifyCustomerOrders } from "@/lib/analytics/customer-classification";
 import { reportingDateKey, reportingMonthKey, reportingRangeToUtc } from "@/lib/analytics/reporting-range";
 import { timed } from "@/lib/server-timing";
+import { loadBillingMarketingCosts } from "@/lib/shopify/billing-estimates";
 
 export const maxDuration = 60;
 
@@ -72,14 +73,16 @@ async function handleGet(request: Request) {
   if (dailyRows.length) {
     const rangeStart = fromDate || dailyRows[0].sales_date;
     const rangeEnd = toDate || dailyRows.at(-1)!.sales_date;
-    const [metaResult, googleResult, bingResult, acquisitionResult] = await Promise.all([
+    const [metaResult, googleResult, bingResult, acquisitionResult, billingMarketing] = await Promise.all([
       supabase.from("meta_ad_insights_daily").select("date_start,spend,currency").eq("store_id", store.id).gte("date_start", rangeStart).lte("date_start", rangeEnd),
       supabase.from("google_ads_insights_daily").select("insight_date,spend,currency").eq("store_id", store.id).gte("insight_date", rangeStart).lte("insight_date", rangeEnd),
       supabase.from("bing_ads_insights_daily").select("insight_date,spend,currency").eq("store_id", store.id).gte("insight_date", rangeStart).lte("insight_date", rangeEnd),
       supabase.from("shopify_acquisition_daily").select("new_customers,new_customer_sales,currency").eq("store_id", store.id).gte("sales_date", rangeStart).lte("sales_date", rangeEnd),
+      loadBillingMarketingCosts(supabase, store, rangeStart, rangeEnd),
     ]);
     const spendError = metaResult.error ?? googleResult.error ?? bingResult.error ?? acquisitionResult.error;
     if (spendError) return NextResponse.json({ error: spendError.message }, { status: 500 });
+    if (billingMarketing.error) return NextResponse.json({ error: billingMarketing.error }, { status: 500 });
     const monthMap = new Map<string, { key: string; label: string; grossSales: number; discounts: number; netSales: number; shippingRevenue: number; orders: number }>();
     let grossSales = 0, discounts = 0, netSales = 0, shippingRevenue = 0, orderCount = 0, unitsSold = 0;
     for (const row of dailyRows) {
@@ -96,7 +99,7 @@ async function handleGet(request: Request) {
       monthMap.set(key, month);
     }
     const marketingSpend = [...(metaResult.data ?? []).map((row) => ({ spend: row.spend, currency: row.currency })), ...(googleResult.data ?? []).map((row) => ({ spend: row.spend, currency: row.currency })), ...(bingResult.data ?? []).map((row) => ({ spend: row.spend, currency: row.currency }))]
-      .reduce((total, row) => row.currency === store.currency ? total + (Number(row.spend) || 0) : total, 0);
+      .reduce((total, row) => row.currency === store.currency ? total + (Number(row.spend) || 0) : total, billingMarketing.total);
     const metaDates = (metaResult.data ?? []).map((row) => row.date_start).sort();
     const googleDates = (googleResult.data ?? []).map((row) => row.insight_date).sort();
     const bingDates = (bingResult.data ?? []).map((row) => row.insight_date).sort();
@@ -212,7 +215,8 @@ async function handleGet(request: Request) {
   else if (earliestOrderAt) { const earliest = earliestOrderAt.slice(0, 10); metaQuery = metaQuery.gte("date_start", earliest); googleQuery = googleQuery.gte("insight_date", earliest); bingQuery = bingQuery.gte("insight_date", earliest); }
   if (toDate) { metaQuery = metaQuery.lte("date_start", toDate); googleQuery = googleQuery.lte("insight_date", toDate); bingQuery = bingQuery.lte("insight_date", toDate); }
   else if (latestOrderAt) { const latest = latestOrderAt.slice(0, 10); metaQuery = metaQuery.lte("date_start", latest); googleQuery = googleQuery.lte("insight_date", latest); bingQuery = bingQuery.lte("insight_date", latest); }
-  const [metaResult, googleResult, bingResult] = await Promise.all([metaQuery, googleQuery, bingQuery]);
+  const [metaResult, googleResult, bingResult, billingMarketing] = await Promise.all([metaQuery, googleQuery, bingQuery, loadBillingMarketingCosts(supabase, store, fromDate || earliestOrderAt?.slice(0, 10) || null, toDate || latestOrderAt?.slice(0, 10) || null)]);
+  if (billingMarketing.error) return NextResponse.json({ error: billingMarketing.error }, { status: 500 });
   if (metaResult.error || googleResult.error || bingResult.error) return NextResponse.json({ error: metaResult.error?.message ?? googleResult.error?.message ?? bingResult.error?.message }, { status: 500 });
   const metaRows = metaResult.data ?? [], googleRows = googleResult.data ?? [], bingRows = bingResult.data ?? [];
   const orderCount = orders.length;
@@ -235,7 +239,7 @@ async function handleGet(request: Request) {
     const exchangeRate = resolveDatedExchangeRate(exchangeRates, row.currency, store.currency, row.date);
     if (!marketingCurrencyCoverage.include(row.currency, exchangeRate)) return total;
     return total + convertDatedAmount(Number(row.spend) || 0, exchangeRate ?? 1, store.currency);
-  }, 0);
+  }, billingMarketing.total);
   const newCustomers = [...customerClasses.values()].filter((classification) => classification === "new").length;
   const acquisition = calculateAcquisitionMetrics({ netSales, newCustomerSales, marketingSpend, newCustomers });
   return NextResponse.json({
