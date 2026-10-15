@@ -26,6 +26,7 @@ export function Connections({ leadGeneration = false, canManage = false }: { lea
   const [metaAccounts, setMetaAccounts] = useState<Array<{ id: string; name: string; currency: string | null; accountStatus: number | null }>>([]);
   const [metaAccountSearch, setMetaAccountSearch] = useState("");
   const [loadingMetaAccounts, setLoadingMetaAccounts] = useState(false);
+  const [metaAccountLoadError, setMetaAccountLoadError] = useState("");
   const [metaLookbackMonths, setMetaLookbackMonths] = useState("12");
   const [metaConnected, setMetaConnected] = useState(false);
   const [metaConnectionStatus, setMetaConnectionStatus] = useState<"connected" | "error" | "disconnected">("disconnected");
@@ -77,6 +78,7 @@ export function Connections({ leadGeneration = false, canManage = false }: { lea
     setManualMeta(false);
     setLoadingMetaAccounts(true);
     setConnectionError("");
+    setMetaAccountLoadError("");
     setMetaSyncResult("");
     setMetaAccounts([]);
     setAccountId("");
@@ -89,7 +91,9 @@ export function Connections({ leadGeneration = false, canManage = false }: { lea
       setMetaLookbackMonths(String(payload.lookbackMonths ?? 12));
       if (!payload.accounts?.length) setConnectionError("Meta did not grant access to any ad accounts. Reconnect with Meta and grant access to the account you want to import.");
     } catch (error) {
-      setConnectionError(error instanceof Error ? error.message : "Could not load Meta ad accounts");
+      const message = error instanceof Error ? error.message : "Could not load Meta ad accounts";
+      setMetaAccountLoadError(message);
+      setConnectionError(message);
     } finally { setLoadingMetaAccounts(false); }
   }, []);
 
@@ -329,12 +333,12 @@ export function Connections({ leadGeneration = false, canManage = false }: { lea
     {showMetaSetup && <div className="modal-backdrop" onMouseDown={()=>setShowMetaSetup(false)}><section className="connection-modal" onMouseDown={(event)=>event.stopPropagation()}>
       <button className="modal-close" onClick={()=>setShowMetaSetup(false)}><X/></button>
       <div className="modal-brand">{integrationLogo("Meta Ads")}<div><span className="eyebrow">DATA CONNECTION</span><h2>{metaOAuthPending ? "Select your Meta ad account" : "Connect Meta Ads"}</h2></div></div>
-      <p className="modal-intro">{metaOAuthPending ? "Choose the ad account to connect to this Spine store, then choose how much spend history to import." : "Connect with Facebook to grant Spine read-only access to your Meta Ads account. Your Facebook password never reaches Spine."}</p>
+      <p className="modal-intro">{metaOAuthPending ? "Choose one approved ad account for the currently selected Spine store. You can connect the other approved accounts when setting up your other stores." : "Connect with Facebook to grant Spine read-only access to your Meta Ads account. Your Facebook password never reaches Spine."}</p>
       {!metaOAuthPending && <div className="connection-notice meta-oauth-notice"><Info/><div><strong>Connect your own Facebook account</strong><span>Choose the Meta ad account you manage, then Spine securely saves the approved connection and imports its daily spend.</span></div><button className="primary" disabled={savingConnection || metaOAuthConfigured === false} onClick={connectMetaWithFacebook}><ExternalLink/>{metaConnectionStatus === "error" ? "Reconnect with Meta" : "Connect with Meta"}</button></div>}
       {metaConnectionStatus === "error" && metaConnectionError && <div className="connection-error" role="alert">{metaConnectionError}</div>}
-      {metaConnected && metaAccountName && <div className="connected-account"><span/><div><small>CURRENT ACCOUNT</small><strong>{metaAccountName}</strong>{metaLastSync ? <small>{metaLastSync.importedDays.toLocaleString()} daily spend records · latest {metaLastSync.latestDate ? new Date(`${metaLastSync.latestDate}T00:00:00Z`).toLocaleDateString("en-GB") : "date unavailable"}</small> : <small>Spend data has not been imported yet.</small>}</div></div>}
+      {!metaOAuthPending && metaConnected && metaAccountName && <div className="connected-account"><span/><div><small>CURRENT ACCOUNT</small><strong>{metaAccountName}</strong>{metaLastSync ? <small>{metaLastSync.importedDays.toLocaleString()} daily spend records · latest {metaLastSync.latestDate ? new Date(`${metaLastSync.latestDate}T00:00:00Z`).toLocaleDateString("en-GB") : "date unavailable"}</small> : <small>Spend data has not been imported yet.</small>}</div></div>}
       {metaOAuthConfigured === false && <div className="connection-error">Meta sign-in needs the existing app credentials configured by your Spine administrator.</div>}
-      {metaOAuthPending && <div role="status"><p>{loadingMetaAccounts ? "Loading your Meta ad accounts…" : `${metaAccounts.length} ad accounts available. Select one below.`}</p><button type="button" disabled={savingConnection || loadingMetaAccounts} onClick={() => void loadOAuthMetaAccounts()}>Reload ad accounts</button><button type="button" disabled={savingConnection} onClick={connectMetaWithFacebook}>Sign in with Meta again</button></div>}
+      {metaOAuthPending && <div className="meta-oauth-selection-status" role="status"><p>{loadingMetaAccounts ? "Loading your Meta ad accounts…" : metaAccountLoadError ? "Could not load the accounts you approved in Meta." : `${metaAccounts.length} ad accounts available. Select one below.`}</p><button type="button" disabled={savingConnection || loadingMetaAccounts} onClick={() => void loadOAuthMetaAccounts()}>Reload ad accounts</button><button type="button" disabled={savingConnection} onClick={connectMetaWithFacebook}>Sign in with Meta again</button></div>}
       <button type="button" disabled={savingConnection} onClick={() => { setManualMeta(!manualMeta); setMetaOAuthPending(false); setMetaAccounts([]); setAccountId(""); }}>{manualMeta ? "Hide manual token option" : "Use a manual token instead"}</button>
       {manualMeta && <><div className="help-card"><Info/><div><strong>Alternative for agency-managed accounts</strong><p>Use a Meta system-user token only if your business manages the connection centrally. For normal use, choose <b>Connect with Meta</b> above.</p><a className="meta-developer-link" href="https://developers.facebook.com/tools/explorer" target="_blank" rel="noreferrer"><ExternalLink/>Open Graph API Explorer</a></div></div>
       <label className="form-field"><span>System-user token <small>Optional alternative</small><b className="tooltip-trigger">?<em>Use this only for a centrally managed Meta system user with ads_read.</em></b></span><div className="secret-input"><KeyRound/><input value={token} onChange={(event)=>{setToken(event.target.value);setMetaAccounts([]);setAccountId("");setMetaAccountSearch("");setConnectionError("");}} type={showToken?"text":"password"} placeholder="EAAB..." autoComplete="off"/><button onClick={()=>setShowToken(!showToken)}>{showToken?<EyeOff/>:<Eye/>}</button></div></label>

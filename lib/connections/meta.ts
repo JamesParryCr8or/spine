@@ -33,21 +33,49 @@ const numeric = (value: string | undefined) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-export async function discoverMetaAccounts(accessToken: string, includeAllPages = false) {
-  const accounts: MetaAccount[] = [];
-  let next: string | undefined = `https://graph.facebook.com/${graphVersion}/me/adaccounts?fields=id,name,account_status,currency,timezone_name&limit=100`;
+class MetaAccountDiscoveryError extends Error {
+  readonly code?: number;
+  constructor(message: string, code?: number) { super(message); this.code = code; }
+}
 
-  for (let page = 0; next && page < (includeAllPages ? 10 : 1); page += 1) {
-    const response = await fetch(next, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      cache: "no-store",
+async function metaAccountEdge(accessToken: string, edge: "adaccounts" | "assigned_ad_accounts", includeAllPages: boolean) {
+  const accounts: MetaAccount[] = [];
+  let next: string | undefined = `https://graph.facebook.com/${graphVersion}/me/${edge}?fields=id,name,account_status,currency,timezone_name&limit=100`;
+  for (let page = 0; next && page < (includeAllPages ? 10 : 1); page++) {
+    const url = new URL(next);
+    if (url.origin !== "https://graph.facebook.com") throw new Error("Meta returned an unexpected pagination URL");
+    const response = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store", signal: AbortSignal.timeout(20_000),
     });
-    const payload = await response.json().catch(() => ({})) as { data?: MetaAccount[]; paging?: { next?: string }; error?: { message?: string } };
-    if (!response.ok) throw new Error(payload.error?.message ?? "Meta rejected this connection");
+    const payload = await response.json().catch(() => ({})) as { data?: MetaAccount[]; paging?: { next?: string }; error?: { message?: string; code?: number } };
+    if (!response.ok || payload.error) throw new MetaAccountDiscoveryError(payload.error?.message ?? "Meta rejected this connection", payload.error?.code);
     accounts.push(...(payload.data ?? []));
     next = payload.paging?.next;
   }
+  if (includeAllPages && next) throw new Error("Meta returned more than 1,000 ad accounts. Narrow the assets approved for Spine and try again.");
   return accounts;
+}
+
+export async function discoverMetaAccounts(accessToken: string, includeAllPages = false) {
+  let userError: MetaAccountDiscoveryError | undefined;
+  try {
+    const accounts = await metaAccountEdge(accessToken, "adaccounts", includeAllPages);
+    if (accounts.length) return accounts;
+  } catch (error) {
+    // Personal-user and business system-user tokens expose different edges.
+    // Invalid/revoked tokens and network errors must still fail immediately.
+    if (!(error instanceof MetaAccountDiscoveryError) || ![10, 100, 200].includes(error.code ?? 0)) throw error;
+    userError = error;
+  }
+  try {
+    return await metaAccountEdge(accessToken, "assigned_ad_accounts", includeAllPages);
+  } catch (error) {
+    if (!userError && error instanceof MetaAccountDiscoveryError && [10, 100, 200].includes(error.code ?? 0)) return [];
+    if (error instanceof MetaAccountDiscoveryError && [10, 200].includes(error.code ?? 0)) {
+      throw new Error("Meta denied access to the approved ad accounts. Check that the login configuration includes ads_read and that the selected accounts grant ANALYZE access, then sign in with Meta again.");
+    }
+    throw error;
+  }
 }
 
 export async function importMetaInsights({
