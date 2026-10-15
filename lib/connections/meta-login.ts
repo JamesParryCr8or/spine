@@ -8,8 +8,8 @@ export function metaLoginUrl({ appId, redirectUri, state, configurationId }: Log
   return url;
 }
 
-export async function exchangeMetaCode({ appId, appSecret, redirectUri, code, configurationId }: {
-  appId: string; appSecret: string; redirectUri: string; code: string; configurationId?: string;
+export async function exchangeMetaCode({ appId, appSecret, redirectUri, code, configurationId, tokenType }: {
+  appId: string; appSecret: string; redirectUri: string; code: string; configurationId?: string; tokenType?: "user" | "system_user";
 }) {
   const exchange = async (params: URLSearchParams) => {
     const response = await fetch(`https://graph.facebook.com/v22.0/oauth/access_token?${params}`, {
@@ -20,8 +20,8 @@ export async function exchangeMetaCode({ appId, appSecret, redirectUri, code, co
     return payload.access_token;
   };
   const token = await exchange(new URLSearchParams({ client_id: appId, client_secret: appSecret, redirect_uri: redirectUri, code }));
-  // Business configurations define their token type and duration. In particular,
-  // business integration system-user tokens cannot use the user-token extension.
-  if (configurationId) return token;
+  // System-user configurations define their token duration; user configurations
+  // still need the long-lived user-token exchange.
+  if (configurationId && tokenType !== "user") return token;
   return exchange(new URLSearchParams({ grant_type: "fb_exchange_token", client_id: appId, client_secret: appSecret, fb_exchange_token: token }));
 }

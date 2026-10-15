@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
   if (!appId || !appSecret) return redirectToApp(request, "error", "Meta OAuth has not been configured yet.");
 
   try {
-    const accessToken = await exchangeMetaCode({ appId, appSecret, redirectUri: callbackUrl(request), code, configurationId: session.loginConfigId });
+    const accessToken = await exchangeMetaCode({ appId, appSecret, redirectUri: callbackUrl(request), code, configurationId: session.loginConfigId, tokenType: session.loginTokenType });
 
     const response = redirectToApp(request, "select");
     response.cookies.set(metaPendingCookie, sealMetaSession({ ...session, expires: Date.now() + 600_000, accessToken }, appSecret, "pending"), metaCookieOptions);

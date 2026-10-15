@@ -4,7 +4,7 @@ export const metaStateCookie = "spine_meta_oauth_state";
 export const metaPendingCookie = "spine_meta_oauth_pending";
 export const metaCookieOptions = { httpOnly: true, sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", maxAge: 600 };
 type Context = { userId: string; storeId: string; organizationId: string };
-export type MetaSession = Context & { nonce: string; expires: number; lookbackMonths: number; accessToken?: string; loginConfigId?: string };
+export type MetaSession = Context & { nonce: string; expires: number; lookbackMonths: number; accessToken?: string; loginConfigId?: string; loginTokenType?: "user" | "system_user" };
 
 // Separate authenticated encryption keys for the state and pending credential.
 function key(secret: string, purpose: string) {

@@ -14,6 +14,8 @@ Set server environment variables `META_APP_ID`, `META_APP_SECRET`, and `META_OAU
 
 For Meta's native business and asset checklist, create a **Facebook Login for Business → Configurations** entry using a system-user access token, Ad accounts as the asset type, and `ads_read` permission. Set its public Configuration ID as `META_LOGIN_CONFIG_ID`. The authorization URL then sends `config_id` without overriding the configuration with `scope`. Business tokens keep the duration chosen in the configuration and skip the user-token extension. Without a configuration, classic sign-in requests `ads_read` and extends the user token.
 
+For a **User access token** configuration, set `META_LOGIN_TOKEN_TYPE=user` alongside its Configuration ID. Spine then extends the returned user token. This configuration may omit Meta's asset checklist; the account picker inside Spine selects the ad account for the current store. The token type is bound to the initiating sign-in session, so changing environment settings cannot change an in-progress callback's token handling. `system_user` is the default for existing configurations.
+
 After Meta grants the selected assets, Spine asks which approved ad account to map to the current store. Pending selection resumes on refreshing Connections while the ten-minute session remains valid. State and temporary credentials use authenticated encryption in HttpOnly cookies and are bound to the signed-in user, organization, and store. Changing brands during sign-in requires reconnecting. Environment changes require a new deployment before they take effect.
 
 ### Shopify billing CSVs

@@ -27,6 +27,18 @@ test("business tokens survive callback without the incompatible user-token exten
   assert.equal(calls[0].searchParams.get("code"), "test-code");
 });
 
+test("user-token business configurations still exchange for a long-lived user token", async t => {
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async url => {
+    const params = new URL(url).searchParams; calls.push(params);
+    return Response.json({ access_token: calls.length === 1 ? "short-user-token" : "long-user-token" });
+  });
+  assert.equal(await exchangeMetaCode({ ...options, configurationId: "user-config", tokenType: "user" }), "long-user-token");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].get("grant_type"), "fb_exchange_token");
+  assert.equal(calls[1].get("fb_exchange_token"), "short-user-token");
+});
+
 test("classic user login extends the token and reports failed exchanges", async t => {
   let calls = 0;
   t.mock.method(globalThis, "fetch", async url => {
@@ -46,7 +58,7 @@ test("classic user login extends the token and reports failed exchanges", async 
 test("configuration and pending credential stay bound to the initiating user and store", () => {
   const context = { userId: "user", storeId: "store", organizationId: "org" };
   const now = Date.now();
-  const session = { ...context, nonce: "nonce", expires: now + 600_000, lookbackMonths: 12, loginConfigId: "456", accessToken: "business-token" };
+  const session = { ...context, nonce: "nonce", expires: now + 600_000, lookbackMonths: 12, loginConfigId: "456", loginTokenType: "user", accessToken: "business-token" };
   const sealed = sealMetaSession(session, "secret", "pending");
   assert.equal(sealed.includes("business-token"), false);
   assert.deepEqual(openMetaSession(sealed, "secret", "pending", context, now), session);
