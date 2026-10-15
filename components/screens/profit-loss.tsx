@@ -94,6 +94,11 @@ export function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
+  useEffect(() => {
+    const refresh = () => setRetryToken(value => value + 1);
+    window.addEventListener("spine:reports-updated", refresh);
+    return () => window.removeEventListener("spine:reports-updated", refresh);
+  }, []);
   const [fromDate, setFromDate] = useState(initialRange?.from ?? (savedPreset ? "" : default365DayRange.from));
   const [toDate, setToDate] = useState(initialRange?.to ?? (savedPreset ? "" : default365DayRange.to));
   const [datePreset, setDatePreset] = useState<FinanceDatePreset>(initialRange ? "custom" : savedPreset === "all_imported" ? "all_imported" : savedPreset ? "custom" : "last_365_days");

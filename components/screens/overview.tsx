@@ -129,6 +129,11 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
+  useEffect(() => {
+    const refresh = () => setRetryToken(value => value + 1);
+    window.addEventListener("spine:reports-updated", refresh);
+    return () => window.removeEventListener("spine:reports-updated", refresh);
+  }, []);
   const [customizingWidgets, setCustomizingWidgets] = useState(false);
   const [widgetPreferences, setWidgetPreferences] = useState<{ order: OverviewWidgetId[]; hidden: OverviewWidgetId[] }>({ order: [...overviewWidgetIds], hidden: [] });
   const widgetPreferencesReady = useRef(false);

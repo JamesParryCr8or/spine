@@ -28,7 +28,8 @@ async function readSecret(supabase: SupabaseClient, storeId: string, provider: s
   return typeof data === "string" && data ? data : null;
 }
 
-async function needsRefresh(supabase: SupabaseClient, table: string, storeId: string, dateColumn: string, from: string, to: string) {
+async function needsRefresh(supabase: SupabaseClient, table: string, storeId: string, dateColumn: string, from: string, to: string, force = false) {
+  if (force) return true;
   const { data } = await supabase
     .from(table)
     .select(`${dateColumn},synced_at`)
@@ -40,11 +41,11 @@ async function needsRefresh(supabase: SupabaseClient, table: string, storeId: st
   return !(data?.length);
 }
 
-export async function refreshShopifyReporting(supabase: SupabaseClient, store: Store, from: string, to: string) {
+export async function refreshShopifyReporting(supabase: SupabaseClient, store: Store, from: string, to: string, force = false) {
   if (!store.shopify_domain) return;
   const [salesNeedsRefresh, acquisitionNeedsRefresh] = await Promise.all([
-    needsRefresh(supabase, "shopify_sales_daily", store.id, "sales_date", from, to),
-    needsRefresh(supabase, "shopify_acquisition_daily", store.id, "sales_date", from, to),
+    needsRefresh(supabase, "shopify_sales_daily", store.id, "sales_date", from, to, force),
+    needsRefresh(supabase, "shopify_acquisition_daily", store.id, "sales_date", from, to, force),
   ]);
   if (!salesNeedsRefresh && !acquisitionNeedsRefresh) return;
   const token = await readSecret(supabase, store.id, "shopify");
@@ -130,11 +131,11 @@ const shiftIso = (value: string, days: number) => new Date(new Date(`${value}T00
  * window is re-read. Aggregated rows only: storage grows with campaigns x
  * days, not orders.
  */
-export async function refreshShopifyCampaigns(supabase: SupabaseClient, store: Store, from: string, to: string): Promise<string | undefined> {
+export async function refreshShopifyCampaigns(supabase: SupabaseClient, store: Store, from: string, to: string, force = false): Promise<string | undefined> {
   if (!store.shopify_domain) return;
   const { data: state, error: stateError } = await supabase.from("shopify_campaign_sync_state").select("backfilled_from,synced_at").eq("store_id", store.id).maybeSingle();
   if (stateError) throw new Error(stateError.message);
-  if (state && state.synced_at >= freshAfter()) return "Skipped: refreshed in the last 15 minutes";
+  if (!force && state && state.synced_at >= freshAfter()) return "Skipped: refreshed in the last 15 minutes";
   const token = await readSecret(supabase, store.id, "shopify");
   if (!token) return "Skipped: no Shopify token";
 
@@ -201,12 +202,12 @@ function paymentQueryWindows(from: string, to: string) {
 
 /** ShopifyQL supplies payment value and count by gateway, including historical orders
  * that predate our order-transaction importer. It does not supply provider fees. */
-export async function refreshShopifyPaymentGateways(supabase: SupabaseClient, store: Store, from: string, to: string) {
+export async function refreshShopifyPaymentGateways(supabase: SupabaseClient, store: Store, from: string, to: string, force = false) {
   if (!store.shopify_domain) return;
   const { data: settings, error: settingsError } = await supabase.from("payment_fee_estimate_settings")
     .select("gateway_synced_from,gateway_synced_to,gateway_synced_at").eq("store_id", store.id).maybeSingle();
   if (settingsError) throw settingsError;
-  if (settings?.gateway_synced_from && settings.gateway_synced_to && settings.gateway_synced_at &&
+  if (!force && settings?.gateway_synced_from && settings.gateway_synced_to && settings.gateway_synced_at &&
       settings.gateway_synced_from <= from && settings.gateway_synced_to >= to &&
       settings.gateway_synced_at >= freshAfter()) return;
   const token = await readSecret(supabase, store.id, "shopify");
@@ -253,8 +254,8 @@ export async function refreshShopifyPaymentGateways(supabase: SupabaseClient, st
   if (saveError) throw saveError;
 }
 
-async function refreshMeta(supabase: SupabaseClient, store: Store, from: string, to: string) {
-  if (!await needsRefresh(supabase, "meta_ad_insights_daily", store.id, "date_start", from, to)) return;
+async function refreshMeta(supabase: SupabaseClient, store: Store, from: string, to: string, force = false) {
+  if (!await needsRefresh(supabase, "meta_ad_insights_daily", store.id, "date_start", from, to, force)) return;
   const [{ data: connection }, token] = await Promise.all([
     supabase.from("data_connections").select("external_account_id,external_account_name").eq("store_id", store.id).eq("provider", "meta").eq("status", "connected").maybeSingle(),
     readSecret(supabase, store.id, "meta"),
@@ -282,10 +283,10 @@ async function refreshMeta(supabase: SupabaseClient, store: Store, from: string,
   }
 }
 
-async function refreshGoogle(supabase: SupabaseClient, store: Store, from: string, to: string) {
+async function refreshGoogle(supabase: SupabaseClient, store: Store, from: string, to: string, force = false) {
   const [accountNeeds, campaignNeeds] = await Promise.all([
-    needsRefresh(supabase, "google_ads_insights_daily", store.id, "insight_date", from, to),
-    needsRefresh(supabase, "google_ads_campaign_insights_daily", store.id, "insight_date", from, to),
+    needsRefresh(supabase, "google_ads_insights_daily", store.id, "insight_date", from, to, force),
+    needsRefresh(supabase, "google_ads_campaign_insights_daily", store.id, "insight_date", from, to, force),
   ]);
   if (!accountNeeds && !campaignNeeds) return;
   const [{ data: connection }, refreshToken, { data: managers }] = await Promise.all([
@@ -384,7 +385,7 @@ function parseDelimited(text: string) {
   return rows;
 }
 
-async function refreshBing(supabase: SupabaseClient, store: Store, from: string, to: string) {
+async function refreshBing(supabase: SupabaseClient, store: Store, from: string, to: string, force = false) {
   // Microsoft only retains daily Campaign Performance data for 36 months.
   // "All imported data" can start much earlier (for example, old Shopify
   // orders), and submitting that entire range makes Microsoft reject the
@@ -395,7 +396,7 @@ async function refreshBing(supabase: SupabaseClient, store: Store, from: string,
   const earliestAvailableDate = retentionStart.toISOString().slice(0, 10);
   if (to < earliestAvailableDate) return;
   const reportFrom = from < earliestAvailableDate ? earliestAvailableDate : from;
-  if (!await needsRefresh(supabase, "bing_ads_insights_daily", store.id, "insight_date", reportFrom, to)) return;
+  if (!await needsRefresh(supabase, "bing_ads_insights_daily", store.id, "insight_date", reportFrom, to, force)) return;
   const [{ data: connection }, secret, { data: account }] = await Promise.all([
     supabase.from("data_connections").select("external_account_id,external_account_name").eq("store_id", store.id).eq("provider", "bing_ads").eq("status", "connected").maybeSingle(),
     readSecret(supabase, store.id, "bing_ads"),
@@ -461,9 +462,9 @@ async function refreshBing(supabase: SupabaseClient, store: Store, from: string,
   return imported.length;
 }
 
-export async function refreshMicrosoftAdsReporting(supabase: SupabaseClient, store: Store, from: string, to: string) {
+export async function refreshMicrosoftAdsReporting(supabase: SupabaseClient, store: Store, from: string, to: string, force = false) {
   try {
-    const imported = await refreshBing(supabase, store, from, to);
+    const imported = await refreshBing(supabase, store, from, to, force);
     if (imported) await supabase.from("data_connections").update({ last_error: null }).eq("store_id", store.id).eq("provider", "bing_ads");
   } catch (error) {
     const message = error instanceof Error ? error.message
@@ -476,16 +477,16 @@ export async function refreshMicrosoftAdsReporting(supabase: SupabaseClient, sto
 
 export type ReportingSourceResult = { source: string; status: "fulfilled" | "rejected"; message?: string };
 
-export async function refreshReportingData(_supabase: SupabaseClient, store: Store, from: string, to: string): Promise<ReportingSourceResult[]> {
+export async function refreshReportingData(_supabase: SupabaseClient, store: Store, from: string, to: string, force = false): Promise<ReportingSourceResult[]> {
   const reportingClient = createAdminClient();
   const sources = ["shopify", "shopify_payments", "meta", "google_ads", "bing_ads", "shopify_campaigns"];
   const results = await Promise.allSettled([
-    refreshShopifyReporting(reportingClient, store, from, to),
-    refreshShopifyPaymentGateways(reportingClient, store, from, to),
-    refreshMeta(reportingClient, store, from, to),
-    refreshGoogle(reportingClient, store, from, to),
-    refreshMicrosoftAdsReporting(reportingClient, store, from, to),
-    refreshShopifyCampaigns(reportingClient, store, from, to),
+    refreshShopifyReporting(reportingClient, store, from, to, force),
+    refreshShopifyPaymentGateways(reportingClient, store, from, to, force),
+    refreshMeta(reportingClient, store, from, to, force),
+    refreshGoogle(reportingClient, store, from, to, force),
+    refreshMicrosoftAdsReporting(reportingClient, store, from, to, force),
+    refreshShopifyCampaigns(reportingClient, store, from, to, force),
   ]);
   return results.map((result, index) => {
     if (result.status === "rejected") {

@@ -154,23 +154,59 @@ export function AnalyticsApp() {
       .then(async (response) => response.ok ? response.json() as Promise<Freshness> : null)
       .then((payload) => setFreshness(payload))
       .catch(() => setFreshness(null));
-    // One background refresh per browser session; the server skips it if the store synced recently.
-    try {
-      if (!sessionStorage.getItem("spine:login-refresh")) {
-        sessionStorage.setItem("spine:login-refresh", "1");
-        fetch("/api/sync/login", { method: "POST" })
-          .then(async (response) => response.ok ? response.json() as Promise<{ started: boolean }> : null)
-          .then((result) => {
-            if (!result?.started) return;
-            // Pick up the finished refresh's source chips.
-            window.setTimeout(() => {
-              fetch("/api/analytics/freshness").then(async (response) => response.ok ? response.json() as Promise<Freshness> : null).then((payload) => { if (payload) setFreshness(payload); }).catch(() => undefined);
-            }, 75_000);
-          })
-          .catch(() => undefined);
-      }
-    } catch { /* sessionStorage can be unavailable; skip the login refresh. */ }
   }, []);
+  useEffect(() => {
+    const storeId = workspace?.activeStoreId;
+    if (!storeId) return;
+    const controller = new AbortController();
+    let nextCheckAt = 0;
+    let checking = false;
+    let pollTimer: number | undefined;
+    async function completed() {
+      if (controller.signal.aborted) return;
+      await clearQueryCache();
+      if (controller.signal.aborted) return;
+      window.dispatchEvent(new Event("spine:reports-updated"));
+      const response = await fetch("/api/analytics/freshness", { signal: controller.signal });
+      if (response.ok && !controller.signal.aborted) setFreshness(await response.json() as Freshness);
+    }
+    function poll(startedAt: number, attempt = 0) {
+      pollTimer = window.setTimeout(async () => {
+        if (controller.signal.aborted) return;
+        try {
+          const response = await fetch(`/api/sync/login?storeId=${encodeURIComponent(storeId!)}`, { signal: controller.signal });
+          if (!response.ok) return;
+          const { run } = await response.json() as { run: { status: string; created_at: string } | null };
+          if (run && Date.parse(run.created_at) >= startedAt - 1000 && run.status !== "running") { await completed(); return; }
+          if (attempt < 17) poll(startedAt, attempt + 1);
+          else nextCheckAt = Date.now() + 60_000;
+        } catch { if (!controller.signal.aborted) nextCheckAt = Date.now() + 60_000; }
+      }, 10_000);
+    }
+    async function check() {
+      if (document.visibilityState !== "visible" || checking || Date.now() < nextCheckAt) return;
+      checking = true;
+      const startedAt = Date.now();
+      try {
+        const response = await fetch("/api/sync/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ storeId }), signal: controller.signal });
+        if (!response.ok) { nextCheckAt = Date.now() + 60_000; return; }
+        const result = await response.json() as { started: boolean; reason?: string; nextSyncAt?: number };
+        nextCheckAt = result.nextSyncAt ?? Date.now() + 2 * 60 * 60_000;
+        if (result.started || result.reason === "running") {
+          if (pollTimer !== undefined) window.clearTimeout(pollTimer);
+          // An already running refresh may have started before this browser opened.
+          poll(result.started ? startedAt : 0);
+        }
+      } catch { if (!controller.signal.aborted) nextCheckAt = Date.now() + 60_000; }
+      finally { checking = false; }
+    }
+    void check();
+    const interval = window.setInterval(() => void check(), 30_000);
+    const onReturn = () => void check();
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    return () => { controller.abort(); window.clearInterval(interval); if (pollTimer !== undefined) window.clearTimeout(pollTimer); window.removeEventListener("focus", onReturn); document.removeEventListener("visibilitychange", onReturn); };
+  }, [workspace?.activeStoreId]);
   useEffect(() => { createClient().auth.getUser().then(({ data }) => { const user = data.user; if (!user) return; const metadataName = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : typeof user.user_metadata?.name === "string" ? user.user_metadata.name : ""; setAccount({ name: metadataName || user.email?.split("@")[0] || "Account", email: user.email || "" }); }); }, []);
   const switchStore = async (storeId: string) => {
     const store = workspace?.stores.find((candidate) => candidate.id === storeId);
@@ -206,7 +242,7 @@ export function AnalyticsApp() {
   };
   const openDrilldown = (target: View, context?: DrilldownContext) => { setActiveReportRun(null); setDrilldown(context ?? null); goTo(target); setMobileOpen(false); };
   const freshnessHeading = !freshness ? "SHOPIFY DATA" : !freshness.connected ? "SHOPIFY NOT CONNECTED" : freshness.latestStatus === "running" || freshness.latestStatus === "paused" ? "IMPORTING SHOPIFY" : freshness.latestStatus === "failed" || freshness.latestStatus === "interrupted" ? "SYNC NEEDS ATTENTION" : freshness.lastSuccessfulSync ? "SHOPIFY SYNCED" : "READY TO SYNC";
-  const freshnessDetail = freshness?.latestStatus === "running" ? "Importing your Shopify catalogue and orders" : freshness?.latestStatus === "paused" ? "Continuing in the background each hour" : freshness?.latestStatus === "interrupted" ? "Open Connections to resume the saved import" : freshness?.lastSuccessfulSync ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(freshness.lastSuccessfulSync)) : freshness?.latestStatus === "failed" ? "Open Connections to review the failed sync" : "Open Connections to import Shopify data";
+  const freshnessDetail = freshness?.latestStatus === "running" ? "Importing your Shopify catalogue and orders" : freshness?.latestStatus === "paused" ? "Continues on the next active refresh" : freshness?.latestStatus === "interrupted" ? "Open Connections to resume the saved import" : freshness?.lastSuccessfulSync ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(freshness.lastSuccessfulSync)) : freshness?.latestStatus === "failed" ? "Open Connections to review the failed sync" : "Open Connections to import Shopify data";
   return <div className="app-shell">
     <aside className={mobileOpen?"sidebar open":"sidebar"}><div className="brand"><span className="brand-identity"><SpineLogo light /><small>The backbone of your business</small></span><button className="mobile-close" onClick={()=>setMobileOpen(false)}><X/></button></div><label className="store-switcher"><span className="store-icon"><ShoppingBag/></span><span><small>STORE</small><b>{switchingStore ? "Switching…" : activeStoreName}</b></span><select aria-label="Active store" value={workspace?.activeStoreId ?? ""} disabled={!workspace || switchingStore || workspace.stores.length < 2} onChange={(event)=>void switchStore(event.target.value)}>{workspace?.stores.map((store)=>{const organization=workspace?.organizations.find((candidate)=>candidate.id===store.organizationId);return <option key={store.id} value={store.id}>{organization && (workspace?.organizations.length ?? 0) > 1 ? `${organization.name} · ` : ""}{store.name}</option>})}</select><ChevronDown/></label><nav>{availableNav.map((item)=>{if(item.subItem&&!customersExpanded)return null;const isCustomers=item.label==="Customers";return <div key={item.label}>{item.section&&<span className="nav-section">{item.section}</span>}<Link href={viewHref(item.label)} className={`${view===item.label ? "nav-item active" : "nav-item"}${item.subItem ? " nav-sub-item" : ""}`} title={item.display ? item.label : undefined} aria-current={view===item.label ? "page" : undefined} onMouseEnter={()=>preloadScreen(item.label)} onFocus={()=>preloadScreen(item.label)} onClick={()=>{if(isCustomers)setCustomersExpanded((expanded)=>!expanded);setActiveReportRun(null);setDrilldown(null);setMobileOpen(false)}}><item.icon/><span className="nav-label">{item.display ?? item.label}</span>{isCustomers&&<ChevronDown style={{marginLeft:"auto",transform:customersExpanded?"rotate(0deg)":"rotate(-90deg)",transition:"transform .2s"}}/>}</Link></div>})}</nav><div className="sidebar-bottom"><button className="nav-item" onClick={logout}><LogOut/><span>Sign out</span></button><div className="user-card"><div>{account.name.slice(0, 2).toUpperCase()}</div><span><b>{account.name}</b><small>{account.email}</small></span></div></div></aside>
     <main className="main"><header className="topbar"><button className="menu-button" onClick={()=>setMobileOpen(true)}><Menu/></button><div className="breadcrumb"><span>{activeStoreName}</span><b>/</b><strong>{view}</strong></div><div className="top-actions">{businessModel === "lead_generation" && <div className="global-date-picker"><button className="date-button" title="Choose reporting period" onClick={() => setLeadDatePickerOpen((open) => !open)}><CalendarDays/><span>{leadRangeLabel}</span><ChevronDown/></button>{leadDatePickerOpen && <div className="global-date-menu"><label>Period<select value={leadDatePreset} onChange={(event) => updateLeadPreset(event.target.value as FinanceDatePreset)}><option value="all_imported">All imported data</option><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="last_7_days">Last 7 days</option><option value="last_30_days">Last 30 days</option><option value="last_90_days">Last 90 days</option><option value="last_365_days">Last 365 days</option><option value="this_month">This month</option><option value="last_month">Last month</option><option value="custom">Custom dates</option></select></label>{leadDatePreset === "custom" && <div className="global-date-custom"><label>From<input type="date" value={leadFrom} onChange={(event) => setLeadFrom(event.target.value)}/></label><label>To<input type="date" value={leadTo} onChange={(event) => setLeadTo(event.target.value)}/></label></div>}<button className="primary" onClick={() => setLeadDatePickerOpen(false)}>Apply period</button></div>}</div>}{businessModel && <button className="export-button" disabled={syncingReporting} onClick={() => void syncReportingNow()} title={businessModel === "lead_generation" ? "Refresh GoHighLevel and ad reporting data now" : "Refresh Shopify, Meta, Google and Microsoft Ads reporting data now"}><RefreshCw className={syncingReporting ? "spin" : ""}/> {syncingReporting ? "Syncing…" : "Sync now"}</button>}<button className="icon-button" onClick={openSync} title="Open Shopify sync"><RefreshCw/></button><button className="export-button" onClick={()=>goTo("Reports")}><Table2/> Reports</button></div></header>

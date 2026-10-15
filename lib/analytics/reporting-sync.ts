@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { refreshReportingData, type ReportingSourceResult } from "./reporting-refresh";
 import { syncGoHighLevelOpportunities } from "./gohighlevel-sync";
 import { runShopifyImport } from "../shopify/import";
+import { staleReportingRunMs } from "./sync-schedule";
 
 export { rollingSyncWindow } from "./reporting-sync-window";
 
@@ -87,7 +88,13 @@ export async function runReportingSyncForStore(
   trigger: "cron" | "manual" | "login",
   /** When set, also runs the Shopify order import until this epoch-ms deadline. */
   shopifyImportDeadline?: number,
+  forceReportingRefresh = false,
 ): Promise<ReportingSyncOutcome> {
+  // A terminated function must not leave the store permanently locked.
+  const { error: staleError } = await reportingClient.from("reporting_sync_runs")
+    .update({ status: "failed", error_message: "Refresh exceeded its time limit; released for retry", completed_at: new Date().toISOString() })
+    .eq("store_id", store.id).eq("status", "running").lt("created_at", new Date(Date.now() - staleReportingRunMs).toISOString());
+  if (staleError) return { storeId: store.id, status: "failed", error: staleError.message };
   const { data: run, error: insertError } = await reportingClient
     .from("reporting_sync_runs")
     .insert({ organization_id: store.organization_id, store_id: store.id, trigger, window_start: from, window_end: to })
@@ -100,7 +107,7 @@ export async function runReportingSyncForStore(
   }
   try {
     const [reportingResults, ghlResults, shopifyResults] = await Promise.all([
-      refreshReportingData(reportingClient, store, from, to),
+      refreshReportingData(reportingClient, store, from, to, forceReportingRefresh),
       goHighLevelResult(reportingClient, store),
       shopifyOrdersResult(reportingClient, store, shopifyImportDeadline, trigger),
     ]);

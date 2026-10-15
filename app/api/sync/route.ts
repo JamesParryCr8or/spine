@@ -7,10 +7,8 @@ import { rollingSyncWindow, runReportingSyncForStore } from "@/lib/analytics/rep
 export const maxDuration = 90;
 
 /**
- * Manual "Sync now" action. The scheduled cron job (app/api/cron/sync)
- * keeps reporting data within about an hour of fresh on its own; this lets
- * a signed-in user pull a fresher refresh on demand - e.g. right after
- * connecting Shopify - without waiting for the next cron tick. Runs
+ * Manual "Sync now" action, independent of the two-hour activity throttle.
+ * Lets a signed-in user pull a fresher refresh on demand. Runs
  * synchronously (unlike the cron job) so the response reflects what
  * actually happened, for a UI that shows the result immediately.
  */

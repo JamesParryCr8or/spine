@@ -1,7 +1,8 @@
 export const defaultSyncHour = 6;
 
 /** A refresh that finished this recently is fresh enough that opening the app doesn't start another. */
-export const loginRefreshFreshMs = 4 * 60 * 60 * 1000;
+export const loginRefreshFreshMs = 2 * 60 * 60 * 1000;
+export const staleReportingRunMs = 10 * 60 * 1000;
 
 export type SyncSchedule = { enabled: boolean; sync_hour: number } | null | undefined;
 

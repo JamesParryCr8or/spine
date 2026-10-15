@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { computePnl, loadPnlInputs, slicePnlInputs, type PnlResult } from "@/lib/analytics/pnl-engine";
+import { runReportingSyncForStore } from "@/lib/analytics/reporting-sync";
 
 export const maxDuration = 300;
 
-type Store = { id: string; name: string; currency: string; timezone: string | null };
+type Store = { id: string; organization_id: string; name: string; currency: string; timezone: string | null; shopify_domain: string | null; business_model: string | null };
 type Setting = { store_id: string; enabled: boolean; webhook_url: string | null };
 
 const dayKey = (date: Date) => date.toISOString().slice(0, 10);
@@ -88,7 +89,7 @@ export async function GET(request: Request) {
   const fallbackWebhook = globalWebhook?.startsWith("https://") ? globalWebhook : null;
   const supabase = createAdminClient();
   const [{ data: storeData, error: storesError }, { data: settingData, error: settingsError }] = await Promise.all([
-    supabase.from("stores").select("id,name,currency,timezone"),
+    supabase.from("stores").select("id,organization_id,name,currency,timezone,shopify_domain,business_model"),
     supabase.from("weekly_report_settings").select("store_id,enabled,webhook_url").eq("enabled", true),
   ]);
   if (storesError || settingsError) return NextResponse.json({ error: (storesError ?? settingsError)!.message }, { status: 500 });
@@ -102,12 +103,23 @@ export async function GET(request: Request) {
   const to = dayKey(yesterday);
   const delivered: Array<{ storeId: string; storeName: string }> = [];
   const failed: Array<{ storeId: string; storeName: string; error: string }> = [];
+  const deadline = Date.now() + 240_000;
 
   for (const store of (storeData ?? []) as Store[]) {
     const setting = settings.get(store.id);
     const webhookUrl = setting?.webhook_url ?? fallbackWebhook;
     if (!setting || !webhookUrl) continue;
     try {
+      if (Date.now() + 60_000 > deadline) throw new Error("Report refresh deferred: function time budget exhausted");
+      // Refresh the report's whole period before generating or delivering it.
+      let refresh = await runReportingSyncForStore(supabase, store, from, dayKey(new Date()), "cron", Math.min(deadline, Date.now() + 55_000), true);
+      for (let attempt = 0; refresh.status === "skipped" && attempt < 12 && Date.now() + 60_000 < deadline; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 5_000));
+        refresh = await runReportingSyncForStore(supabase, store, from, dayKey(new Date()), "cron", Math.min(deadline, Date.now() + 55_000), true);
+      }
+      if (refresh.status !== "completed") throw new Error(refresh.status === "failed" ? refresh.error : "Another refresh is still running; report was not sent with stale figures");
+      const refreshFailures = refresh.results.filter(result => result.status === "rejected");
+      if (refreshFailures.length) throw new Error(`Report not sent because refresh failed: ${refreshFailures.map(result => `${result.source}: ${result.message}`).join("; ")}`);
       const loaded = await loadPnlInputs(supabase, store, { from, to });
       if (!loaded.ok) throw new Error(loaded.error);
       const week = computePnl(loaded.inputs, store);
