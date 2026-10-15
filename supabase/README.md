@@ -12,7 +12,9 @@ The primary connection option is **Connect with Meta**. It exchanges the authori
 
 Set server environment variables `META_APP_ID`, `META_APP_SECRET`, and `META_OAUTH_REDIRECT_URI`. The redirect URI must match the Meta app's allowed callback exactly. Spine's production callback is `https://spine-nine-orpin.vercel.app/api/connections/meta/callback`, using app `1137765288603817`. Keep the secret in Vercel Secret settings; never commit it. `META_LOGIN_CONFIG_ID` optionally selects a Facebook Login for Business configuration belonging to this app.
 
-Sign-in requests `ads_read`. State and temporary credentials use authenticated encryption in HttpOnly cookies, expire after ten minutes, and are bound to the signed-in user, organization, and store. Changing brands during sign-in requires reconnecting. Environment changes require a new deployment before they take effect.
+For Meta's native business and asset checklist, create a **Facebook Login for Business → Configurations** entry using a system-user access token, Ad accounts as the asset type, and `ads_read` permission. Set its public Configuration ID as `META_LOGIN_CONFIG_ID`. The authorization URL then sends `config_id` without overriding the configuration with `scope`. Business tokens keep the duration chosen in the configuration and skip the user-token extension. Without a configuration, classic sign-in requests `ads_read` and extends the user token.
+
+After Meta grants the selected assets, Spine asks which approved ad account to map to the current store. Pending selection resumes on refreshing Connections while the ten-minute session remains valid. State and temporary credentials use authenticated encryption in HttpOnly cookies and are bound to the signed-in user, organization, and store. Changing brands during sign-in requires reconnecting. Environment changes require a new deployment before they take effect.
 
 ### Shopify billing CSVs
 

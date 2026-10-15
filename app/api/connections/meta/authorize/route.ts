@@ -1,3 +1,4 @@
+import { metaLoginUrl } from "@/lib/connections/meta-login";
 import { NextRequest, NextResponse } from "next/server";
 
 import { requireWorkspace } from "@/lib/workspace/server";
@@ -30,10 +31,10 @@ export async function GET(request: NextRequest) {
   const requestedMonths = Number(request.nextUrl.searchParams.get("lookbackMonths"));
   const lookbackMonths = Number.isInteger(requestedMonths) && requestedMonths >= 1 && requestedMonths <= 36 ? requestedMonths : 12;
   const state = crypto.randomUUID();
-  const url = new URL("https://www.facebook.com/v22.0/dialog/oauth");
-  url.search = new URLSearchParams({ client_id: appId, redirect_uri: callbackUrl(request), state, response_type: "code", scope: "ads_read", ...(process.env.META_LOGIN_CONFIG_ID ? { config_id: process.env.META_LOGIN_CONFIG_ID } : {}) }).toString();
+  const loginConfigId = process.env.META_LOGIN_CONFIG_ID?.trim() || undefined;
+  const url = metaLoginUrl({ appId, redirectUri: callbackUrl(request), state, configurationId: loginConfigId });
   const response = NextResponse.redirect(url);
-  response.cookies.set(metaStateCookie, sealMetaSession({ nonce: state, userId: workspace.userId, storeId: workspace.store.id, organizationId: workspace.membership.organizationId, expires: Date.now() + 600_000, lookbackMonths }, process.env.META_APP_SECRET, "state"), metaCookieOptions);
+  response.cookies.set(metaStateCookie, sealMetaSession({ nonce: state, userId: workspace.userId, storeId: workspace.store.id, organizationId: workspace.membership.organizationId, expires: Date.now() + 600_000, lookbackMonths, loginConfigId }, process.env.META_APP_SECRET, "state"), metaCookieOptions);
   response.cookies.set(metaPendingCookie, "", { ...metaCookieOptions, maxAge: 0 });
   return response;
 }

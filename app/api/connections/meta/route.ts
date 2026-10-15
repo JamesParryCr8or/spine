@@ -33,6 +33,16 @@ export async function GET() {
     .maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  const pending = canManageConnections(result.membership.role)
+    ? openMetaSession((await cookies()).get(metaPendingCookie)?.value, process.env.META_APP_SECRET ?? "", "pending", {
+      userId: result.userId, storeId: store.id, organizationId: result.membership.organizationId,
+    }) : null;
+  // Resume selection even after a refresh removed the callback query string.
+  // Do not validate the previous connection while a replacement awaits selection.
+  if (pending) return NextResponse.json({ connection: data, pendingOAuth: true,
+    oauthConfigured: Boolean(process.env.META_APP_ID && process.env.META_APP_SECRET),
+  }, { headers: { "Cache-Control": "no-store" } });
+
   let connection = data;
   if (connection?.status === "connected") {
     const { data: accessToken, error: secretError } = await supabase.rpc("read_connection_secret", {
@@ -73,7 +83,7 @@ export async function GET() {
       syncedAt: latest?.[0]?.synced_at ?? null,
     };
   }
-  return NextResponse.json({ connection, sync, oauthConfigured: Boolean(process.env.META_APP_ID && process.env.META_APP_SECRET) });
+  return NextResponse.json({ connection, sync, pendingOAuth: false, oauthConfigured: Boolean(process.env.META_APP_ID && process.env.META_APP_SECRET) }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export const POST = withStoreJobLock("meta_import", 300, handlePost);

@@ -1,3 +1,4 @@
+import { exchangeMetaCode } from "@/lib/connections/meta-login";
 import { NextRequest, NextResponse } from "next/server";
 
 import { requireWorkspace } from "@/lib/workspace/server";
@@ -40,31 +41,10 @@ export async function GET(request: NextRequest) {
   if (!appId || !appSecret) return redirectToApp(request, "error", "Meta OAuth has not been configured yet.");
 
   try {
-    const redirectUri = callbackUrl(request);
-    const tokenParams = new URLSearchParams({
-      client_id: appId,
-      client_secret: appSecret,
-      redirect_uri: redirectUri,
-      code,
-    });
-    const tokenResponse = await fetch(`https://graph.facebook.com/v22.0/oauth/access_token?${tokenParams}`, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
-    const tokenPayload = await tokenResponse.json().catch(() => ({})) as { access_token?: string; error?: { message?: string } };
-    if (!tokenResponse.ok || !tokenPayload.access_token) throw new Error(tokenPayload.error?.message ?? "Meta could not complete Facebook sign-in.");
-
-    const extensionParams = new URLSearchParams({
-      grant_type: "fb_exchange_token",
-      client_id: appId,
-      client_secret: appSecret,
-      fb_exchange_token: tokenPayload.access_token,
-    });
-    const extensionResponse = await fetch(`https://graph.facebook.com/v22.0/oauth/access_token?${extensionParams}`, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
-    const extensionPayload = await extensionResponse.json().catch(() => ({})) as { access_token?: string; error?: { message?: string } };
-    if (!extensionResponse.ok || !extensionPayload.access_token) {
-      throw new Error(extensionPayload.error?.message ?? "Meta could not extend the Facebook connection.");
-    }
+    const accessToken = await exchangeMetaCode({ appId, appSecret, redirectUri: callbackUrl(request), code, configurationId: session.loginConfigId });
 
     const response = redirectToApp(request, "select");
-    response.cookies.set(metaPendingCookie, sealMetaSession({ ...session, expires: Date.now() + 600_000, accessToken: extensionPayload.access_token }, appSecret, "pending"), metaCookieOptions);
+    response.cookies.set(metaPendingCookie, sealMetaSession({ ...session, expires: Date.now() + 600_000, accessToken }, appSecret, "pending"), metaCookieOptions);
     response.headers.set("Cache-Control", "no-store");
     return response;
   } catch (cause) {
