@@ -78,15 +78,16 @@ async function metaTokenGrant(accessToken: string): Promise<MetaTokenGrant | nul
 }
 
 async function grantedMetaAccounts(accessToken: string, grant: MetaTokenGrant, includeAllPages: boolean) {
-  if (grant.scopes && !grant.scopes.some(scope => scope === "ads_read" || scope === "ads_management")) {
-    throw new Error("Meta did not grant ads_read. Add it to the login configuration, then sign in with Meta again.");
-  }
+  const scopes = [...new Set([...(grant.scopes ?? []), ...(grant.granular_scopes ?? []).flatMap(scope => scope.scope ? [scope.scope] : [])])];
   const ids = [...new Set((grant.granular_scopes ?? [])
     .filter(scope => scope.scope === "ads_read" || scope.scope === "ads_management")
     .flatMap(scope => scope.target_ids ?? []).filter(id => /^(act_)?[0-9]+$/.test(id)))];
   // Operational evidence for this flow without recording credentials or asset IDs.
   console.info({ event: "meta_business_account_discovery", tokenType: grant.type ?? "unknown",
-    grantedAccountCount: ids.length, hasSystemUser: Boolean(grant.user_id) });
+    grantedScopes: scopes, grantedAccountCount: ids.length, hasSystemUser: Boolean(grant.user_id) });
+  if (!scopes.some(scope => scope === "ads_read" || scope === "ads_management")) {
+    throw new Error(`Meta accepted sign-in but returned no ads_read grant (token type: ${grant.type ?? "unknown"}; granted permissions: ${scopes.join(", ") || "none"}). Check the Meta app's ads_read access level and login configuration, then sign in again.`);
+  }
   if (!ids.length) {
     if (!grant.user_id || !/^[0-9]+$/.test(grant.user_id)) {
       throw new Error("Meta returned no ad account grants or system-user identity. Sign in again and approve at least one ad account.");

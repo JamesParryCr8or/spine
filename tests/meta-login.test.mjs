@@ -8,6 +8,7 @@ const options = { appId: "123", appSecret: "test-secret", redirectUri: "https://
 test("business login invokes the asset configuration without overriding its permissions", () => {
   const url = metaLoginUrl({ ...options, configurationId: "456" });
   assert.equal(url.searchParams.get("config_id"), "456");
+  assert.equal(url.searchParams.get("override_default_response_type"), "true");
   assert.equal(url.searchParams.has("scope"), false);
   assert.equal(url.searchParams.get("redirect_uri"), options.redirectUri);
   assert.equal(url.searchParams.get("state"), "nonce");

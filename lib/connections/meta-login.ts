@@ -3,7 +3,7 @@ type LoginOptions = { appId: string; redirectUri: string; state: string; configu
 export function metaLoginUrl({ appId, redirectUri, state, configurationId }: LoginOptions) {
   const url = new URL("https://www.facebook.com/v22.0/dialog/oauth");
   url.search = new URLSearchParams({ client_id: appId, redirect_uri: redirectUri, state, response_type: "code",
-    ...(configurationId ? { config_id: configurationId } : { scope: "ads_read" }),
+    ...(configurationId ? { config_id: configurationId, override_default_response_type: "true" } : { scope: "ads_read" }),
   }).toString();
   return url;
 }

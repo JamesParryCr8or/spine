@@ -74,7 +74,7 @@ test("business discovery resolves granted ad IDs without querying the unsupporte
     if (parsed.pathname.endsWith("/debug_token")) {
       assert.equal(options.headers.Authorization, "Bearer 123|app-secret");
       assert.equal(parsed.searchParams.get("input_token"), "business-token");
-      return Response.json({ data: { app_id: "123", is_valid: true, type: "SYSTEM_USER", scopes: ["ads_read"], granular_scopes: [
+      return Response.json({ data: { app_id: "123", is_valid: true, type: "SYSTEM_USER", scopes: [], granular_scopes: [
         { scope: "ads_read", target_ids: ["11", "22", "11"] },
         { scope: "pages_read_engagement", target_ids: ["99"] },
       ] } });
@@ -115,4 +115,18 @@ test("invalid grants and grants from another app never load asset details", asyn
   grant = { app_id: "123", is_valid: false };
   await assert.rejects(discoverMetaAccounts("revoked"), /expired or was revoked/);
   assert.equal(calls, 4);
+});
+
+test("a valid sign-in without any ads grant stays blocked and reports the returned permissions", async t => {
+  appEnvironment(t);
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async url => {
+    calls++;
+    if (new URL(url).pathname.endsWith("/debug_token")) return Response.json({ data: {
+      app_id: "123", is_valid: true, type: "USER", scopes: ["public_profile"], granular_scopes: [], user_id: "777",
+    } });
+    return Response.json({ error: { code: 200, message: "Missing Permissions" } }, { status: 403 });
+  });
+  await assert.rejects(discoverMetaAccounts("no-ads-grant"), /no ads_read grant.*USER.*public_profile/);
+  assert.equal(calls, 2);
 });
