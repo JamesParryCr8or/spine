@@ -3,12 +3,13 @@ import type { StockItem } from "@/lib/stock/planning";
 
 type Page<T> = { nodes: T[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
 type Level = { location: { id: string; name: string; isActive: boolean }; quantities: { name: string; quantity: number }[] };
-type Variant = { id: string; title: string; media: { nodes: { preview: { image: { url: string } | null } | null }[] }; product: { title: string; vendor: string; status: string; tags: string[]; featuredMedia: { preview: { image: { url: string } | null } | null } | null } };
+type Collection = { id: string; title: string; handle: string };
+type Variant = { id: string; title: string; media: { nodes: { preview: { image: { url: string } | null } | null }[] }; product: { id: string; collections: Page<Collection>; title: string; vendor: string; status: string; tags: string[]; featuredMedia: { preview: { image: { url: string } | null } | null } | null } };
 type Item = { id: string; sku: string | null; tracked: boolean; unitCost: { amount: string; currencyCode: string } | null; variants: Page<Variant> | null; inventoryLevels: Page<Level> };
 export const stockQuery = `query Stock($cursor: String) {
   inventoryItems(first: 10, after: $cursor) {
     nodes { id sku tracked unitCost { amount currencyCode }
-      variants(first: 1) { nodes { id title media(first: 1) { nodes { preview { image { url } } } } product { title vendor status tags featuredMedia { preview { image { url } } } } } pageInfo { hasNextPage endCursor } }
+      variants(first: 1) { nodes { id title media(first: 1) { nodes { preview { image { url } } } } product { id collections(first: 10) { nodes { id title handle } pageInfo { hasNextPage endCursor } } title vendor status tags featuredMedia { preview { image { url } } } } } pageInfo { hasNextPage endCursor } }
       inventoryLevels(first: 20) { nodes { location { id name isActive } quantities(names: ["available", "on_hand", "committed", "incoming"]) { name quantity } } pageInfo { hasNextPage endCursor } }
     } pageInfo { hasNextPage endCursor }
   }
@@ -21,13 +22,19 @@ export const stockLevelsQuery = `query StockLevels($id: ID!, $cursor: String) {
 }`;
 export const stockVariantsQuery = `query StockVariants($id: ID!, $cursor: String) {
   inventoryItem(id: $id) { variants(first: 50, after: $cursor) {
-    nodes { id title media(first: 1) { nodes { preview { image { url } } } } product { title vendor status tags featuredMedia { preview { image { url } } } } }
+    nodes { id title media(first: 1) { nodes { preview { image { url } } } } product { id collections(first: 10) { nodes { id title handle } pageInfo { hasNextPage endCursor } } title vendor status tags featuredMedia { preview { image { url } } } } }
     pageInfo { hasNextPage endCursor }
+  } }
+}`;
+export const stockCollectionsQuery = `query StockCollections($id: ID!, $cursor: String) {
+  product(id: $id) { collections(first: 100, after: $cursor) {
+    nodes { id title handle } pageInfo { hasNextPage endCursor }
   } }
 }`;
 export async function loadStockPage(shop: string, token: string, cursor: string | null) {
   const result = await shopifyGraph<{ inventoryItems: Page<Item> }>(shop, token, stockQuery, { cursor });
   const items: StockItem[] = [];
+  const collectionCache = new Map<string, Collection[]>();
   for (const item of result.inventoryItems.nodes) {
     if (!item.variants?.nodes.length) continue;
     const variants = [...item.variants.nodes];
@@ -49,9 +56,29 @@ export async function loadStockPage(shop: string, token: string, cursor: string 
       levels.push(...more.inventoryItem.inventoryLevels.nodes);
       page = more.inventoryItem.inventoryLevels.pageInfo;
     }
+    const collections = new Map<string, Collection>();
+    for (const { product } of variants) {
+      let memberships = collectionCache.get(product.id);
+      if (!memberships) {
+        memberships = [...product.collections.nodes];
+        let collectionPage = product.collections.pageInfo;
+        const seenCursors = new Set<string>();
+        while (collectionPage.hasNextPage) {
+          const after = collectionPage.endCursor;
+          if (!after || seenCursors.has(after)) throw new Error("Incomplete collection page. Refresh stock to retry.");
+          seenCursors.add(after);
+          const more = await shopifyGraph<{ product: { collections: Page<Collection> } | null }>(shop, token, stockCollectionsQuery, { id: product.id, cursor: after });
+          if (!more.product) throw new Error("A product changed while loading collections. Refresh stock to retry.");
+          memberships.push(...more.product.collections.nodes);
+          collectionPage = more.product.collections.pageInfo;
+        }
+        collectionCache.set(product.id, memberships);
+      }
+      memberships.forEach((collection) => collections.set(collection.id, collection));
+    }
     const product = variant.product;
     items.push({ id: item.id, variantId: variant.id, variantIds: variants.map((v) => v.id), sku: item.sku ?? "", title: product.title, variant: variants.length > 1 ? `${variant.title} · shared inventory (${variants.length} variants)` : variant.title,
-      vendor: product.vendor, status: product.status, tags: [...new Set(variants.flatMap((v) => v.product.tags))], tracked: item.tracked,
+      vendor: product.vendor, status: product.status, collections: [...collections.values()], tags: [...new Set(variants.flatMap((v) => v.product.tags))], tracked: item.tracked,
       image: variant.media.nodes[0]?.preview?.image?.url ?? product.featuredMedia?.preview?.image?.url ?? null,
       unitCost: item.unitCost ? Number(item.unitCost.amount) : null, currency: item.unitCost?.currencyCode ?? null,
       levels: levels.map((level) => { const q = Object.fromEntries(level.quantities.map((value) => [value.name, value.quantity])); return { id: level.location.id, name: level.location.name, active: level.location.isActive, available: q.available ?? 0, onHand: q.on_hand ?? 0, committed: q.committed ?? 0, incoming: q.incoming ?? 0 }; }),

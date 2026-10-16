@@ -1,6 +1,6 @@
 export type StockItem = {
   id: string; variantId: string; variantIds: string[]; sku: string; title: string; variant: string;
-  vendor: string; status: string; tags: string[]; image: string | null; tracked: boolean;
+  vendor: string; status: string; tags: string[]; collections: { id: string; title: string; handle: string }[]; image: string | null; tracked: boolean;
   unitCost: number | null; currency: string | null;
   levels: { id: string; name: string; active: boolean; available: number; onHand: number; committed: number; incoming: number }[];
 };
