@@ -65,7 +65,7 @@ function renderHtml(input: {
 
 
 
-const revenue = (result: PnlResult) => result.metrics.netProductSales - result.metrics.refunds;
+const revenue = (result: PnlResult) => result.metrics.netProductSales - result.metrics.refunds + result.metrics.shippingRevenue;
 const profit = (result: PnlResult) => result.metrics.netProfit ?? result.metrics.profitAfterKnownCosts;
 
 /**

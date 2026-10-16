@@ -18,7 +18,7 @@ export type ProfitAndLossInput = {
 };
 
 export function calculateProfitAndLoss(input: ProfitAndLossInput) {
-  const contributionRevenue = input.netProductSales - input.refunds;
+  const contributionRevenue = input.netProductSales - input.refunds + input.shippingRevenue;
   const grossProfit = contributionRevenue - input.cogs;
   const operatingExpenses = input.fixedOperatingExpenses + input.variableOperatingExpenses;
   const profitAfterOperatingCosts = grossProfit - operatingExpenses;
