@@ -5,7 +5,7 @@ import { type ReportingGranularity, type ReportingPeriod } from "@/lib/analytics
 import { ArrowDownRight, ArrowUpRight, BarChart3, CalendarDays, Database, FileBarChart, Info, LayoutDashboard, Megaphone, Package, PhoneCall, Settings, ShoppingBag, Table2, TrendingUp, Users, WalletCards } from "lucide-react";
 import { fetchJson } from "@/lib/queries/client";
 
-export type View = "Revenue & Costs" | "Overview" | "Profit & Loss" | "Sales" | "UTM Analysis" | "Products" | "Leads" | "Pipeline outcomes" | "Stage ageing" | "Lead sources" | "Sales team" | "Forecast" | "Lost reasons" | "Follow-ups" | "Customers" | "Customer cohorts" | "Repurchase rates" | "Time between orders" | "Product journeys" | "New versus repeat sales" | "Top Shopify customers" | "Sales by country" | "Costs" | "Expenses" | "Reports" | "Connections" | "Settings" | "Team";
+export type View = "Stock report" | "Replenishment" | "Purchase orders" | "Revenue & Costs" | "Overview" | "Profit & Loss" | "Sales" | "UTM Analysis" | "Products" | "Leads" | "Pipeline outcomes" | "Stage ageing" | "Lead sources" | "Sales team" | "Forecast" | "Lost reasons" | "Follow-ups" | "Customers" | "Customer cohorts" | "Repurchase rates" | "Time between orders" | "Product journeys" | "New versus repeat sales" | "Top Shopify customers" | "Sales by country" | "Costs" | "Expenses" | "Reports" | "Connections" | "Settings" | "Team";
 
 export type DrilldownContext = { from?: string; to?: string; search?: string; source?: string; medium?: string; campaign?: string; landingPage?: string; customerType?: string; country?: string; product?: string; comparisonMode?: "previous_period" | "previous_year"; attributionModel?: "first_touch" | "last_touch" };
 
@@ -81,6 +81,9 @@ export const ecommerceNav: NavigationItem[] = [
   { label: "New versus repeat sales", display: "New vs repeat", icon: BarChart3, subItem: true },
   { label: "Top Shopify customers", display: "Top customers", icon: Users, subItem: true },
   { label: "Sales by country", display: "Countries", icon: BarChart3, subItem: true },
+  { label: "Stock report", icon: Package, section: "STOCK" },
+  { label: "Replenishment", icon: TrendingUp },
+  { label: "Purchase orders", icon: ShoppingBag },
   { label: "Costs", icon: WalletCards, section: "DATA" },
   { label: "Expenses", icon: WalletCards },
   { label: "Reports", icon: Table2 },
