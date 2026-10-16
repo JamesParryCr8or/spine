@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Download, FilePlus2, RefreshCw } from "lucide-react";
 import { combinedDemand, defaultPlanning, planStock, type PlanningSettings, type PurchaseOrder, type StockDemand, type StockItem } from "@/lib/stock/planning";
@@ -20,6 +20,12 @@ export function Stock({ storeId, view }: { storeId: string; view: StockView }) {
   const [demand, setDemand] = useState<DemandResponse | null>(null);
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [drafts, setDrafts] = useState<PurchaseOrder[]>([]);
+  const reviewHeading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (!drafts.length || view !== "Replenishment") return;
+    reviewHeading.current?.focus({ preventScroll: true });
+    reviewHeading.current?.scrollIntoView({ behavior: "instant", block: "start" });
+  }, [drafts, view]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [poError, setPoError] = useState("");
@@ -123,11 +129,17 @@ export function Stock({ storeId, view }: { storeId: string; view: StockView }) {
       </div>
       <div className={styles.notice}>Demand comes directly from Shopify Analytics for the last 30, 60 and 90 complete days, by event date. Reversals include refunds, returns, cancellations and order edits; they are not a count of physical returns. Shopify analytics processing may lag recent activity. {warehouse ? `This warehouse is allocated ${settings.share}% of store demand; adjust its share above.` : "All active warehouse stock is combined once per variant."} Reorder when available + included incoming falls below lead time + safety stock; top up to lead time + safety + coverage. Incoming arrival dates are unknown, so check expected deliveries before ordering.</div>
       {view === "Replenishment" && <div className={styles.actions}><button className={styles.primary} disabled={!canDraft || !rows.some((r) => r.plan.reorder > 0 && r.item.status === "ACTIVE")} onClick={() => draftOrders(false)}><FilePlus2 size={16}/>Generate suggested POs</button><button disabled={!canDraft || !rows.some((r) => selected.has(r.item.id) && r.item.tracked)} onClick={() => draftOrders(true)}>Review selected products</button><small>Grouped by Shopify vendor and currency. Quantities and suppliers are editable before export.</small></div>}
+      {view === "Replenishment" && drafts.length > 0 && <section className={styles.review} aria-labelledby="po-review-heading">
+        <div className={styles.notice}>
+          <h3 id="po-review-heading" ref={reviewHeading} tabIndex={-1} className={styles.reviewHeading}>Review {drafts.length} purchase order{drafts.length === 1 ? "" : "s"}</h3>
+          <p>Choose a delivery warehouse, review quantities and costs, then save or export each draft. Saved drafts appear in <Link href="/protected/purchase-orders">Purchase orders</Link>.</p>
+        </div>
+        {drafts.map((po) => <StockPurchaseOrder key={po.reference} initial={po} storeId={storeId} storeName={demand?.storeName ?? "Spine"} destinations={locations.map((l) => l[1])} canManage={demand?.canManage ?? false} onSaved={onSaved}/>)}
+      </section>}
       <div className={styles.scroll}><table><thead><tr>{view === "Replenishment" && <th><input type="checkbox" aria-label="Select visible tracked products" checked={pageRows.some((r) => r.item.tracked) && pageRows.filter((r) => r.item.tracked).every((r) => selected.has(r.item.id))} onChange={(e) => setSelected((old) => { const next = new Set(old); pageRows.filter((r) => r.item.tracked).forEach((r) => e.target.checked ? next.add(r.item.id) : next.delete(r.item.id)); return next; })}/></th>}<th>Product</th><th>SKU</th><th>Status</th><th>Available</th><th>On hand</th><th>Committed</th><th>Incoming</th><th>Sales 30 / 60 / 90d</th><th>Reversals 30 / 60 / 90d</th><th>Net 30 / 60 / 90d</th><th>Daily demand</th><th>Stock days</th><th>Action</th><th>Reorder</th></tr></thead><tbody>
         {pageRows.map(({ item, demand: d, plan }) => <tr key={item.id}>{view === "Replenishment" && <td><input type="checkbox" aria-label={`Select ${item.title} ${item.variant}`} disabled={!item.tracked} checked={selected.has(item.id)} onChange={(e) => setSelected((old) => { const next = new Set(old); if (e.target.checked) next.add(item.id); else next.delete(item.id); return next; })}/></td>}<td><div className={styles.product}>{item.image && <img src={item.image} alt="" width={44} height={44} loading="lazy" referrerPolicy="no-referrer"/>}<span><strong>{item.title}</strong><small>{item.variant === "Default Title" ? item.vendor : `${item.variant} · ${item.vendor}`}</small><small>{item.tags.join(" · ")}</small></span></div></td><td>{item.sku || "No SKU"}</td><td>{item.status.toLowerCase()}</td><td><strong>{item.tracked ? plan.available.toLocaleString() : "—"}</strong></td><td>{plan.onHand.toLocaleString()}</td><td>{plan.committed.toLocaleString()}</td><td>{plan.incoming.toLocaleString()}</td><td>{d ? `${d.sales30} / ${d.sales60} / ${d.sales90}` : "0 / 0 / 0"}</td><td>{d ? `${d.returns30} / ${d.returns60} / ${d.returns90}` : "0 / 0 / 0"}</td><td>{d ? `${d.net30} / ${d.net60} / ${d.net90}` : "0 / 0 / 0"}</td><td>{plan.daily.toFixed(2)}</td><td>{!item.tracked ? "—" : plan.stockDays === null ? "No demand" : plan.stockDays.toFixed(1)}</td><td><span className={`${styles.badge} ${["Out of stock", "Reorder"].includes(plan.action) ? styles.urgent : ["Untracked", "No recent demand"].includes(plan.action) ? styles.neutral : ""}`}>{plan.action}</span></td><td><strong>{plan.reorder.toLocaleString()}</strong></td></tr>)}
       </tbody></table>{!rows.length && <div className={styles.empty}>{loading ? "Waiting for stock…" : "No products match these filters."}</div>}</div>
       <div className={styles.pager}><small>{rows.length.toLocaleString()} variants · page {currentPage + 1} of {pageCount}</small><div className={styles.actions}><button disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous</button><button disabled={currentPage + 1 >= pageCount} onClick={() => setPage(currentPage + 1)}>Next</button></div></div>
-      {view === "Replenishment" && drafts.map((po) => <StockPurchaseOrder key={po.reference} initial={po} storeId={storeId} storeName={demand?.storeName ?? "Spine"} destinations={locations.map((l) => l[1])} canManage={demand?.canManage ?? false} onSaved={onSaved}/>)}
     </>}
   </div>;
 }
