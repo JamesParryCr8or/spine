@@ -250,13 +250,16 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
     return () => controller.abort();
   }, [finishReportRun, fromDate, toDate, retryToken]);
 
-  useResetOnChange(`${fromDate}|${toDate}|${granularity}|${pnlSummary?.period?.start ?? "pending"}|${pnlSummary?.period?.end ?? ""}|${trendRetry}`, () => { setTrendLoading(true); setTrendError(false); });
+  const trendStart = fromDate || pnlSummary?.period?.start;
+  const trendEnd = toDate || pnlSummary?.period?.end;
+  const trendHasData = Boolean(pnlSummary?.hasData);
+  useResetOnChange(`${trendStart}|${trendEnd}|${granularity}|${trendHasData}|${trendRetry}`, () => { setTrendLoading(true); setTrendError(false); });
   useEffect(() => {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => {
-      if (!pnlSummary?.period || !pnlSummary.hasData) { setTrendData([]); setTrendLoading(false); return; }
-      const periodStart = fromDate || pnlSummary.period.start;
-      const periodEnd = toDate || pnlSummary.period.end;
+      if (!trendStart || !trendEnd || !trendHasData) { setTrendData([]); setTrendLoading(false); return; }
+      const periodStart = trendStart;
+      const periodEnd = trendEnd;
       const dailyDays = Math.floor((Date.parse(periodEnd + "T00:00:00Z") - Date.parse(periodStart + "T00:00:00Z")) / 86400000) + 1;
       const periods = reportingPeriods(periodStart, periodEnd, granularity, granularity === "daily" ? Math.max(dailyDays, 1) : 60);
       setTrendLoading(true);
@@ -272,7 +275,7 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
         .finally(() => { if (!controller.signal.aborted) setTrendLoading(false); });
     }, 0);
     return () => { window.clearTimeout(timeout); controller.abort(); };
-  }, [fromDate, toDate, granularity, pnlSummary, trendRetry]);
+  }, [trendStart, trendEnd, granularity, trendHasData, trendRetry]);
 
   const hasLiveData = Boolean(liveData?.hasData);
   const formatter = new Intl.NumberFormat("en-GB", { style: "currency", currency: liveData?.currency || "GBP", maximumFractionDigits: 0 });

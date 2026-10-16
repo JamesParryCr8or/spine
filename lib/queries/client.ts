@@ -120,11 +120,25 @@ export async function peekJson<T>(url: string): Promise<CachedJson<T> | null> {
  * cached. `force` always requests.
  */
 export async function fetchJson<T>(url: string, options: { force?: boolean; signal?: AbortSignal; staleTime?: number } = {}): Promise<T> {
+  const queryKey = keyFor(url);
   await whenRestored();
-  return getQueryClient().fetchQuery({
-    queryKey: keyFor(url),
-    queryFn: ({ signal }) => requestJson(url, options.signal ?? signal) as Promise<T>,
+  const callerSignal = options.signal;
+  callerSignal?.throwIfAborted();
+  const pending = getQueryClient().fetchQuery({
+    queryKey,
+    // The cache owns this shared request. A departing screen must not abort
+    // the network request that a new render (or another panel) is reusing.
+    queryFn: ({ signal }) => requestJson(url, signal) as Promise<T>,
     staleTime: options.force ? 0 : options.staleTime ?? staleTimeMs,
+  });
+  if (!callerSignal) return pending;
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(callerSignal.reason ?? new DOMException("Request cancelled", "AbortError"));
+    callerSignal.addEventListener("abort", abort, { once: true });
+    pending.then(
+      (value) => { callerSignal.removeEventListener("abort", abort); resolve(value); },
+      (error) => { callerSignal.removeEventListener("abort", abort); reject(error); },
+    );
   });
 }
 
