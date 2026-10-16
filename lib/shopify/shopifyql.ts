@@ -26,7 +26,8 @@ export async function runStoreShopifyQl<T extends string>(store: { id: string; s
       );
       const parseError = result.shopifyqlQuery.parseErrors[0];
       if (parseError) throw new Error(`Shopify query (${name}): ${parseError}`);
-      return [name, result.shopifyqlQuery.tableData?.rows ?? []] as const;
+      if (!result.shopifyqlQuery.tableData) throw new Error(`Shopify query (${name}) returned no report. Please retry.`);
+      return [name, result.shopifyqlQuery.tableData.rows] as const;
     }));
     return { ok: true, results: Object.fromEntries(entries) as Record<T, ShopifyQlRow[]> };
   } catch (error) {
