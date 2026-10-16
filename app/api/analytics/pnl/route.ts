@@ -1,10 +1,11 @@
+import { loadReportingPnlInputs as loadPnlInputs } from "@/lib/analytics/reporting-inputs";
 import { NextResponse } from "next/server";
 
 import { requireWorkspace } from "@/lib/workspace/server";
-import { computePnl, loadPnlInputs } from "@/lib/analytics/pnl-engine";
+import { computePnl } from "@/lib/analytics/pnl-engine";
 import { timed } from "@/lib/server-timing";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /** One P&L for one date range. Multi-period views use ./series instead. */
 async function handleGet(request: Request) {

@@ -1,5 +1,6 @@
 "use client";
 
+import { latestCost } from "@/lib/analytics/effective-cost";
 import { useEffect, useState } from "react";
 import { downloadXlsx } from "@/lib/exports/xlsx";
 import { Download, Info, Package, Plus, Search, Upload, WalletCards, X, Trash2 } from "lucide-react";
@@ -34,6 +35,7 @@ export function Costs({ focusSku }: { focusSku?: string | null }) {
   const [shippingCosts, setShippingCosts] = useState<ProductShippingCost[]>([]);
   const [missingCostImpact, setMissingCostImpact] = useState({ orders: 0, units: 0, revenue: 0 });
   const [currency, setCurrency] = useState("GBP");
+  const [latestCogs, setLatestCogs] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [showAddShipping, setShowAddShipping] = useState(false);
@@ -58,6 +60,7 @@ export function Costs({ focusSku }: { focusSku?: string | null }) {
     fetch("/api/costs").then(async (response) => { const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Could not load costs"); return payload; }),
     fetch("/api/costs/shipping").then(async (response) => { const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Could not load shipping costs"); return payload; }),
   ]).then(([payload, shippingPayload]) => {
+    setLatestCogs(payload.cogsMethod === "latest");
     setError(""); setVariants(payload.variants ?? []); setCosts(payload.costs ?? []); setShippingCosts(shippingPayload.costs ?? []); setMissingCostImpact(payload.missingCostImpact ?? { orders: 0, units: 0, revenue: 0 }); setCurrency(payload.currency ?? "GBP"); setCanEdit(Boolean(payload.canEdit && shippingPayload.canEdit));
   }).catch((reason) => setError(reason instanceof Error ? reason.message : "Could not load costs"));
 
@@ -148,8 +151,15 @@ export function Costs({ focusSku }: { focusSku?: string | null }) {
     const key = variant.id;
     const skuKey = variant.sku ? `sku:${variant.sku.toLowerCase()}` : "";
     const records = costs.filter((cost) => cost.variant_id === key || (skuKey && `sku:${cost.sku?.toLowerCase()}` === skuKey));
-    return records.length > 0 && !currentCosts.has(key) && !currentCosts.has(skuKey) && records.some((cost) => Boolean(cost.effective_to && cost.effective_to < currentDate));
+    return !latestCogs && records.length > 0 && !currentCosts.has(key) && !currentCosts.has(skuKey) && records.some((cost) => Boolean(cost.effective_to && cost.effective_to < currentDate));
   }).length;
+  if (latestCogs) {
+    currentCosts.clear();
+    for (const cost of costs) {
+      const key = cost.variant_id ?? `sku:${cost.sku?.toLowerCase()}`;
+      currentCosts.set(key, latestCost([...(currentCosts.has(key) ? [currentCosts.get(key)!] : []), cost])!);
+    }
+  }
   const covered = variants.filter((variant) => currentCosts.has(variant.id) || (variant.sku && currentCosts.has(`sku:${variant.sku.toLowerCase()}`)) || variant.shopify_unit_cost !== null).length;
   const missingVariants = variants.filter((variant) => !currentCosts.has(variant.id) && (!variant.sku || !currentCosts.has(`sku:${variant.sku.toLowerCase()}`)) && variant.shopify_unit_cost === null);
   const coverage = variants.length ? Math.round((covered / variants.length) * 100) : 0;
@@ -168,12 +178,12 @@ export function Costs({ focusSku }: { focusSku?: string | null }) {
 
   return <>
     <section className="cost-toolbar">
-      <div><span className="eyebrow">COST ENGINE</span><h2>Product cost history</h2><p>Costs apply from their effective date, so future changes do not rewrite historical profit.</p></div>
+      <div><span className="eyebrow">COST ENGINE</span><h2>Product cost history</h2><p>{latestCogs ? "The latest recorded unit cost applies across all historical sales. Changing costs recalculates past profit using daily Shopify Analytics quantities, without waiting for order imports." : "Costs apply from their effective date, so future changes do not rewrite historical profit."}</p></div>
       <div className="feature-actions"><button className="primary" disabled={!canEdit} onClick={()=>setShowAdd(true)}><Plus/> Add product cost</button><button disabled={!canEdit} onClick={() => setShowAddShipping(true)}><Plus/> Add shipping override</button><details className="action-menu"><summary><Download/> Import / export</summary><div className="action-menu-list"><label className={canEdit?"menu-item":"menu-item disabled"}><Upload/> Import CSV<input type="file" accept=".csv,text/csv" disabled={!canEdit || saving} onChange={(event)=>{const file=event.target.files?.[0];if(file) void importCsv(file);event.target.value="";}}/></label><button disabled={missingVariants.length === 0} onClick={exportMissingCsv}><Download/> Missing COGS (CSV)</button><button disabled={missingVariants.length === 0} onClick={exportMissingXlsx}><Download/> Missing COGS (Excel)</button></div></details></div>
     </section>
     {error && <div className="connection-error cost-error">{error}</div>}
     <section className="cost-grid live"><div><strong>{variants.length.toLocaleString()}</strong><span>Variants synced</span></div><div><strong>{coverage}%</strong><span>Current cost coverage</span><i className="coverage-bar"><b style={{ width: `${coverage}%` }}/></i></div><div><strong>{Math.max(variants.length-covered,0).toLocaleString()}</strong><span>Missing costs</span></div><div><strong>{costs.length.toLocaleString()}</strong><span>Cost records</span></div></section>
-    {missingCostImpact.orders > 0 && <div className="connection-notice cost-impact"><Info/><div><strong>Missing costs affect {formatter.format(missingCostImpact.revenue)} of imported sales</strong><span>{missingCostImpact.orders.toLocaleString()} orders and {missingCostImpact.units.toLocaleString()} units cannot yet have complete gross-profit calculations. Add an effective-dated product cost to resolve them.</span></div></div>}
+    {missingCostImpact.orders > 0 && <div className="connection-notice cost-impact"><Info/><div><strong>Missing costs affect {formatter.format(missingCostImpact.revenue)} of imported sales</strong><span>{missingCostImpact.orders.toLocaleString()} orders and {missingCostImpact.units.toLocaleString()} units cannot yet have complete gross-profit calculations. Add a product cost to resolve them.</span></div></div>}
     {staleVariants > 0 && <div className="connection-notice cost-impact"><Info/><div><strong>{staleVariants.toLocaleString()} product cost{staleVariants === 1 ? "" : "s"} need updating</strong><span>These variants have an expired cost record. Add a new effective-dated cost to keep future profitability up to date.</span></div></div>}
     <section className="panel report-panel"><div className="panel-head"><div><span className="eyebrow">CURRENT COVERAGE</span><h2>Variant cost coverage</h2></div><span className="report-note">Active manual costs take priority over Shopify&apos;s unit cost.</span></div>{variants.length ? <><div className="filter-row"><div className="search"><Search/><input value={coverageSearch} onChange={(event) => { setCoverageSearch(event.target.value); setCoverageLimit(25); }} placeholder="Find a product or SKU..."/></div><div className="segmented">{(["all", "missing", "covered"] as const).map((key) => <button key={key} className={coverageFilter === key ? "active" : ""} onClick={() => { setCoverageFilter(key); setCoverageLimit(25); }}>{key === "all" ? `All (${variants.length})` : key === "missing" ? `Needs cost (${missingVariants.length})` : `Covered (${covered})`}</button>)}</div></div><div className="table-scroll"><table className="data-table"><thead><tr><th>Product / variant</th><th>SKU</th><th>Selling price</th><th>Shopify unit cost</th><th>Active override</th><th>Shipping override</th><th>Current source</th><th/></tr></thead><tbody>{shownVariants.map((variant) => { const override = currentCosts.get(variant.id) ?? (variant.sku ? currentCosts.get(`sku:${variant.sku.toLowerCase()}`) : undefined); const shippingOverride = currentShippingCosts.get(variant.id) ?? (variant.sku ? currentShippingCosts.get(`sku:${variant.sku.toLowerCase()}`) : undefined); const source = override ? override.source : variant.shopify_unit_cost !== null ? "shopify" : "missing"; return <tr key={variant.id}><td><strong>{variant.productTitle}</strong><small>{variant.title}</small></td><td>{variant.sku || "—"}</td><td>{formatter.format(Number(variant.price))}</td><td>{variant.shopify_unit_cost === null ? "—" : formatter.format(Number(variant.shopify_unit_cost))}</td><td>{override ? <strong>{formatter.format(Number(override.amount))}</strong> : "—"}</td><td>{shippingOverride ? <><strong>{formatter.format(Number(shippingOverride.amount))}</strong><small>per {shippingOverride.allocation_basis === "units" ? "unit" : "order"}</small></> : "Store fallback"}</td><td><span className={source === "missing" ? "cost-warning" : `source-pill ${source}`}>{source === "missing" ? "Needs cost" : source.replace("_", " ")}</span></td><td>{canEdit && source === "missing" ? <button className="row-action" onClick={() => { setVariantId(variant.id); setShowAdd(true); }}>Add cost</button> : null}</td></tr>; })}</tbody></table></div>{filteredVariants.length === 0 ? <div className="cost-empty"><strong>No variants match</strong><span>Try a different search or filter.</span></div> : <div className="table-footer"><span>Showing {shownVariants.length.toLocaleString()} of {filteredVariants.length.toLocaleString()}</span>{filteredVariants.length > shownVariants.length && <button onClick={() => setCoverageLimit((value) => value + 50)}>Show more</button>}</div>}</> : null}</section>
     <section className="panel report-panel cost-table-panel"><div className="panel-head"><div><span className="eyebrow">EFFECTIVE-DATED RECORDS</span><h2>Product costs</h2></div><a className="template-link" href="data:text/csv;charset=utf-8,sku%2Camount%2Ccurrency%2Ceffective_from%2Ceffective_to%2Cnotes%0AEXAMPLE-SKU%2C12.50%2CGBP%2C2026-01-01%2C%2COptional%20note" download="product-cost-template.csv">Download CSV template</a></div><div className="filter-row"><div className="search"><Search/><input value={costSearch} onChange={(event) => setCostSearch(event.target.value)} placeholder="Find a product or SKU..."/></div></div>

@@ -1,4 +1,6 @@
 export type EffectiveCost = {
+  currency?: string;
+  updated_at?: string;
   variant_id: string | null;
   sku: string | null;
   amount: string;
@@ -22,4 +24,11 @@ export function resolveEffectiveCost(costs: EffectiveCost[], orderDate: string, 
 
 export function costKey(cost: Pick<EffectiveCost, "variant_id" | "sku">) {
   return cost.variant_id ? `variant:${cost.variant_id}` : cost.sku ? `sku:${cost.sku.trim().toLowerCase()}` : null;
+}
+
+/** Latest recorded cost, applied retrospectively regardless of sale date. */
+export function latestCost<T extends EffectiveCost>(costs: T[]): T | undefined {
+  return [...costs].sort((a, b) => b.effective_from.localeCompare(a.effective_from)
+    || (sourcePriority[b.source] ?? 0) - (sourcePriority[a.source] ?? 0)
+    || (b.updated_at ?? "").localeCompare(a.updated_at ?? ""))[0];
 }

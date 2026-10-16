@@ -1,10 +1,11 @@
+import { loadReportingPnlInputs as loadPnlInputs } from "@/lib/analytics/reporting-inputs";
 import { NextResponse } from "next/server";
 
 import { requireWorkspace } from "@/lib/workspace/server";
-import { computePnl, contiguousSpans, loadPnlInputs, slicePnlInputs, type PnlInputs } from "@/lib/analytics/pnl-engine";
+import { computePnl, contiguousSpans, slicePnlInputs, type PnlInputs } from "@/lib/analytics/pnl-engine";
 import { timed } from "@/lib/server-timing";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const maxPeriods = 400;
 // A P&L screen asks for its columns plus a previous-year comparison: two

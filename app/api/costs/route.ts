@@ -78,6 +78,9 @@ export async function GET(request: Request) {
     if ((data ?? []).length < 1000) break;
   }
   const orderDates = new Map(orderRows.filter((order) => order.processed_at).map((order) => [order.id, order.processed_at!.slice(0, 10)]));
+  const { data: costDefaults, error: defaultsError } = await supabase.from("store_cost_defaults").select("cogs_method").eq("store_id", store.id).maybeSingle();
+  if (defaultsError) return NextResponse.json({ error: defaultsError.message }, { status: 500 });
+  const latestCogs = costDefaults?.cogs_method === "latest";
   const variantsByGid = new Map((variants ?? []).map((variant) => [variant.shopify_gid, variant]));
   const costsByKey = new Map<string, Array<{ effective_from: string; effective_to: string | null }>>();
   for (const cost of costs ?? []) {
@@ -91,12 +94,13 @@ export async function GET(request: Request) {
     if (!date) continue;
     const variant = line.variant_gid ? variantsByGid.get(line.variant_gid) : undefined;
     const key = variant ? `variant:${variant.id}` : line.sku ? `sku:${line.sku.trim().toLowerCase()}` : null;
-    const hasManualCost = key ? (costsByKey.get(key) ?? []).some((cost) => cost.effective_from <= date && (!cost.effective_to || cost.effective_to >= date)) : false;
+    const hasManualCost = key ? (costsByKey.get(key) ?? []).some((cost) => latestCogs || (cost.effective_from <= date && (!cost.effective_to || cost.effective_to >= date))) : false;
     if (hasManualCost || variant?.shopify_unit_cost !== null && variant?.shopify_unit_cost !== undefined) continue;
     missingOrders.add(line.order_id); missingUnits += Math.max(line.current_quantity, 0); missingRevenue += Number(line.net_sales) || 0;
   }
 
   return NextResponse.json({
+    cogsMethod: latestCogs ? "latest" : "effective_dates",
     currency: store.currency,
     missingCostImpact: { orders: missingOrders.size, units: missingUnits, revenue: missingRevenue },
     canEdit: ["owner", "admin"].includes(membership.role),

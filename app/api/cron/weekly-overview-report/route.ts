@@ -1,7 +1,8 @@
+import { loadReportingPnlInputs as loadPnlInputs } from "@/lib/analytics/reporting-inputs";
 import { NextResponse } from "next/server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { computePnl, loadPnlInputs, slicePnlInputs, type PnlResult } from "@/lib/analytics/pnl-engine";
+import { computePnl, slicePnlInputs, type PnlResult } from "@/lib/analytics/pnl-engine";
 import { runReportingSyncForStore } from "@/lib/analytics/reporting-sync";
 
 export const maxDuration = 300;

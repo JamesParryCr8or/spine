@@ -17,12 +17,12 @@ import { loadBillingEstimates } from "../shopify/billing-estimates.ts";
 type Order = { id: string; processed_at: string | null; gross_sales: string; discounts: string; net_product_sales: string; shipping_revenue: string; tax: string; duties: string; total_sales: string; currency: string; exchange_rate: number };
 type RawOrder = Omit<Order, "exchange_rate">;
 type Line = { order_id: string; variant_gid: string | null; sku: string | null; current_quantity: number; net_sales: string };
-type Variant = { id: string; shopify_gid: string; sku: string | null; shopify_unit_cost: string | null };
+type Variant = { id: string; shopify_gid: string; sku: string | null; shopify_unit_cost: string | null; currency?: string };
 type Refund = { order_id: string; total_refunded: string };
 type Transaction = ShopifyTransactionFee & { order_id: string; gateway: string | null; amount: string; processed_at_shopify: string | null; created_at_shopify: string };
 type PaymentFeeRuleRow = { gateway: string; percentage_rate: string; fixed_fee: string; tax_rate: string; minimum_fee: string; currency: string; effective_from: string; effective_to: string | null };
 type ProductShippingCostRow = ProductShippingCost & { currency: string };
-type StoreCostDefault = { fulfilment_amount: string; fulfilment_basis: "orders" | "units"; postage_amount: string; postage_basis: "orders" | "units"; default_cogs_percent: string; currency: string };
+type StoreCostDefault = { cogs_method?: "effective_dates" | "latest"; fulfilment_amount: string; fulfilment_basis: "orders" | "units"; postage_amount: string; postage_basis: "orders" | "units"; default_cogs_percent: string; currency: string };
 type CustomCost = { name: string; category: string; amount: string; currency: string; cadence: "one_off" | "daily" | "weekly" | "monthly" | "annual"; allocation_basis: "fixed" | "orders" | "units" | "revenue"; effective_from: string; effective_to: string | null };
 type MarketingRow = { date: string; spend: string; currency: string };
 type ShopifyDaily = {
@@ -45,6 +45,7 @@ export type PnlRange = { from: string | null; to: string | null };
  */
 export type PnlInputs = {
   range: PnlRange;
+  latestCogs?: Array<{ date: string; amount: number; source: "spine" | "shopify" | "estimate" | "missing" }>;
   shopifyDaily: ShopifyDaily[];
   exchangeRates: DatedExchangeRate[];
   orders: RawOrder[];
@@ -172,8 +173,8 @@ export async function loadPnlInputs(
     byOrderChunk<Line>("shopify_order_lines", "order_id,variant_gid,sku,current_quantity,net_sales"),
     byOrderChunk<Refund>("shopify_refunds", "order_id,total_refunded"),
     byOrderChunk<Transaction>("shopify_transactions", "order_id,fee_amount,fee_tax,currency,status,gateway,amount,processed_at_shopify,created_at_shopify"),
-    byStore<Variant>("shopify_variants", "id,shopify_gid,sku,shopify_unit_cost"),
-    byStore<EffectiveCost>("product_costs", "variant_id,sku,amount,effective_from,effective_to,source"),
+    byStore<Variant>("shopify_variants", "id,shopify_gid,sku,shopify_unit_cost,currency"),
+    byStore<EffectiveCost>("product_costs", "variant_id,sku,amount,effective_from,effective_to,source,currency,updated_at"),
     byStore<CustomCost>("custom_costs", "name,category,amount,currency,cadence,allocation_basis,effective_from,effective_to"),
     byStore<PaymentFeeRuleRow>("payment_fee_rules", "gateway,percentage_rate,fixed_fee,tax_rate,minimum_fee,currency,effective_from,effective_to"),
     byStore<ProductShippingCostRow>("product_shipping_costs", "id,variant_id,sku,amount,allocation_basis,currency,effective_from,effective_to"),
@@ -188,7 +189,7 @@ export async function loadPnlInputs(
     marketing("meta_ad_insights_daily", "date_start"),
     marketing("google_ads_insights_daily", "insight_date"),
     marketing("bing_ads_insights_daily", "insight_date"),
-    supabase.from("store_cost_defaults").select("fulfilment_amount,fulfilment_basis,postage_amount,postage_basis,default_cogs_percent,currency").eq("store_id", store.id).maybeSingle(),
+    supabase.from("store_cost_defaults").select("fulfilment_amount,fulfilment_basis,postage_amount,postage_basis,default_cogs_percent,currency,cogs_method").eq("store_id", store.id).maybeSingle(),
     supabase.from("payment_fee_estimate_settings").select("shopify_plan,plan_override,default_percentage_rate,default_fixed_fee,surcharge_rate_override").eq("store_id", store.id).maybeSingle(),
     supabase.from("data_connections").select("status,last_error").eq("store_id", store.id).eq("provider", "bing_ads").maybeSingle(),
     loadBillingEstimates(supabase, store.id),
@@ -241,6 +242,7 @@ export function slicePnlInputs(inputs: PnlInputs, store: PnlStore, period: PnlRa
   return {
     ...inputs,
     range: period,
+    latestCogs: inputs.latestCogs?.filter((row) => inDateRange(row.date, period)),
     shopifyDaily: inputs.shopifyDaily.filter((day) => inDateRange(day.sales_date, period)),
     orders: inputs.orders.filter((order) => orderInBounds(order, bounds)),
     gatewayPaymentDays: inputs.gatewayPaymentDays.filter((day) => inDateRange(day.payment_date, period)),
@@ -334,6 +336,11 @@ export function computePnl(inputs: PnlInputs, store: PnlStore) {
     const uncostedSales = shopifyDaily.reduce((total, day) => total + Math.max(monetary(day.net_sales_without_cost_recorded), 0), 0);
     cogs = recordedCogs + (defaultProductCogsRate === null ? 0 : uncostedSales * defaultProductCogsRate);
     if (uncostedSales > 0 && defaultProductCogsRate === null) missingCostLines = 1;
+  }
+
+  if (inputs.latestCogs) {
+    cogs = inputs.latestCogs.reduce((sum, row) => sum + row.amount, 0);
+    missingCostLines = inputs.latestCogs.filter((row) => row.source === "missing").length;
   }
 
   const convertedOrderAmount = (order: Order, value: string) => convertDatedAmount(monetary(value), order.exchange_rate, store.currency);
@@ -481,7 +488,7 @@ export function computePnl(inputs: PnlInputs, store: PnlStore) {
 
   return {
     hasData: shopifyDaily.length > 0 || includedOrders.length > 0,
-    orderCoverage: { reportedOrders, importedOrders: inputs.orders.length, usingImportedOrders },
+    orderCoverage: { latestCogs: Boolean(inputs.latestCogs), estimatedCostRows: inputs.latestCogs?.filter((row) => row.source === "estimate").length ?? 0, missingCostRows: missingCostLines, reportedOrders, importedOrders: inputs.orders.length, usingImportedOrders },
     currency: store.currency,
     timezone: timeZone,
     currencyCoverage: currencyCoverage.summary(),
