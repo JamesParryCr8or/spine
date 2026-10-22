@@ -566,3 +566,10 @@ button { cursor:pointer; }
 }
 
 .meta-oauth-selection-status{margin:16px 0;font-size:12px;line-height:1.5}.meta-oauth-selection-status p{margin:0 0 10px}.meta-oauth-selection-status button{border:1px solid #d8ddec;border-radius:8px;background:#fff;color:#5542cc;padding:8px 11px;margin:0 8px 8px 0;font:inherit;cursor:pointer}.meta-oauth-selection-status button:disabled{opacity:.55;cursor:not-allowed}
+
+.warehouse-cost-actions{display:flex;align-items:center;justify-content:flex-start;gap:16px;flex-wrap:wrap;padding:18px 20px;border-top:1px solid #e8eaf2;background:#faf9ff}
+.warehouse-save-button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;border:1px solid #5a46dc;border-radius:9px;background:#6754ea;color:#fff;padding:0 20px;font-family:inherit;font-size:13px;font-weight:700;box-shadow:0 3px 10px #5a46dc33;cursor:pointer;transition:background .15s,box-shadow .15s,transform .15s}
+.warehouse-save-button:hover:not(:disabled){background:#5742d8;box-shadow:0 5px 14px #5a46dc44;transform:translateY(-1px)}
+.warehouse-save-button:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
+.warehouse-save-status{color:#0b7a56;font-size:12px;font-weight:650;line-height:1.4}
+@media(max-width:760px){.warehouse-save-button{width:100%}}
