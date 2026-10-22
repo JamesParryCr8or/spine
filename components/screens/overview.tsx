@@ -5,17 +5,17 @@ import { StatCardSkeleton } from "@/components/ui/skeleton";
 import { reportingPeriods, type ReportingGranularity } from "@/lib/analytics/reporting-periods";
 import { useResetOnChange } from "@/lib/use-reset-on-change";
 import { fetchJson, peekJson } from "@/lib/queries/client";
-import { BarChart3, Download, ExternalLink, Info, Package, Settings, Users, WalletCards } from "lucide-react";
+import { BarChart3, Download, ExternalLink, Info, Package, Settings } from "lucide-react";
 import { WarehouseBreakdown } from "@/components/analytics/warehouse-breakdown";
-import { OrderCoverageNotice, type View, type DrilldownContext, default365DayRange, type FinanceDatePreset, financeDateRange, Trend, downloadCsv, useReportRun, type CurrencyCoverage, type CurrencyConversionCoverage, type PnlData, type PnlPeriodData, pnlSeriesKey, fetchPnlSeries, type ProductData, type CustomerData } from "@/components/analytics/shared";
+import { OrderCoverageNotice, type View, type DrilldownContext, default365DayRange, type FinanceDatePreset, financeDateRange, Trend, downloadCsv, useReportRun, type CurrencyCoverage, type CurrencyConversionCoverage, type PnlData, type PnlPeriodData, pnlSeriesKey, fetchPnlSeries, type ProductData } from "@/components/analytics/shared";
 import { PanelState, UpdatingChip } from "@/components/ui/panel-state";
 import styles from "./overview-loading.module.css";
 
-type OverviewWidgetId = "products" | "customers" | "costs";
+type OverviewWidgetId = "products";
 
-const overviewWidgetIds: OverviewWidgetId[] = ["products", "customers", "costs"];
+const overviewWidgetIds: OverviewWidgetId[] = ["products"];
 
-const overviewWidgetLabels: Record<OverviewWidgetId, string> = { products: "Top products", customers: "Customer split", costs: "Cost breakdown" };
+const overviewWidgetLabels: Record<OverviewWidgetId, string> = { products: "Top products" };
 
 type FinanceTrendPoint = {
   label: string; start: string; end: string; revenue: number; profit: number; complete: boolean;
@@ -105,7 +105,7 @@ type OverviewData = {
   bing?: { importedDays: number; start?: string | null; end?: string | null };
 };
 
-type ShopifyOverviewWidgets = { channels: Array<{ channel: string; sales: number; orders: number }>; products: Array<{ key: string; product: string; variant: string; units: number; netRevenue: number }>; customers: Array<{ label: string; sales: number; orders: number }> };
+type ShopifyOverviewWidgets = { products: Array<{ key: string; product: string; variant: string; units: number; netRevenue: number }> };
 
 export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId?: string; onDrilldown: (target: View, context?: DrilldownContext) => void; storageKey: string }) {
   const finishReportRun = useReportRun(reportRunId);
@@ -114,7 +114,6 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
   const [pnlSummary, setPnlSummary] = useState<PnlData | null>(null);
   const [pnlComparison, setPnlComparison] = useState<PnlData | null>(null);
   const [overviewProducts, setOverviewProducts] = useState<ProductData | null>(null);
-  const [overviewCustomers, setOverviewCustomers] = useState<CustomerData | null>(null);
   const [shopifyWidgets, setShopifyWidgets] = useState<ShopifyOverviewWidgets | null>(null);
   const [shopifyWidgetError, setShopifyWidgetError] = useState("");
   const [fromDate, setFromDate] = useState(default365DayRange.from);
@@ -212,14 +211,13 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
       comparisonSuffix ? `/api/analytics/overview${comparisonSuffix}` : null,
       comparisonSuffix ? `/api/analytics/pnl${comparisonSuffix}` : null,
       `/api/analytics/products${suffix}`,
-      `/api/analytics/customers${suffix}`,
     ];
     const controller = new AbortController();
     const show = (results: Array<unknown | null>) => {
-      const [overview, pnl, comparison, previousPnl, productsData, customersData] = results;
+      const [overview, pnl, comparison, previousPnl, productsData] = results;
       setLiveData(overview as OverviewData | null); setPnlSummary(pnl as PnlData | null);
       setComparisonData(comparison as OverviewData | null); setPnlComparison(previousPnl as PnlData | null);
-      setOverviewProducts(productsData as ProductData | null); setOverviewCustomers(customersData as CustomerData | null);
+      setOverviewProducts(productsData as ProductData | null);
       setLoadError(!overview);
     };
     void (async () => {
@@ -302,9 +300,12 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
     { label: "Blended MER", value: liveData.metrics.blendedMer === null ? "—" : `${liveData.metrics.blendedMer.toFixed(2)}x`, ...ratioDelta(liveData.metrics.blendedMer, comparisonData?.metrics.blendedMer, "Net sales ÷ marketing cost"), hint: liveData.metrics.marketingSpend ? `${formatter.format(liveData.metrics.marketingSpend)} imported spend` : "Connect ad spend" },
     { label: "New-customer ROAS", value: liveData.metrics.newCustomerRoas === null ? "—" : `${liveData.metrics.newCustomerRoas.toFixed(2)}x`, ...ratioDelta(liveData.metrics.newCustomerRoas, comparisonData?.metrics.newCustomerRoas, "First observed order sales"), hint: "Uses ad spend and affiliate fees for the imported window" },
     { label: "Gross profit", value: pnlSummary?.hasData ? formatter.format(pnlSummary.metrics.grossProfit) : "—", ...moneyDelta(pnlSummary?.hasData ? pnlSummary.metrics.grossProfit : null, pnlComparison?.hasData ? pnlComparison.metrics.grossProfit : null, "Net product sales plus shipping income, less refunds and COGS"), hint: pnlSummary?.metrics.missingCostLines ? `${pnlSummary.metrics.missingCostLines.toLocaleString()} lines need costs` : "Product costs covered" },
+    { label: "COGS", value: pnlSummary?.hasData ? formatter.format(pnlSummary.metrics.cogs) : "—", ...moneyDelta(pnlSummary?.hasData ? pnlSummary.metrics.cogs : null, pnlComparison?.hasData ? pnlComparison.metrics.cogs : null, "Product costs for this period", true), hint: "Latest Spine unit costs, with fallback where needed" },
     { label: "Marketing cost", value: pnlSummary?.availability.marketingSpend ? formatter.format(pnlSummary.metrics.marketingSpend) : "—", ...moneyDelta(pnlSummary?.availability.marketingSpend ? pnlSummary.metrics.marketingSpend : null, pnlComparison?.availability.marketingSpend ? pnlComparison.metrics.marketingSpend : null, "Imported ad spend", true), hint: pnlSummary?.availability.marketingSpend ? "Ads + affiliate commissions" : "Connect ad spend" },
+    { label: "Payment fees", value: pnlSummary?.availability.transactionFees ? formatter.format(pnlSummary.metrics.transactionFees) : "—", ...moneyDelta(pnlSummary?.availability.transactionFees ? pnlSummary.metrics.transactionFees : null, pnlComparison?.availability.transactionFees ? pnlComparison.metrics.transactionFees : null, "Payment processing fees", true), hint: pnlSummary?.availability.transactionFees ? "Shopify and external processor fees" : "Payment fee data unavailable" },
     { label: "Postage cost", value: pnlSummary?.availability.shippingCosts ? formatter.format(pnlSummary.metrics.merchantShippingCosts) : "—", ...moneyDelta(pnlSummary?.availability.shippingCosts ? pnlSummary.metrics.merchantShippingCosts : null, pnlComparison?.availability.shippingCosts ? pnlComparison.metrics.merchantShippingCosts : null, "Delivery and product shipping costs", true), hint: pnlSummary?.availability.shippingCosts ? "Product overrides and store postage" : "Complete postage costs" },
     { label: "Warehouse fulfilment", value: pnlSummary?.availability.handlingCosts ? formatter.format(pnlSummary.metrics.handlingCosts) : "—", ...moneyDelta(pnlSummary?.availability.handlingCosts ? pnlSummary.metrics.handlingCosts : null, pnlComparison?.availability.handlingCosts ? pnlComparison.metrics.handlingCosts : null, "Fulfilment cost by order or unit", true), hint: pnlSummary?.availability.handlingCosts ? "Store fulfilment default applied" : "Set fulfilment cost" },
+    { label: "Operating costs", value: pnlSummary?.availability.operatingExpenses ? formatter.format(pnlSummary.metrics.operatingExpenses) : "—", ...moneyDelta(pnlSummary?.availability.operatingExpenses ? pnlSummary.metrics.operatingExpenses : null, pnlComparison?.availability.operatingExpenses ? pnlComparison.metrics.operatingExpenses : null, "Fixed and variable operating expenses", true), hint: "Fixed and variable costs in the P&L" },
     { label: "Contribution margin", value: pnlSummary?.availability.marketingSpend && pnlSummary.availability.shippingCosts && pnlSummary.availability.handlingCosts ? formatter.format(pnlSummary.metrics.contributionMargin) : "—", ...moneyDelta(pnlSummary?.availability.marketingSpend && pnlSummary.availability.shippingCosts && pnlSummary.availability.handlingCosts ? pnlSummary.metrics.contributionMargin : null, pnlComparison?.availability.marketingSpend && pnlComparison.availability.shippingCosts && pnlComparison.availability.handlingCosts ? pnlComparison.metrics.contributionMargin : null, "After variable direct costs"), hint: pnlSummary?.availability.shippingCosts && pnlSummary?.availability.handlingCosts ? "Shipping and handling included" : "Complete shipping and handling costs" },
     { label: "Net profit", value: displayedNetProfit !== null ? formatter.format(displayedNetProfit) : "—", ...netProfitDelta, delta: netProfitIsProvisional ? "Provisional" : netProfitDelta.delta, hint: pnlSummary?.availability.netProfit ? `${pnlSummary.metrics.netMargin === null ? "—" : `${(pnlSummary.metrics.netMargin * 100).toFixed(1)}%`} net margin` : pnlSummary?.hasData ? "Known costs only · coverage incomplete" : "P&L data unavailable" },
   ] : [];
@@ -349,20 +350,6 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
     { label: "Microsoft Ads", amount: pnlSummary?.metrics.bingMarketingSpend ?? 0, available: Boolean(pnlSummary?.availability.bingMarketingSpend), color: "#0f766e" },
     { label: "Affiliate fees", amount: pnlSummary?.metrics.affiliateMarketingSpend ?? 0, available: Boolean(pnlSummary?.hasData), color: "#ec4899" },
   ];
-  const customerSplit = shopifyWidgets?.customers ?? (overviewCustomers ? [
-    { label: "New", sales: overviewCustomers.metrics.newCustomerSales, orders: overviewCustomers.metrics.newCustomerOrders },
-    { label: "Repeat", sales: overviewCustomers.metrics.repeatCustomerSales, orders: overviewCustomers.metrics.repeatCustomerOrders },
-    { label: "Guest", sales: overviewCustomers.metrics.guestSales, orders: overviewCustomers.metrics.guestOrders },
-  ] : []);
-  const customerSales = customerSplit.reduce((total, row) => total + row.sales, 0);
-  const costBreakdown = pnlSummary ? [
-    { label: "Product COGS", amount: pnlSummary.metrics.cogs },
-    { label: "Marketing", amount: pnlSummary.metrics.marketingSpend },
-    { label: "Payment fees", amount: pnlSummary.metrics.transactionFees },
-    { label: "Shipping & handling", amount: pnlSummary.metrics.merchantShippingCosts + pnlSummary.metrics.handlingCosts },
-    { label: "Operating expenses", amount: pnlSummary.metrics.operatingExpenses },
-  ].filter((row) => row.amount > 0) : [];
-  const totalKnownCosts = costBreakdown.reduce((total, row) => total + row.amount, 0);
   const exportOverview = () => {
     if (!liveData?.hasData) return;
     downloadCsv("shopify-overview.csv", [
@@ -423,7 +410,7 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
     {liveData?.currencyCoverage.convertedOrders ? <div className="connection-notice"><Info/><div><strong>{liveData.currencyCoverage.convertedOrders.toLocaleString()} orders converted to {liveData.currency}</strong><span>Historical rates applied: {liveData.currencyCoverage.convertedCurrencies.map((item) => `${item.currency} (${item.orders.toLocaleString()})`).join(", ")}.</span></div></div> : null}{liveData?.currencyCoverage.excludedOrders ? <div className="connection-notice"><Info/><div><strong>{liveData.currencyCoverage.excludedOrders.toLocaleString()} orders excluded from financial totals</strong><span>Reporting currency is {liveData.currency}. Excluded: {liveData.currencyCoverage.excludedCurrencies.map((item) => `${item.currency} (${item.orders.toLocaleString()})`).join(", ")}. Add explicit exchange rates before consolidating these orders.</span></div></div> : null}{liveData?.marketingCurrencyCoverage.convertedRows ? <div className="connection-notice"><Info/><div><strong>{liveData.marketingCurrencyCoverage.convertedRows.toLocaleString()} advertising spend rows converted to {liveData.currency}</strong><span>Historical rates applied: {liveData.marketingCurrencyCoverage.convertedCurrencies.map((item) => `${item.currency} (${item.rows.toLocaleString()})`).join(", ")}.</span></div></div> : null}{liveData?.marketingCurrencyCoverage.excludedRows ? <div className="connection-notice"><Info/><div><strong>{liveData.marketingCurrencyCoverage.excludedRows.toLocaleString()} advertising spend rows excluded</strong><span>Missing dated rates: {liveData.marketingCurrencyCoverage.excludedCurrencies.map((item) => `${item.currency} (${item.rows.toLocaleString()})`).join(", ")}.</span></div></div> : null}
     <div className="report-export">{hasLiveData ? <button className="export-button" onClick={exportOverview}><Download/> Export overview CSV</button> : null}<button className="export-button" onClick={() => setCustomizingWidgets((current) => !current)}><Settings/> {customizingWidgets ? "Done customizing" : "Customize dashboard"}</button></div>
     {customizingWidgets ? <section className="widget-customizer" aria-label="Dashboard widget settings"><div><strong>Summary widgets</strong><span>Choose what appears and arrange the reading order.</span></div><div className="widget-customizer-list">{widgetPreferences.order.map((id, index) => <div className="widget-customizer-row" key={id}><label><input type="checkbox" checked={widgetVisible(id)} onChange={() => toggleWidget(id)}/><span>{overviewWidgetLabels[id]}</span></label><div><button type="button" disabled={index === 0} onClick={() => moveWidget(id, -1)} aria-label={`Move ${overviewWidgetLabels[id]} earlier`}>↑</button><button type="button" disabled={index === widgetPreferences.order.length - 1} onClick={() => moveWidget(id, 1)} aria-label={`Move ${overviewWidgetLabels[id]} later`}>↓</button></div></div>)}</div><button type="button" className="panel-drilldown" onClick={resetWidgets}>Restore defaults</button></section> : null}
-    <section className="metric-grid">{loading ? Array.from({ length: 14 }, (_, index) => <StatCardSkeleton key={index}/>) : liveMetrics.map((metric) => <button type="button" className="metric-card drilldown-card" key={metric.label} onClick={() => onDrilldown(metricReport(metric.label), drilldownRange)} aria-label={`Open ${metric.label} details`}>
+    <section className="metric-grid">{loading ? Array.from({ length: 18 }, (_, index) => <StatCardSkeleton key={index}/>) : liveMetrics.map((metric) => <button type="button" className="metric-card drilldown-card" key={metric.label} onClick={() => onDrilldown(metricReport(metric.label), drilldownRange)} aria-label={`Open ${metric.label} details`}>
       <div className="metric-head"><span>{metric.label}</span><ExternalLink /></div>
       <strong>{metric.value}</strong>
       <div className="metric-foot"><Trend positive={metric.positive} neutral={metric.label === "Net profit" && netProfitIsProvisional}>{metric.delta}</Trend><span>{metric.hint}</span></div>
@@ -454,8 +441,6 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
         {hasLiveData ? <ul className="health-list"><li><span className="status success"/>Shopify sales loaded <b>{liveData!.metrics.orders.toLocaleString()} orders</b></li><li><span className="status success"/>Data window <b>{liveData!.range.start} – {liveData!.range.end}</b></li><li><span className={(liveData!.meta?.importedDays || liveData!.google?.importedDays || liveData!.bing?.importedDays) ? "status success" : "status warn"}/>Marketing spend <b>{(liveData!.meta?.importedDays || liveData!.google?.importedDays || liveData!.bing?.importedDays) ? `${liveData!.meta?.importedDays ?? 0} Meta days · ${liveData!.google?.importedDays ?? 0} Google days · ${liveData!.bing?.importedDays ?? 0} Microsoft days` : "No spend loaded"}</b></li></ul> : <ul className="health-list"><li><span className="status success"/>Shopify synced <b>2m ago</b></li><li><span className="status success"/>Ad accounts connected <b>2 of 2</b></li><li><span className="status warn"/>Missing product costs <b>14 SKUs</b></li></ul>}
       </article>
       {widgetVisible("products") ? <article className="panel report-panel" style={{ order: widgetOrder("products") }}><div className="panel-head"><div><span className="eyebrow">PRODUCTS</span><h2>Top products by net revenue</h2></div><button className="panel-drilldown" onClick={() => onDrilldown("Products", drilldownRange)}>View report <ExternalLink/></button></div>{topProducts.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Product</th><th>Units</th><th>Net revenue</th><th>Share of top five</th></tr></thead><tbody>{topProducts.map((product) => { const share = topProductRevenue ? Math.max(0, product.netRevenue) / topProductRevenue * 100 : 0; return <tr key={product.key}><td><strong>{product.product}</strong><small>{product.variant}</small></td><td>{product.units.toLocaleString()}</td><td>{formatter.format(product.netRevenue)}</td><td><div className="overview-product-share"><span>{topProductRevenue ? `${share.toFixed(1)}%` : "—"}</span><div className="overview-product-track" role="img" aria-label={`${product.product}: ${share.toFixed(1)} percent of top five revenue`}><i style={{ width: `${Math.max(0, product.netRevenue) / topProductMaximum * 100}%` }}/></div></div></td></tr>; })}</tbody></table></div> : <div className="cost-empty"><Package/><strong>No product sales in this period</strong><span>{shopifyWidgetError}</span></div>}</article> : null}
-      {widgetVisible("customers") ? <article className="panel report-panel" style={{ order: widgetOrder("customers") }}><div className="panel-head"><div><span className="eyebrow">CUSTOMERS</span><h2>Customer sales split</h2></div><button className="panel-drilldown" onClick={() => onDrilldown("Customers", drilldownRange)}>View report <ExternalLink/></button></div>{customerSplit.length ? <div className="report-summary">{customerSplit.map((row) => <div key={row.label}><span>{row.label}</span><strong>{formatter.format(row.sales)}</strong><small>{row.orders.toLocaleString()} orders · {customerSales ? (row.sales / customerSales * 100).toFixed(1) : "0.0"}%</small></div>)}</div> : <div className="cost-empty"><Users/><strong>No customer sales in this period</strong><span>{shopifyWidgetError}</span></div>}</article> : null}
-      {widgetVisible("costs") ? <article className="panel report-panel" style={{ order: widgetOrder("costs") }}><div className="panel-head"><div><span className="eyebrow">COSTS</span><h2>Known cost breakdown</h2></div><button className="panel-drilldown" onClick={() => onDrilldown("Profit & Loss", drilldownRange)}>View report <ExternalLink/></button></div>{costBreakdown.length ? <div className="report-summary">{costBreakdown.map((row) => <div key={row.label}><span>{row.label}</span><strong>{formatter.format(row.amount)}</strong><small>{totalKnownCosts ? (row.amount / totalKnownCosts * 100).toFixed(1) : "0.0"}% of known costs</small></div>)}</div> : <div className="cost-empty"><WalletCards/><strong>No cost data in this period</strong></div>}</article> : null}
     </section>
   </>;
 }
