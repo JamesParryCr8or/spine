@@ -39,8 +39,13 @@ export function WarehouseCostSettings() {
   };
   return <section className="panel report-panel" aria-busy={busy}>
     <div className="panel-head"><div><span className="eyebrow">SHOPIFY WAREHOUSES · {currency}</span><h2>Warehouse fulfilment costs</h2></div><button type="button" className="row-action" disabled={busy} onClick={() => void load()}>Reload warehouses</button></div>
-    <p>Postage is charged once per order at each warehouse, and picking per fulfilled unit. Storage and admin are optional monthly costs, prorated by calendar day. Set the start date to include historical fulfilments.</p>
-    <p>Saving any warehouse rates switches reporting to this method and replaces the store postage/picking defaults, product shipping overrides and custom shipping/handling rules. Configure every warehouse used in the period; missing rates make profit provisional. Removing all warehouse rates restores the previous method.</p>
+    <div className="warehouse-cost-copy">
+      <p>Set postage per dispatched order and picking per fulfilled unit for each warehouse. Optional monthly storage and admin costs are spread across calendar days. Choose a start date that covers historical fulfilments.</p>
+      <div className="warehouse-cost-callout">
+        <strong>How this affects reports</strong>
+        <p>Warehouse rates replace store postage and picking defaults, product shipping overrides, and custom shipping and handling rules. Add rates for every warehouse used in the report period; missing rates keep profit provisional. Remove all warehouse rates to restore the previous method.</p>
+      </div>
+    </div>
     {error && <p role="alert" className="cost-warning">{error}</p>}
     {busy && <p role="status">Loading warehouse costs…</p>}
     <div className="table-scroll"><table className="data-table"><thead><tr><th>Use</th><th>Warehouse</th><th>Postage / order</th><th>Picking / unit</th><th>Storage / month</th><th>Admin / month</th><th>From</th><th>Until (optional)</th></tr></thead><tbody>{locations.map((location) => {

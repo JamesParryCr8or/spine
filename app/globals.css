@@ -573,3 +573,10 @@ button { cursor:pointer; }
 .warehouse-save-button:disabled{opacity:.55;cursor:not-allowed;box-shadow:none}
 .warehouse-save-status{color:#0b7a56;font-size:12px;font-weight:650;line-height:1.4}
 @media(max-width:760px){.warehouse-save-button{width:100%}}
+
+.warehouse-cost-copy{padding:0 24px 20px;max-width:920px;color:#59647a;font-size:13px;line-height:1.6}
+.warehouse-cost-copy>p{margin:0 0 14px}
+.warehouse-cost-callout{border:1px solid #e4dfff;border-radius:10px;background:#f8f7ff;padding:12px 15px}
+.warehouse-cost-callout strong{display:block;margin-bottom:3px;color:#4535ad;font-size:12px;font-weight:750}
+.warehouse-cost-callout p{margin:0;color:#59647a}
+@media(max-width:760px){.warehouse-cost-copy{padding:0 16px 18px}.warehouse-cost-callout{padding:11px 13px}}
