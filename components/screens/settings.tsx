@@ -1,5 +1,6 @@
 "use client";
 
+import { WarehouseCostSettings } from "@/components/settings/warehouse-costs";
 import { useCallback, useEffect, useState } from "react";
 import { WeeklyReportSettings } from "@/components/weekly-report-settings";
 import { SyncScheduleSettings } from "@/components/sync-schedule-settings";
@@ -173,7 +174,7 @@ export function SettingsView() {
         <FormGrid><FormField label="Average order / deal value"><TextInput inputMode="decimal" value={averageOrderValue} disabled={!canManage || savingAverageOrderValue} onChange={(event) => setAverageOrderValue(event.target.value)} placeholder="250"/></FormField></FormGrid>
         {saveButton("Save value", savingAverageOrderValue, !Number.isFinite(Number(averageOrderValue)) || Number(averageOrderValue) < 0, () => void saveAverageOrderValue())}
       </Panel>
-    </> : <Panel eyebrow="Order economics" title="Fulfilment and postage" description="Product shipping overrides take priority over the postage default. Use the COGS rate only when a product does not have its own Shopify or manual unit cost." actions={<span className="text-ds-small text-ds-muted">{costDefaults.currency}</span>}>
+    </> : <Panel eyebrow="Order economics" title="Default costs" description="Postage and fulfilment defaults apply until warehouse rates are configured below. Product shipping overrides apply only to this default method. The COGS percentage is the fallback for products without a unit cost." actions={<span className="text-ds-small text-ds-muted">{costDefaults.currency}</span>}>
       <FormGrid>
         <FormField label="Default COGS rate (%)"><TextInput inputMode="decimal" value={costDefaults.defaultCogsPercent} disabled={!canManage} onChange={(event) => setCostDefaults({ ...costDefaults, defaultCogsPercent: event.target.value })}/></FormField>
         <span aria-hidden="true" className="hidden sm:block"/>
@@ -184,6 +185,7 @@ export function SettingsView() {
       </FormGrid>
       {saveButton("Save defaults", savingDefaults, false, () => void saveCostDefaults())}
     </Panel>}
+    {businessModel !== "lead_generation" && <WarehouseCostSettings/>}
     <SyncScheduleSettings/>
     <WeeklyReportSettings/>
 

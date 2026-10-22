@@ -10,6 +10,7 @@ import { buildPnlExport, formatPnlValue, type PnlExportGroup } from "@/lib/expor
 import type { ColumnStyle } from "@/lib/exports/xlsx";
 import { downloadXlsx } from "@/lib/exports/xlsx";
 import { ChevronDown, Download, Info } from "lucide-react";
+import { WarehouseBreakdown } from "@/components/analytics/warehouse-breakdown";
 import { OrderCoverageNotice, type DrilldownContext, default365DayRange, type FinanceDatePreset, financeDateRange, downloadCsv, useReportRun, type PnlData, type PnlPeriodData, pnlSeriesKey, fetchPnlSeries } from "@/components/analytics/shared";
 import { PanelState, UpdatingChip } from "@/components/ui/panel-state";
 
@@ -317,7 +318,7 @@ export function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey 
     { section: "Transaction costs", label: "Estimated external processor fees", value: (data) => data.externalPaymentFees?.available ? (-data.metrics.estimatedProcessorFees) : "Not imported" },
     { section: "Transaction costs", label: "Estimated Shopify third-party fees", value: (data) => !data.externalPaymentFees?.available ? "Not imported" : data.externalPaymentFees.surchargeRate !== null ? (-data.metrics.estimatedShopifySurcharge) : "Select Shopify plan" },
     { section: "Transaction costs", label: "Total payment fees", value: (data) => (-data.metrics.transactionFees) },
-    { section: "Shipping and handling", label: "Store fulfilment fallback", value: (data) => (-data.metrics.shippingFallbackCosts) },
+    { section: "Shipping and handling", label: "Postage / fulfilment costs", value: (data) => (-data.metrics.shippingFallbackCosts) },
     { section: "Shipping and handling", label: "Variant shipping overrides", value: (data) => (-data.metrics.variantShippingCosts) },
     { section: "Shipping and handling", label: "Merchant shipping and fulfilment", value: (data) => data.availability.shippingCosts ? (-data.metrics.merchantShippingCosts) : "Coverage needed" },
     { section: "Shipping and handling", label: "Handling and pick/pack", value: (data) => data.availability.handlingCosts ? (-data.metrics.handlingCosts) : "Coverage needed" },
@@ -333,6 +334,15 @@ export function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey 
     { section: "Contribution and net profit", label: "Contribution margin", value: (data) => data.availability.marketingSpend && data.availability.shippingCosts && data.availability.handlingCosts ? (data.metrics.contributionMargin) : "Coverage needed" },
     { section: "Contribution and net profit", label: "Net profit", value: (data) => data.availability.netProfit && data.metrics.netProfit !== null ? (data.metrics.netProfit) : "Coverage needed" },
   ];
+  const warehouseNames = new Map([pnl, comparison, ...periodData.map((entry) => entry.data)].flatMap((data) => data?.warehouseBreakdown?.map((row) => [row.locationId, row.name] as const) ?? []));
+  const warehouseRows: PnlRow[] = [...warehouseNames].flatMap(([locationId, name]) => (["postage", "picking", "storage", "admin"] as const).map((key): PnlRow => ({
+    section: "Warehouse breakdown (included above)", label: name + " — " + key,
+    value: (data) => {
+      const row = data.warehouseBreakdown?.find((item) => item.locationId === locationId);
+      return row?.missing ? "Warehouse rate needed" : -(row?.[key] ?? 0);
+    },
+  })));
+  pnlRows.splice(pnlRows.findIndex((row) => row.section === "Contribution and net profit"), 0, ...warehouseRows);
   const processorNames = [...new Set([pnl, comparison, ...periodData.map((entry) => entry.data)]
     .flatMap((data) => data?.externalPaymentFees?.byGateway.map((gateway) => gateway.gateway) ?? []))].sort();
   const processorRowIndex = pnlRows.findIndex((row) => row.label === "Estimated external processor fees");
@@ -487,6 +497,8 @@ export function ProfitLoss({ savedPreset, reportRunId, initialRange, storageKey 
     {loading || periodLoading ? <PanelState status="loading" message="Calculating reconciled periods…"/> : null}
     {pnl.microsoftAdsImportError && !pnl.availability.bingMarketingSpend ? <div className="connection-notice"><Info/><div><strong>Microsoft Ads spend could not be imported</strong><span>{pnl.microsoftAdsImportError}</span></div></div> : null}
     <OrderCoverageNotice coverage={pnl.orderCoverage}/>
+    <WarehouseBreakdown data={pnl}/>
+    {pnl.warehouseBreakdown && <div className="connection-notice"><div><strong>Fulfilment costs by Shopify warehouse</strong><span>Postage is per order per warehouse; picking is per fulfilled unit. Storage and admin are monthly fixed costs prorated daily. Costs follow the fulfilment date. Warehouse rows below are already included in shipping, handling and fixed operating totals.</span>{pnl.warehouseBreakdown.some((row) => row.missing) && <span role="alert">Some fulfilled activity has no active warehouse rate. Profit is provisional until the warehouse and rate dates are configured.</span>}</div></div>}
     {!pnl.hasData ? <div className="connection-notice"><Info/><div><strong>Connect Shopify to build your income statement</strong><span>Your period views will populate after the first sync.</span></div></div> : null}{pnl.currencyCoverage.convertedOrders ? <div className="connection-notice"><Info/><div><strong>{pnl.currencyCoverage.convertedOrders.toLocaleString()} orders converted in this P&amp;L</strong><span>Historical rates applied into {pnl.currency}: {pnl.currencyCoverage.convertedCurrencies.map((item) => `${item.currency} (${item.orders.toLocaleString()})`).join(", ")}.</span></div></div> : null}{pnl.currencyCoverage.excludedOrders ? <div className="connection-notice"><Info/><div><strong>{pnl.currencyCoverage.excludedOrders.toLocaleString()} orders excluded from this P&amp;L</strong><span>Reporting currency is {pnl.currency}. Excluded: {pnl.currencyCoverage.excludedCurrencies.map((item) => `${item.currency} (${item.orders.toLocaleString()})`).join(", ")}. Spine never combines currencies without an explicit dated exchange rate.</span></div></div> : null}{pnl.marketingCurrencyCoverage.convertedRows ? <div className="connection-notice"><Info/><div><strong>{pnl.marketingCurrencyCoverage.convertedRows.toLocaleString()} advertising spend rows converted</strong><span>Historical rates applied into {pnl.currency}: {pnl.marketingCurrencyCoverage.convertedCurrencies.map((item) => `${item.currency} (${item.rows.toLocaleString()})`).join(", ")}.</span></div></div> : null}{pnl.marketingCurrencyCoverage.excludedRows ? <div className="connection-notice"><Info/><div><strong>{pnl.marketingCurrencyCoverage.excludedRows.toLocaleString()} advertising spend rows excluded</strong><span>Net profit stays provisional until dated rates exist for {pnl.marketingCurrencyCoverage.excludedCurrencies.map((item) => `${item.currency} (${item.rows.toLocaleString()})`).join(", ")}.</span></div></div> : null}
     {pnl.hasData && !pnl.availability.transactionFeesComplete ? <div className="connection-notice"><Info/><div><strong>Shopify payment fees need attention</strong><span>{pnl.transactionFeeCoverage?.reportedFeeDays ?? 0} of {pnl.transactionFeeCoverage?.salesDays ?? 0} sales days have imported fees. {pnl.transactionFeeCoverage?.latestReportedFeeDate ? `Latest fee date: ${pnl.transactionFeeCoverage.latestReportedFeeDate}.` : "No fees were returned for this period."} Net profit remains provisional until fees are covered.</span><button type="button" className="secondary-button" disabled={feeRefreshBusy} onClick={() => void refreshShopifyFees()}>{feeRefreshBusy ? "Refreshing Shopify fees…" : "Refresh Shopify fees"}</button>{feeRefreshStatus ? <small>{feeRefreshStatus}</small> : null}</div></div> : null}
     {pnl.hasData ? <div className="connection-notice"><Info/><div><strong>{reconciliationIssues.length ? "Reconciliation status: provisional" : "Reconciliation status: complete"}</strong><span>{reconciliationIssues.length ? reconciliationIssues.join(" · ") : "All required cost inputs are covered for this period."}</span></div></div> : null}

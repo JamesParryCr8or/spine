@@ -1,3 +1,4 @@
+import { warehouseCosts, type WarehouseRate, type WarehouseActivity } from "./warehouse-costs.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createCurrencyCoverage } from "./currency-coverage.ts";
@@ -22,7 +23,7 @@ type Refund = { order_id: string; total_refunded: string };
 type Transaction = ShopifyTransactionFee & { order_id: string; gateway: string | null; amount: string; processed_at_shopify: string | null; created_at_shopify: string };
 type PaymentFeeRuleRow = { gateway: string; percentage_rate: string; fixed_fee: string; tax_rate: string; minimum_fee: string; currency: string; effective_from: string; effective_to: string | null };
 type ProductShippingCostRow = ProductShippingCost & { currency: string };
-type StoreCostDefault = { cogs_method?: "effective_dates" | "latest"; fulfilment_amount: string; fulfilment_basis: "orders" | "units"; postage_amount: string; postage_basis: "orders" | "units"; default_cogs_percent: string; currency: string };
+type StoreCostDefault = { warehouse_costs?: WarehouseRate[]; cogs_method?: "effective_dates" | "latest"; fulfilment_amount: string; fulfilment_basis: "orders" | "units"; postage_amount: string; postage_basis: "orders" | "units"; default_cogs_percent: string; currency: string };
 type CustomCost = { name: string; category: string; amount: string; currency: string; cadence: "one_off" | "daily" | "weekly" | "monthly" | "annual"; allocation_basis: "fixed" | "orders" | "units" | "revenue"; effective_from: string; effective_to: string | null };
 type MarketingRow = { date: string; spend: string; currency: string };
 type ShopifyDaily = {
@@ -45,6 +46,7 @@ export type PnlRange = { from: string | null; to: string | null };
  */
 export type PnlInputs = {
   range: PnlRange;
+  warehouseActivity?: WarehouseActivity[];
   latestCogs?: Array<{ date: string; amount: number; source: "spine" | "shopify" | "estimate" | "missing" }>;
   shopifyDaily: ShopifyDaily[];
   exchangeRates: DatedExchangeRate[];
@@ -189,7 +191,7 @@ export async function loadPnlInputs(
     marketing("meta_ad_insights_daily", "date_start"),
     marketing("google_ads_insights_daily", "insight_date"),
     marketing("bing_ads_insights_daily", "insight_date"),
-    supabase.from("store_cost_defaults").select("fulfilment_amount,fulfilment_basis,postage_amount,postage_basis,default_cogs_percent,currency,cogs_method").eq("store_id", store.id).maybeSingle(),
+    supabase.from("store_cost_defaults").select("fulfilment_amount,fulfilment_basis,postage_amount,postage_basis,default_cogs_percent,currency,cogs_method,warehouse_costs").eq("store_id", store.id).maybeSingle(),
     supabase.from("payment_fee_estimate_settings").select("shopify_plan,plan_override,default_percentage_rate,default_fixed_fee,surcharge_rate_override").eq("store_id", store.id).maybeSingle(),
     supabase.from("data_connections").select("status,last_error").eq("store_id", store.id).eq("provider", "bing_ads").maybeSingle(),
     loadBillingEstimates(supabase, store.id),
@@ -242,6 +244,7 @@ export function slicePnlInputs(inputs: PnlInputs, store: PnlStore, period: PnlRa
   return {
     ...inputs,
     range: period,
+    warehouseActivity: inputs.warehouseActivity?.filter((row) => inDateRange(row.date, period)),
     latestCogs: inputs.latestCogs?.filter((row) => inDateRange(row.date, period)),
     shopifyDaily: inputs.shopifyDaily.filter((day) => inDateRange(day.sales_date, period)),
     orders: inputs.orders.filter((order) => orderInBounds(order, bounds)),
@@ -426,19 +429,28 @@ export function computePnl(inputs: PnlInputs, store: PnlStore) {
   const bingMarketingSpend = convertedMarketingSpend(bingInsights);
   const marketingCoverage = marketingCurrencyCoverage.summary();
 
+  const warehouseMode = Boolean(inputs.warehouseActivity);
+  const warehouseFrom = inputs.range.from ?? rangeStart;
+  const warehouseTo = inputs.range.to ?? rangeEnd;
+  const warehouseBreakdown = warehouseMode && warehouseFrom && warehouseTo ? warehouseCosts(inputs.storeCostDefault?.warehouse_costs ?? [], inputs.warehouseActivity!, warehouseFrom, warehouseTo) : [];
+  const warehouseStorage = warehouseBreakdown.reduce((sum, row) => sum + row.storage, 0);
+  const warehouseAdmin = warehouseBreakdown.reduce((sum, row) => sum + row.admin, 0);
+  const warehouseMissing = warehouseBreakdown.reduce((sum, row) => sum + row.missing, 0);
   const billingCosts = billingPeriodCosts(inputs.billingCharges ?? [], store.currency, exchangeRates, inputs.range.from ?? rangeStart, inputs.range.to ?? rangeEnd);
   const billingEstimate = estimateBillingCosts(inputs.billingCharges ?? [], store.currency, exchangeRates, inputs.billingCoverage ?? [], inputs.billingEstimateSettings ?? { enabled: true, overrides: {} }, inputs.billingToday ?? reportingDateKey(new Date(), store.timezone || "Europe/London"), inputs.range.from ?? rangeStart, inputs.range.to ?? rangeEnd);
   const affiliateMarketingSpend = billingCosts.marketing + billingEstimate.marketing;
   const marketingSpend = metaMarketingSpend + googleMarketingSpend + bingMarketingSpend + affiliateMarketingSpend;
   const marketingSpendAvailable = (marketingCoverage.includedRows > 0 || affiliateMarketingSpend !== 0) && marketingCoverage.excludedRows === 0;
-  let fixedOperatingExpenses = billingCosts.fixed + billingEstimate.fixed;
+  let fixedOperatingExpenses = billingCosts.fixed + billingEstimate.fixed + warehouseStorage + warehouseAdmin;
   let variableOperatingExpenses = billingCosts.variable + billingEstimate.variable;
-  let merchantShippingCosts = variantShippingCosts + defaultPostageCosts;
-  let handlingCosts = defaultFulfilmentCosts;
+  if (warehouseMode) variantShippingCosts = 0;
+  let merchantShippingCosts = warehouseMode ? warehouseBreakdown.reduce((sum, row) => sum + row.postage, 0) : variantShippingCosts + defaultPostageCosts;
+  let handlingCosts = warehouseMode ? warehouseBreakdown.reduce((sum, row) => sum + row.picking, 0) : defaultFulfilmentCosts;
   let shippingCostsAvailable = Boolean(usableStoreCostDefault);
   let handlingCostsAvailable = Boolean(usableStoreCostDefault);
   let unallocatedOperatingCosts = billingCosts.missingRates + billingEstimate.missingRates;
   for (const cost of inputs.operatingCosts) {
+    if (warehouseMode && operatingCostBucket(cost.category) !== "operating") continue;
     if (!rangeStart || !rangeEnd || cost.currency !== store.currency) {
       unallocatedOperatingCosts += 1;
       continue;
@@ -482,12 +494,14 @@ export function computePnl(inputs: PnlInputs, store: PnlStore) {
   }));
   const shippingFallbackCosts = merchantShippingCosts - variantShippingCosts;
   shippingCostsAvailable = lines.length > 0 ? shippingCoverage.missingLines === 0 : Boolean(usableStoreCostDefault || defaultShippingCosts.length > 0);
+  if (warehouseMode) { shippingCostsAvailable = warehouseMissing === 0; handlingCostsAvailable = warehouseMissing === 0; }
   const netProfitAvailable = transactionFeesComplete && marketingSpendAvailable && shippingCostsAvailable && handlingCostsAvailable && missingCostLines === 0 && unallocatedOperatingCosts === 0;
   const calculated = calculateProfitAndLoss({ ...totals, refunds, cogs, marketingSpend, transactionFees, merchantShippingCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, complete: netProfitAvailable });
   const microsoftConnection = inputs.microsoftConnection;
 
   return {
-    hasData: shopifyDaily.length > 0 || includedOrders.length > 0,
+    hasData: shopifyDaily.length > 0 || includedOrders.length > 0 || warehouseBreakdown.length > 0,
+    warehouseBreakdown: warehouseMode ? warehouseBreakdown : undefined,
     orderCoverage: { latestCogs: Boolean(inputs.latestCogs), estimatedCostRows: inputs.latestCogs?.filter((row) => row.source === "estimate").length ?? 0, missingCostRows: missingCostLines, reportedOrders, importedOrders: inputs.orders.length, usingImportedOrders },
     currency: store.currency,
     timezone: timeZone,
@@ -496,7 +510,7 @@ export function computePnl(inputs: PnlInputs, store: PnlStore) {
     microsoftAdsImportError: microsoftConnection?.last_error ?? null,
     transactionFeeCoverage: { salesDays: salesDays.length, reportedFeeDays: reportedFeeDays.length, latestReportedFeeDate: reportedFeeDays.at(-1)?.sales_date ?? null },
     calculatedAt: new Date().toISOString(),
-    metrics: { affiliateMarketingSpend, shopifyBillingFixedActuals: billingCosts.fixed, shopifyBillingFixedEstimates: billingEstimate.fixed, shopifyBillingVariableActuals: billingCosts.variable, shopifyBillingVariableEstimates: billingEstimate.variable, shopifyBillingActuals: billingCosts.total, shopifyBillingEstimates: billingEstimate.total, ...totals, refunds, cogs, ...calculated, marketingSpend, metaMarketingSpend, googleMarketingSpend, bingMarketingSpend, transactionFees, shopifyPaymentFees, estimatedProcessorFees: externalPaymentFees.processorFees, estimatedShopifySurcharge: externalPaymentFees.shopifySurcharge, merchantShippingCosts, variantShippingCosts, shippingFallbackCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, orders: shopifyDaily.length ? shopifyDaily.reduce((total, day) => total + day.orders, 0) : includedOrders.length, unitsSold: dailyUnitCount || totalOrderUnits, missingCostLines, missingShippingLines: shippingCoverage.missingLines, shippingOverrideLines: shippingCoverage.overrideLines, shippingFallbackLines: shippingCoverage.fallbackLines, shippingFallbackRate: shippingCoverage.fallbackRate, unallocatedOperatingCosts },
+    metrics: { warehouseStorage, warehouseAdmin, affiliateMarketingSpend, shopifyBillingFixedActuals: billingCosts.fixed, shopifyBillingFixedEstimates: billingEstimate.fixed, shopifyBillingVariableActuals: billingCosts.variable, shopifyBillingVariableEstimates: billingEstimate.variable, shopifyBillingActuals: billingCosts.total, shopifyBillingEstimates: billingEstimate.total, ...totals, refunds, cogs, ...calculated, marketingSpend, metaMarketingSpend, googleMarketingSpend, bingMarketingSpend, transactionFees, shopifyPaymentFees, estimatedProcessorFees: externalPaymentFees.processorFees, estimatedShopifySurcharge: externalPaymentFees.shopifySurcharge, merchantShippingCosts, variantShippingCosts, shippingFallbackCosts, handlingCosts, fixedOperatingExpenses, variableOperatingExpenses, orders: shopifyDaily.length ? shopifyDaily.reduce((total, day) => total + day.orders, 0) : includedOrders.length, unitsSold: dailyUnitCount || totalOrderUnits, missingCostLines, missingShippingLines: shippingCoverage.missingLines, shippingOverrideLines: shippingCoverage.overrideLines, shippingFallbackLines: shippingCoverage.fallbackLines, shippingFallbackRate: shippingCoverage.fallbackRate, unallocatedOperatingCosts },
     externalPaymentFees: { ...externalPaymentFees, available: gatewayPaymentDays.length > 0 },
     period: rangeStart && rangeEnd ? { start: rangeStart, end: rangeEnd } : null,
     availability: { marketingSpend: marketingSpendAvailable, metaMarketingSpend: metaInsights.length > 0, googleMarketingSpend: googleInsights.length > 0, bingMarketingSpend: bingInsights.length > 0 || (microsoftConnection?.status === "connected" && !microsoftConnection.last_error), transactionFees: transactionFeesAvailable, transactionFeesComplete, shippingCosts: shippingCostsAvailable, handlingCosts: handlingCostsAvailable, operatingExpenses: true, netProfit: netProfitAvailable },

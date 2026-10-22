@@ -1,4 +1,5 @@
 import "server-only";
+import { loadWarehouseActivity } from "@/lib/shopify/warehouse-activity";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadPnlInputs, type PnlStore, type PnlRange, type PnlInputs } from "./pnl-engine";
 import { latestCost } from "./effective-cost";
@@ -8,13 +9,19 @@ import { runStoreShopifyQl } from "@/lib/shopify/shopifyql";
 /** Call only after workspace authorization (or from the authenticated report job). */
 export async function loadReportingPnlInputs(supabase: SupabaseClient, store: PnlStore & { shopify_domain?: string | null }, range: PnlRange) {
   const loaded = await loadPnlInputs(supabase, store, range);
-  if (!loaded.ok || loaded.inputs.storeCostDefault?.cogs_method !== "latest") return loaded;
+  if (!loaded.ok) return loaded;
   const inputs = loaded.inputs;
   const dates = [...inputs.shopifyDaily.map((row) => row.sales_date), ...inputs.orders.flatMap((row) => row.processed_at ? [row.processed_at.slice(0, 10)] : [])].sort();
   const from = range.from ?? dates[0];
   const to = range.to ?? dates.at(-1);
-  inputs.latestCogs = [];
   if (!from || !to) return loaded;
+  if (inputs.storeCostDefault?.warehouse_costs?.length) {
+    if (inputs.storeCostDefault.currency !== store.currency) return { ok: false as const, error: "Re-save warehouse rates in the store reporting currency" };
+    try { inputs.warehouseActivity = await loadWarehouseActivity(store, from, to); }
+    catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Could not load warehouse fulfilments" }; }
+  }
+  if (inputs.storeCostDefault?.cogs_method !== "latest") return loaded;
+  inputs.latestCogs = [];
   const byGid = new Map(inputs.variants.map((variant) => [variant.shopify_gid, variant]));
   const skuVariants = new Map<string, typeof inputs.variants>();
   for (const variant of inputs.variants) {
