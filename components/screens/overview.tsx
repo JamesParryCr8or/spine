@@ -19,12 +19,12 @@ const overviewWidgetLabels: Record<OverviewWidgetId, string> = { products: "Top 
 
 type FinanceTrendPoint = {
   label: string; start: string; end: string; revenue: number; profit: number; complete: boolean;
-  cogs: number; metaMarketing: number; googleMarketing: number; bingMarketing: number; affiliateMarketing: number; paymentFees: number; paymentFeesAvailable: boolean; shipping: number; operating: number;
+  discounts: number; refunds: number; cogs: number; metaMarketing: number; googleMarketing: number; bingMarketing: number; affiliateMarketing: number; paymentFees: number; paymentFeesAvailable: boolean; shipping: number; operating: number;
 };
 
 function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrendPoint[]; formatter: Intl.NumberFormat; onOpen: (point: FinanceTrendPoint) => void }) {
   const [hovered, setHovered] = useState<number | null>(null);
-  const [hoveredSegment, setHoveredSegment] = useState<{ index: number; value: string; x: number; y: number } | null>(null);
+  const [hoveredSegment, setHoveredSegment] = useState<{ index: number; label: string; value: string; x: number; y: number } | null>(null);
   if (!points.length) return <div className="cost-empty"><BarChart3/><strong>No trend data in this period</strong></div>;
   const width = 920, height = 330, left = 58, right = 18, top = 18, bottom = 292;
   const zeroY = (top + bottom) / 2;
@@ -33,7 +33,7 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
   const labelEvery = Math.max(1, Math.ceil(points.length / 8));
   const dataMaximum = Math.max(
     ...points.flatMap((point) => [point.revenue, Math.abs(point.profit)]),
-    ...points.map((point) => point.cogs + point.metaMarketing + point.googleMarketing + point.bingMarketing + point.paymentFees + point.shipping + point.operating + point.affiliateMarketing),
+    ...points.map((point) => point.discounts + point.refunds + point.cogs + point.metaMarketing + point.googleMarketing + point.bingMarketing + point.paymentFees + point.shipping + point.operating + point.affiliateMarketing),
     1,
   );
   const niceStep = (value: number) => {
@@ -60,21 +60,25 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
   const positiveTicks = [0, 1, 2, 3, 4].map((index) => ({ index, y: zeroY - (zeroY - top) * index / 4, value: axisStep * index }));
   const negativeTicks = [1, 2, 3, 4].map((index) => ({ index, y: zeroY + (bottom - zeroY) * index / 4, value: -axisStep * index }));
   const line = points.map((point, index) => `${left + step * index + step / 2},${y(point.profit)}`).join(" ");
-  const costColors = ["#f59e0b", "#1877f2", "#34a853", "#0f766e", "#a855f7", "#06b6d4", "#64748b", "#ec4899"];
+  const costColors = ["#fb7185", "#e11d48", "#f59e0b", "#1877f2", "#34a853", "#0f766e", "#a855f7", "#06b6d4", "#64748b", "#ec4899"];
+  const costLabels = ["Discounts", "Refunds", "COGS", "Facebook ads", "Google Ads", "Microsoft Ads", "Payment fees", "Shipping & handling", "Operating costs", "Affiliate fees"];
   const active = hovered === null ? null : points[hovered];
   const tooltipRows = active ? [
-    { label: "Revenue", value: formatter.format(active.revenue), color: "#7357ff" },
-    { label: "COGS", value: `-${formatter.format(active.cogs)}`, color: costColors[0] },
-    { label: "Facebook ads", value: `-${formatter.format(active.metaMarketing)}`, color: costColors[1] },
-    { label: "Google Ads", value: `-${formatter.format(active.googleMarketing)}`, color: costColors[2] },
-    { label: "Microsoft Ads", value: `-${formatter.format(active.bingMarketing)}`, color: costColors[3] },
-    { label: "Affiliate commissions & fees", value: `-${formatter.format(active.affiliateMarketing)}`, color: costColors[7] },
-    { label: "Payment fees", value: active.paymentFeesAvailable ? `-${formatter.format(active.paymentFees)}` : "Not available", color: costColors[4] },
-    { label: "Shipping & handling", value: `-${formatter.format(active.shipping)}`, color: costColors[5] },
-    { label: "Operating costs", value: `-${formatter.format(active.operating)}`, color: costColors[6] },
+    { label: "Gross revenue (incl. shipping)", value: formatter.format(active.revenue), color: "#7357ff" },
+    { label: "Discounts", value: `-${formatter.format(active.discounts)}`, color: costColors[0] },
+    { label: "Refunds", value: `-${formatter.format(active.refunds)}`, color: costColors[1] },
+    { label: "COGS", value: `-${formatter.format(active.cogs)}`, color: costColors[2] },
+    { label: "Facebook ads", value: `-${formatter.format(active.metaMarketing)}`, color: costColors[3] },
+    { label: "Google Ads", value: `-${formatter.format(active.googleMarketing)}`, color: costColors[4] },
+    { label: "Microsoft Ads", value: `-${formatter.format(active.bingMarketing)}`, color: costColors[5] },
+    { label: "Affiliate commissions & fees", value: `-${formatter.format(active.affiliateMarketing)}`, color: costColors[9] },
+    { label: "Payment fees", value: active.paymentFeesAvailable ? `-${formatter.format(active.paymentFees)}` : "Not available", color: costColors[6] },
+    { label: "Shipping & handling", value: `-${formatter.format(active.shipping)}`, color: costColors[7] },
+    { label: "Operating costs", value: `-${formatter.format(active.operating)}`, color: costColors[8] },
     { label: active.complete ? "Net profit" : "Provisional profit", value: formatter.format(active.profit), color: "#19b981", profit: true },
   ] : [];
-  const segmentLabelWidth = hoveredSegment ? Math.max(58, hoveredSegment.value.length * 6.5 + 18) : 0;
+  const segmentLabelText = hoveredSegment ? `${hoveredSegment.label}: ${hoveredSegment.value}` : "";
+  const segmentLabelWidth = Math.max(58, segmentLabelText.length * 6.5 + 18);
   return <div className="finance-chart">
     <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Revenue, costs and profit over time">
       <line x1={left} x2={left} y1={top} y2={bottom} className="finance-axis"/>
@@ -84,15 +88,15 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
         const center = left + step * index + step / 2;
         const barWidth = Math.min(30, step * .44);
         const revenueTop = y(point.revenue);
-        const costs = [point.cogs, point.metaMarketing, point.googleMarketing, point.bingMarketing, point.paymentFees, point.shipping, point.operating, point.affiliateMarketing];
+        const costs = [point.discounts, point.refunds, point.cogs, point.metaMarketing, point.googleMarketing, point.bingMarketing, point.paymentFees, point.shipping, point.operating, point.affiliateMarketing];
         let currentY = zeroY;
-        return <g key={`${point.start}-${index}`} onMouseEnter={() => setHovered(index)} onMouseLeave={() => { setHovered(null); setHoveredSegment(null); }} onFocus={() => setHovered(index)} onBlur={() => setHovered(null)} onClick={() => onOpen(point)} tabIndex={0} role="button" aria-label={`${point.label}: revenue ${formatter.format(point.revenue)}, costs ${formatter.format(costs.reduce((sum,value)=>sum+value,0))}, profit ${formatter.format(point.profit)}`}>
+        return <g key={`${point.start}-${index}`} onMouseEnter={() => setHovered(index)} onMouseLeave={() => { setHovered(null); setHoveredSegment(null); }} onFocus={() => setHovered(index)} onBlur={() => setHovered(null)} onClick={() => onOpen(point)} tabIndex={0} role="button" aria-label={`${point.label}: gross revenue ${formatter.format(point.revenue)}, deductions and costs ${formatter.format(costs.reduce((sum,value)=>sum+value,0))}, profit ${formatter.format(point.profit)}`}>
           <rect x={center-step/2} y={top} width={step} height={bottom-top+20} fill="transparent" onMouseEnter={() => setHoveredSegment(null)}/>
-          <rect x={center-barWidth/2} y={revenueTop} width={barWidth} height={Math.max(zeroY-revenueTop,1)} rx="4" className="finance-revenue" onMouseEnter={() => setHoveredSegment({ index, value: formatter.format(point.revenue), x: center, y: revenueTop })} onMouseLeave={() => setHoveredSegment(null)}/>
+          <rect x={center-barWidth/2} y={revenueTop} width={barWidth} height={Math.max(zeroY-revenueTop,1)} rx="4" className="finance-revenue" onMouseEnter={() => setHoveredSegment({ index, label: "Gross revenue", value: formatter.format(point.revenue), x: center, y: revenueTop })} onMouseLeave={() => setHoveredSegment(null)}/>
           {costs.map((cost,costIndex) => {
             const segmentHeight = cost / axisMaximum * (bottom-zeroY);
             const segmentTop = currentY;
-            const rect = <rect key={costIndex} x={center-barWidth/2} y={segmentTop} width={barWidth} height={Math.max(segmentHeight,0)} fill={costColors[costIndex]} onMouseEnter={() => setHoveredSegment({ index, value: `-${formatter.format(cost)}`, x: center, y: segmentTop })} onMouseLeave={() => setHoveredSegment(null)}/>;
+            const rect = <rect key={costIndex} x={center-barWidth/2} y={segmentTop} width={barWidth} height={Math.max(segmentHeight,0)} fill={costColors[costIndex]} onMouseEnter={() => setHoveredSegment({ index, label: costLabels[costIndex], value: `-${formatter.format(cost)}`, x: center, y: segmentTop })} onMouseLeave={() => setHoveredSegment(null)}/>;
             currentY += segmentHeight;
             return rect;
           })}
@@ -101,7 +105,7 @@ function FinanceTrendChart({ points, formatter, onOpen }: { points: FinanceTrend
       })}
       <polyline points={line} className="finance-profit-line"/>
       {points.map((point,index) => <circle key={point.start} cx={left+step*index+step/2} cy={y(point.profit)} r={hovered===index?5:3.5} className="finance-profit-dot"/>)}
-      {hoveredSegment && hovered === hoveredSegment.index ? <g className="finance-segment-label" transform={`translate(${Math.max(left + segmentLabelWidth / 2, Math.min(width - right - segmentLabelWidth / 2, hoveredSegment.x))},${Math.max(top + 2, hoveredSegment.y - 26)})`} aria-hidden="true"><rect x={-segmentLabelWidth / 2} y="0" width={segmentLabelWidth} height="21" rx="5"/><text textAnchor="middle" y="14">{hoveredSegment.value}</text></g> : null}
+      {hoveredSegment && hovered === hoveredSegment.index ? <g className="finance-segment-label" transform={`translate(${Math.max(left + segmentLabelWidth / 2, Math.min(width - right - segmentLabelWidth / 2, hoveredSegment.x))},${Math.max(top + 2, hoveredSegment.y - 26)})`} aria-hidden="true"><rect x={-segmentLabelWidth / 2} y="0" width={segmentLabelWidth} height="21" rx="5"/><text textAnchor="middle" y="14">{segmentLabelText}</text></g> : null}
     </svg>
     {active ? <div className="finance-tooltip"><strong>{active.label}</strong>{tooltipRows.map((row) => <span className={`finance-tooltip-row${row.profit ? " tooltip-profit" : ""}`} key={row.label}><i style={{ background: row.color }} aria-hidden="true"/><span>{row.label}</span><b>{row.value}</b></span>)}</div> : null}
   </div>;
@@ -326,10 +330,12 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
     { label: "Net profit", value: displayedNetProfit !== null ? formatter.format(displayedNetProfit) : "—", ...netProfitDelta, delta: netProfitIsProvisional ? "Provisional" : netProfitDelta.delta, hint: pnlSummary?.availability.netProfit ? `${pnlSummary.metrics.netMargin === null ? "—" : `${(pnlSummary.metrics.netMargin * 100).toFixed(1)}%`} net margin` : pnlSummary?.hasData ? "Known costs only · coverage incomplete" : "P&L data unavailable" },
   ] : [];
   const trendSeries: FinanceTrendPoint[] = trendData.map(({ period, data }) => {
-    const reportRevenue = data.metrics.netProductSales - data.metrics.refunds + data.metrics.shippingRevenue;
+    const reportRevenue = data.metrics.netProductSales + data.metrics.discounts + data.metrics.shippingRevenue;
     const reportProfit = data.metrics.netProfit ?? data.metrics.profitAfterMarketingSpend;
     return {
       label: period.label, start: period.start, end: period.end, revenue: reportRevenue, profit: reportProfit, complete: data.availability.netProfit,
+      discounts: data.metrics.discounts,
+      refunds: data.metrics.refunds,
       cogs: data.metrics.cogs,
       metaMarketing: data.metrics.metaMarketingSpend,
       googleMarketing: data.metrics.googleMarketingSpend,
@@ -433,12 +439,13 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
     </button>)}</section>
     <section className="dashboard-grid">
       <article className="panel chart-panel finance-chart-panel overview-wide-panel">
-        <div className="panel-head"><div><span className="eyebrow">PERFORMANCE</span><h2>Revenue, costs and profit</h2></div><div className="finance-legend"><span><i className="legend-revenue"/>Revenue</span><span><i className="legend-cogs"/>COGS</span><span><i className="legend-meta"/>Facebook</span><span><i className="legend-google"/>Google</span><span><i className="legend-microsoft"/>Microsoft Ads</span><span><i className="legend-fees"/>Fees</span><span><i className="legend-shipping"/>Shipping</span><span><i className="legend-operating"/>Operating</span><span><i style={{ background: "#ec4899" }}/>Affiliates</span><span><i className="legend-profit"/>Profit</span></div></div>
+        <div className="panel-head"><div><span className="eyebrow">PERFORMANCE</span><h2>Revenue, costs and profit</h2></div><div className="finance-legend"><span><i className="legend-revenue"/>Gross revenue</span><span><i className="legend-discounts"/>Discounts</span><span><i className="legend-refunds"/>Refunds</span><span><i className="legend-cogs"/>COGS</span><span><i className="legend-meta"/>Facebook</span><span><i className="legend-google"/>Google</span><span><i className="legend-microsoft"/>Microsoft Ads</span><span><i className="legend-fees"/>Fees</span><span><i className="legend-shipping"/>Shipping</span><span><i className="legend-operating"/>Operating</span><span><i style={{ background: "#ec4899" }}/>Affiliates</span><span><i className="legend-profit"/>Profit</span></div></div>
         {loading || trendLoading ? <div className={styles.loading} role="status" aria-live="polite" aria-label="Loading revenue, costs and profit">
           <div className={styles.bars} aria-hidden="true">{[26, 44, 34, 58, 42, 68, 52].map((height, index) => <span key={index} style={{ height, animationDelay: `${index * 110}ms` }}/>)}</div>
           <strong>Bringing your numbers together</strong>
           <span>Loading revenue, costs and profit…</span>
         </div> : trendError ? <PanelState status="error" title="The chart could not be loaded" message="Try loading your revenue and profit trend again." onRetry={() => setTrendRetry(value => value + 1)}/> : <FinanceTrendChart points={trendSeries} formatter={formatter} onOpen={(point) => onDrilldown("Profit & Loss", { from: point.start, to: point.end })}/>}
+        <span className="finance-chart-explainer">Gross revenue includes shipping income. Discounts and refunds are shown as deductions below zero.</span>
         {trendSeries.some((point) => !point.complete) ? <span className="report-note">Profit is provisional where cost coverage is incomplete. Hover a period for the full revenue and cost bridge.</span> : null}
       </article>
       <section className="overview-spend-section overview-wide-panel" aria-label="Marketing spend by channel">
