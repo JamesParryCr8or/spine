@@ -5,17 +5,17 @@ import { StatCardSkeleton } from "@/components/ui/skeleton";
 import { reportingPeriods, type ReportingGranularity } from "@/lib/analytics/reporting-periods";
 import { useResetOnChange } from "@/lib/use-reset-on-change";
 import { fetchJson, peekJson } from "@/lib/queries/client";
-import { BarChart3, CircleDollarSign, Download, ExternalLink, Info, Megaphone, Package, Settings, Sparkles, TrendingUp, Users, WalletCards } from "lucide-react";
+import { BarChart3, Download, ExternalLink, Info, Package, Settings, Users, WalletCards } from "lucide-react";
 import { WarehouseBreakdown } from "@/components/analytics/warehouse-breakdown";
-import { OrderCoverageNotice, type View, type DrilldownContext, default365DayRange, type FinanceDatePreset, financeDateRange, Trend, downloadCsv, useReportRun, type CurrencyCoverage, type CurrencyConversionCoverage, type PnlData, type PnlPeriodData, pnlSeriesKey, fetchPnlSeries, type UtmData, type ProductData, type CustomerData } from "@/components/analytics/shared";
+import { OrderCoverageNotice, type View, type DrilldownContext, default365DayRange, type FinanceDatePreset, financeDateRange, Trend, downloadCsv, useReportRun, type CurrencyCoverage, type CurrencyConversionCoverage, type PnlData, type PnlPeriodData, pnlSeriesKey, fetchPnlSeries, type ProductData, type CustomerData } from "@/components/analytics/shared";
 import { PanelState, UpdatingChip } from "@/components/ui/panel-state";
 import styles from "./overview-loading.module.css";
 
-type OverviewWidgetId = "channel" | "products" | "customers" | "costs";
+type OverviewWidgetId = "products" | "customers" | "costs";
 
-const overviewWidgetIds: OverviewWidgetId[] = ["channel", "products", "customers", "costs"];
+const overviewWidgetIds: OverviewWidgetId[] = ["products", "customers", "costs"];
 
-const overviewWidgetLabels: Record<OverviewWidgetId, string> = { channel: "Channel mix", products: "Top products", customers: "Customer split", costs: "Cost breakdown" };
+const overviewWidgetLabels: Record<OverviewWidgetId, string> = { products: "Top products", customers: "Customer split", costs: "Cost breakdown" };
 
 type FinanceTrendPoint = {
   label: string; start: string; end: string; revenue: number; profit: number; complete: boolean;
@@ -115,7 +115,6 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
   const [pnlComparison, setPnlComparison] = useState<PnlData | null>(null);
   const [overviewProducts, setOverviewProducts] = useState<ProductData | null>(null);
   const [overviewCustomers, setOverviewCustomers] = useState<CustomerData | null>(null);
-  const [overviewUtm, setOverviewUtm] = useState<UtmData | null>(null);
   const [shopifyWidgets, setShopifyWidgets] = useState<ShopifyOverviewWidgets | null>(null);
   const [shopifyWidgetError, setShopifyWidgetError] = useState("");
   const [fromDate, setFromDate] = useState(default365DayRange.from);
@@ -207,7 +206,6 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
       const previousStart = new Date(previousEnd); previousStart.setUTCDate(previousStart.getUTCDate() - days + 1);
       comparisonSuffix = `?from=${previousStart.toISOString().slice(0, 10)}&to=${previousEnd.toISOString().slice(0, 10)}`;
     }
-    const utmSuffix = params.size ? `?attribution=last_touch&${params}` : "?attribution=last_touch";
     const urls: Array<string | null> = [
       `/api/analytics/overview${suffix}`,
       `/api/analytics/pnl${suffix}`,
@@ -215,14 +213,13 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
       comparisonSuffix ? `/api/analytics/pnl${comparisonSuffix}` : null,
       `/api/analytics/products${suffix}`,
       `/api/analytics/customers${suffix}`,
-      `/api/analytics/utm${utmSuffix}`,
     ];
     const controller = new AbortController();
     const show = (results: Array<unknown | null>) => {
-      const [overview, pnl, comparison, previousPnl, productsData, customersData, utmData] = results;
+      const [overview, pnl, comparison, previousPnl, productsData, customersData] = results;
       setLiveData(overview as OverviewData | null); setPnlSummary(pnl as PnlData | null);
       setComparisonData(comparison as OverviewData | null); setPnlComparison(previousPnl as PnlData | null);
-      setOverviewProducts(productsData as ProductData | null); setOverviewCustomers(customersData as CustomerData | null); setOverviewUtm(utmData as UtmData | null);
+      setOverviewProducts(productsData as ProductData | null); setOverviewCustomers(customersData as CustomerData | null);
       setLoadError(!overview);
     };
     void (async () => {
@@ -343,15 +340,15 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
       .catch((error) => { if (!controller.signal.aborted) setShopifyWidgetError(error instanceof Error ? error.message : "Shopify reports could not be loaded"); });
     return () => controller.abort();
   }, [fromDate, toDate]);
-  const channelPalette = ["#7357ff", "#18b981", "#ff9f43", "#37a3ff", "#e85d75"];
-  const channelMap = new Map<string, { sales: number; orders: number }>();
-  for (const row of overviewUtm?.rows ?? []) {
-    const current = channelMap.get(row.channel) ?? { sales: 0, orders: 0 };
-    current.sales += row.sales; current.orders += row.orders; channelMap.set(row.channel, current);
-  }
-  const channelRows = (shopifyWidgets?.channels ?? [...channelMap.entries()].map(([channel, values]) => ({ channel, ...values }))).sort((left, right) => right.sales - left.sales).slice(0, 5);
-  const channelSales = channelRows.reduce((total, row) => total + row.sales, 0);
   const topProducts = shopifyWidgets?.products.map((item) => ({ ...item, missingCostUnits: 1, contributionProfit: 0 })) ?? overviewProducts?.products.slice(0, 5) ?? [];
+  const topProductRevenue = topProducts.reduce((total, item) => total + Math.max(0, item.netRevenue), 0);
+  const topProductMaximum = Math.max(1, ...topProducts.map((item) => Math.max(0, item.netRevenue)));
+  const marketingChannels = [
+    { label: "Meta ads", amount: pnlSummary?.metrics.metaMarketingSpend ?? 0, available: Boolean(pnlSummary?.availability.metaMarketingSpend), color: "#1877f2" },
+    { label: "Google Ads", amount: pnlSummary?.metrics.googleMarketingSpend ?? 0, available: Boolean(pnlSummary?.availability.googleMarketingSpend), color: "#34a853" },
+    { label: "Microsoft Ads", amount: pnlSummary?.metrics.bingMarketingSpend ?? 0, available: Boolean(pnlSummary?.availability.bingMarketingSpend), color: "#0f766e" },
+    { label: "Affiliate fees", amount: pnlSummary?.metrics.affiliateMarketingSpend ?? 0, available: Boolean(pnlSummary?.hasData), color: "#ec4899" },
+  ];
   const customerSplit = shopifyWidgets?.customers ?? (overviewCustomers ? [
     { label: "New", sales: overviewCustomers.metrics.newCustomerSales, orders: overviewCustomers.metrics.newCustomerOrders },
     { label: "Repeat", sales: overviewCustomers.metrics.repeatCustomerSales, orders: overviewCustomers.metrics.repeatCustomerOrders },
@@ -432,7 +429,7 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
       <div className="metric-foot"><Trend positive={metric.positive} neutral={metric.label === "Net profit" && netProfitIsProvisional}>{metric.delta}</Trend><span>{metric.hint}</span></div>
     </button>)}</section>
     <section className="dashboard-grid">
-      <article className="panel chart-panel finance-chart-panel" style={{ order: 0 }}>
+      <article className="panel chart-panel finance-chart-panel overview-wide-panel">
         <div className="panel-head"><div><span className="eyebrow">PERFORMANCE</span><h2>Revenue, costs and profit</h2></div><div className="finance-legend"><span><i className="legend-revenue"/>Revenue</span><span><i className="legend-cogs"/>COGS</span><span><i className="legend-meta"/>Facebook</span><span><i className="legend-google"/>Google</span><span><i className="legend-microsoft"/>Microsoft Ads</span><span><i className="legend-fees"/>Fees</span><span><i className="legend-shipping"/>Shipping</span><span><i className="legend-operating"/>Operating</span><span><i style={{ background: "#ec4899" }}/>Affiliates</span><span><i className="legend-profit"/>Profit</span></div></div>
         {loading || trendLoading ? <div className={styles.loading} role="status" aria-live="polite" aria-label="Loading revenue, costs and profit">
           <div className={styles.bars} aria-hidden="true">{[26, 44, 34, 58, 42, 68, 52].map((height, index) => <span key={index} style={{ height, animationDelay: `${index * 110}ms` }}/>)}</div>
@@ -441,19 +438,24 @@ export function Overview({ reportRunId, onDrilldown, storageKey }: { reportRunId
         </div> : trendError ? <PanelState status="error" title="The chart could not be loaded" message="Try loading your revenue and profit trend again." onRetry={() => setTrendRetry(value => value + 1)}/> : <FinanceTrendChart points={trendSeries} formatter={formatter} onOpen={(point) => onDrilldown("Profit & Loss", { from: point.start, to: point.end })}/>}
         {trendSeries.some((point) => !point.complete) ? <span className="report-note">Profit is provisional where cost coverage is incomplete. Hover a period for the full revenue and cost bridge.</span> : null}
       </article>
+      <section className="overview-spend-section overview-wide-panel" aria-label="Marketing spend by channel">
+        <div className="overview-section-heading"><div><span className="eyebrow">MARKETING</span><h2>Spend by channel</h2></div><span>For the selected period · from Profit &amp; Loss</span></div>
+        <div className="overview-spend-grid">{marketingChannels.map((channel) => {
+          const share = pnlSummary?.metrics.marketingSpend && channel.available ? channel.amount / pnlSummary.metrics.marketingSpend * 100 : 0;
+          return <button type="button" className="panel overview-spend-card" key={channel.label} onClick={() => onDrilldown("Profit & Loss", drilldownRange)} aria-label={`Open ${channel.label} spend in Profit and Loss`}>
+            <span className="overview-spend-label"><i style={{ background: channel.color }}/>{channel.label}<ExternalLink aria-hidden="true"/></span>
+            <strong>{channel.available ? formatter.format(channel.amount) : "—"}</strong>
+            <span className="overview-spend-foot">{channel.available ? `${share.toFixed(1)}% of total marketing cost` : "Spend data unavailable"}</span>
+          </button>;
+        })}</div>
+      </section>
       <article className="panel health-panel" style={{ order: 1 }}><div className="panel-head"><div><span className="eyebrow">DATA HEALTH</span><h2>{hasLiveData ? "Imported store data" : "Store readiness"}</h2></div><span className="score">{hasLiveData ? "LIVE" : "86%"}</span></div>
         <div className="health-ring"><div><strong>{hasLiveData ? liveData!.metrics.orders.toLocaleString() : "86"}</strong><span>{hasLiveData ? "orders" : "Good"}</span></div></div>
         {hasLiveData ? <ul className="health-list"><li><span className="status success"/>Shopify sales loaded <b>{liveData!.metrics.orders.toLocaleString()} orders</b></li><li><span className="status success"/>Data window <b>{liveData!.range.start} – {liveData!.range.end}</b></li><li><span className={(liveData!.meta?.importedDays || liveData!.google?.importedDays || liveData!.bing?.importedDays) ? "status success" : "status warn"}/>Marketing spend <b>{(liveData!.meta?.importedDays || liveData!.google?.importedDays || liveData!.bing?.importedDays) ? `${liveData!.meta?.importedDays ?? 0} Meta days · ${liveData!.google?.importedDays ?? 0} Google days · ${liveData!.bing?.importedDays ?? 0} Microsoft days` : "No spend loaded"}</b></li></ul> : <ul className="health-list"><li><span className="status success"/>Shopify synced <b>2m ago</b></li><li><span className="status success"/>Ad accounts connected <b>2 of 2</b></li><li><span className="status warn"/>Missing product costs <b>14 SKUs</b></li></ul>}
       </article>
-      {widgetVisible("channel") ? <article className="panel channel-panel" style={{ order: widgetOrder("channel") }}><div className="panel-head"><div><span className="eyebrow">ACQUISITION</span><h2>Channel mix</h2></div><button className="panel-drilldown" onClick={() => onDrilldown("UTM Analysis", drilldownRange)}>View report <ExternalLink/></button></div>
-        {channelRows.length ? <div className="channel-table"><div className="channel-row header"><span>Channel</span><span>Orders</span><span>Revenue</span><span>Share</span><span>Revenue mix</span></div>{channelRows.map((channel, index) => { const share = channelSales ? channel.sales / channelSales * 100 : 0; const color = channelPalette[index % channelPalette.length]; return <div className="channel-row" key={channel.channel}><span className="channel-name"><i style={{background:color}}/>{channel.channel}</span><span>{channel.orders.toLocaleString()}</span><strong>{formatter.format(channel.sales)}</strong><span>{share.toFixed(1)}%</span><span className="mix"><i style={{width:`${share}%`, background:color}}/></span></div>; })}</div> : <div className="cost-empty"><Megaphone/><strong>No attributed orders in this period</strong><span>{shopifyWidgetError || "Shopify reported no referrer data for these dates."}</span></div>}
-      </article> : null}
-      {widgetVisible("products") ? <article className="panel report-panel" style={{ order: widgetOrder("products") }}><div className="panel-head"><div><span className="eyebrow">PRODUCTS</span><h2>Top products by net revenue</h2></div><button className="panel-drilldown" onClick={() => onDrilldown("Products", drilldownRange)}>View report <ExternalLink/></button></div>{topProducts.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Product</th><th>Units</th><th>Net revenue</th><th>Share of top five</th></tr></thead><tbody>{topProducts.map((product) => <tr key={product.key}><td><strong>{product.product}</strong><small>{product.variant}</small></td><td>{product.units.toLocaleString()}</td><td>{formatter.format(product.netRevenue)}</td><td>{topProducts.reduce((total, item) => total + Math.max(0, item.netRevenue), 0) ? `${(Math.max(0, product.netRevenue) / topProducts.reduce((total, item) => total + Math.max(0, item.netRevenue), 0) * 100).toFixed(1)}%` : "—"}</td></tr>)}</tbody></table></div> : <div className="cost-empty"><Package/><strong>No product sales in this period</strong><span>{shopifyWidgetError}</span></div>}</article> : null}
+      {widgetVisible("products") ? <article className="panel report-panel" style={{ order: widgetOrder("products") }}><div className="panel-head"><div><span className="eyebrow">PRODUCTS</span><h2>Top products by net revenue</h2></div><button className="panel-drilldown" onClick={() => onDrilldown("Products", drilldownRange)}>View report <ExternalLink/></button></div>{topProducts.length ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Product</th><th>Units</th><th>Net revenue</th><th>Share of top five</th></tr></thead><tbody>{topProducts.map((product) => { const share = topProductRevenue ? Math.max(0, product.netRevenue) / topProductRevenue * 100 : 0; return <tr key={product.key}><td><strong>{product.product}</strong><small>{product.variant}</small></td><td>{product.units.toLocaleString()}</td><td>{formatter.format(product.netRevenue)}</td><td><div className="overview-product-share"><span>{topProductRevenue ? `${share.toFixed(1)}%` : "—"}</span><div className="overview-product-track" role="img" aria-label={`${product.product}: ${share.toFixed(1)} percent of top five revenue`}><i style={{ width: `${Math.max(0, product.netRevenue) / topProductMaximum * 100}%` }}/></div></div></td></tr>; })}</tbody></table></div> : <div className="cost-empty"><Package/><strong>No product sales in this period</strong><span>{shopifyWidgetError}</span></div>}</article> : null}
       {widgetVisible("customers") ? <article className="panel report-panel" style={{ order: widgetOrder("customers") }}><div className="panel-head"><div><span className="eyebrow">CUSTOMERS</span><h2>Customer sales split</h2></div><button className="panel-drilldown" onClick={() => onDrilldown("Customers", drilldownRange)}>View report <ExternalLink/></button></div>{customerSplit.length ? <div className="report-summary">{customerSplit.map((row) => <div key={row.label}><span>{row.label}</span><strong>{formatter.format(row.sales)}</strong><small>{row.orders.toLocaleString()} orders · {customerSales ? (row.sales / customerSales * 100).toFixed(1) : "0.0"}%</small></div>)}</div> : <div className="cost-empty"><Users/><strong>No customer sales in this period</strong><span>{shopifyWidgetError}</span></div>}</article> : null}
       {widgetVisible("costs") ? <article className="panel report-panel" style={{ order: widgetOrder("costs") }}><div className="panel-head"><div><span className="eyebrow">COSTS</span><h2>Known cost breakdown</h2></div><button className="panel-drilldown" onClick={() => onDrilldown("Profit & Loss", drilldownRange)}>View report <ExternalLink/></button></div>{costBreakdown.length ? <div className="report-summary">{costBreakdown.map((row) => <div key={row.label}><span>{row.label}</span><strong>{formatter.format(row.amount)}</strong><small>{totalKnownCosts ? (row.amount / totalKnownCosts * 100).toFixed(1) : "0.0"}% of known costs</small></div>)}</div> : <div className="cost-empty"><WalletCards/><strong>No cost data in this period</strong></div>}</article> : null}
-      <article className="panel activity-panel" style={{ order: 10 }}><div className="panel-head"><div><span className="eyebrow">NEXT STEPS</span><h2>{hasLiveData ? "Complete your profit picture" : "Profit opportunities"}</h2></div></div>
-        {hasLiveData ? <><div className="opportunity"><span className="opp-icon purple"><WalletCards/></span><div><strong>Add effective-dated product costs</strong><p>Product profitability becomes more precise as cost coverage improves.</p></div></div><div className="opportunity"><span className="opp-icon green"><Megaphone/></span><div><strong>Review your UTM analysis</strong><p>See the sources, mediums, and campaigns attached to imported orders.</p></div></div><div className="opportunity"><span className="opp-icon orange"><CircleDollarSign/></span><div><strong>Connect marketing spend</strong><p>ROAS and final net profit need trusted campaign spend and merchant shipping costs.</p></div></div></> : <><div className="opportunity"><span className="opp-icon purple"><Sparkles/></span><div><strong>14 products need costs</strong><p>£8,420 revenue has unknown margin.</p></div><button>Add costs</button></div><div className="opportunity"><span className="opp-icon green"><TrendingUp/></span><div><strong>Google Brand is outperforming</strong><p>ROAS improved 22% this period.</p></div><button>Explore</button></div><div className="opportunity"><span className="opp-icon orange"><Megaphone/></span><div><strong>Campaign naming mismatch</strong><p>3 campaigns need UTM mapping.</p></div><button>Fix</button></div></>}
-      </article>
     </section>
   </>;
 }

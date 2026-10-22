@@ -117,6 +117,27 @@ button { cursor:pointer; }
 .finance-date-controls input[type="date"]:focus,.finance-date-controls select:focus,.pnl-period input[type="date"]:focus{border-color:#7357ff;box-shadow:0 0 0 3px #7357ff1a}
 .finance-date-controls input[type="date"]::-webkit-calendar-picker-indicator,.pnl-period input[type="date"]::-webkit-calendar-picker-indicator{opacity:.7;cursor:pointer}
 .finance-chart-panel{min-height:430px}
+.dashboard-grid>.overview-wide-panel{grid-column:1 / -1}
+.dashboard-grid>.health-panel{grid-column:2;grid-row:3}
+.overview-spend-section{min-width:0}
+.overview-section-heading{display:flex;align-items:end;justify-content:space-between;gap:16px;margin:4px 0 12px}
+.overview-section-heading h2{margin:4px 0 0;font-size:17px;letter-spacing:-.3px}
+.overview-section-heading>span{color:#8490a4;font-size:11px}
+.overview-spend-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.overview-spend-card{display:flex;flex-direction:column;align-items:flex-start;min-width:0;text-align:left;cursor:pointer;padding:18px 20px}
+.overview-spend-card:hover,.overview-spend-card:focus-visible{border-color:#a99bff;box-shadow:0 6px 22px #6c5ce71a;outline:none}
+.overview-spend-label{display:flex;align-items:center;gap:8px;width:100%;font-size:11px;font-weight:700;color:#667188}
+.overview-spend-label i{width:9px;height:9px;border-radius:50%;flex:none}
+.overview-spend-label svg{width:14px;height:14px;margin-left:auto;color:#a8afbd}
+.overview-spend-card>strong{margin:15px 0 10px;font-size:24px;letter-spacing:-.6px;color:#172033}
+.overview-spend-foot{font-size:10px;color:#8190a6}
+.overview-product-share{display:flex;align-items:center;gap:12px;justify-content:flex-end;min-width:150px}
+.overview-product-share>span{min-width:40px;font-weight:700;color:#38445a}
+.overview-product-track{width:104px;height:7px;border-radius:99px;background:#eeecfb;overflow:hidden}
+.overview-product-track i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#8a79ff,#5e43e7)}
+.overview-wide-panel .finance-chart svg{height:auto;aspect-ratio:920 / 330}
+@media(max-width:1050px){.dashboard-grid>.health-panel{grid-column:auto;grid-row:auto}.overview-spend-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){.overview-spend-grid{grid-template-columns:1fr 1fr}.overview-section-heading{align-items:flex-start;flex-direction:column}.overview-spend-card{padding:15px}.overview-spend-card>strong{font-size:20px}.overview-product-share{min-width:120px}.overview-product-track{width:70px}}
 .finance-chart-panel .panel-head{gap:18px;align-items:center;margin-bottom:8px}
 .finance-legend{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:7px 11px;color:#6f7890;font-size:8px}
 .finance-legend span{display:inline-flex;align-items:center;gap:4px}
