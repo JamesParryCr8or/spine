@@ -153,9 +153,13 @@ button { cursor:pointer; }
 .finance-label,.finance-axis-label{fill:#8b94a6;font-size:9px;font-weight:600}
 .finance-chart g[role="button"]{cursor:pointer;outline:none}
 .finance-chart g[role="button"]:focus .finance-revenue,.finance-chart g[role="button"]:hover .finance-revenue{fill:#5e43e7}
+.finance-segment-label{pointer-events:none}
+.finance-segment-label rect{fill:#202a3d;filter:drop-shadow(0 2px 5px #17203335)}
+.finance-segment-label text{fill:#fff;font-size:10px;font-weight:800}
 .finance-tooltip{position:absolute;z-index:3;top:8px;right:8px;min-width:220px;padding:12px 14px;border:1px solid #dde2eb;border-radius:9px;background:#fff;box-shadow:0 12px 30px #1720331f;display:grid;gap:6px;font-size:9px;color:#596376;pointer-events:none}
 .finance-tooltip strong{font-size:11px;color:#202a3d;margin-bottom:2px}
-.finance-tooltip span{display:flex;justify-content:space-between;gap:20px}
+.finance-tooltip .finance-tooltip-row{display:grid;grid-template-columns:8px minmax(0,1fr) auto;align-items:center;gap:7px}
+.finance-tooltip-row i{width:7px;height:7px;border-radius:2px}
 .finance-tooltip b{color:#273249}
 .finance-tooltip .tooltip-profit{border-top:1px solid #eceff4;padding-top:7px;margin-top:2px;color:#138860;font-weight:800}
 @media(max-width:900px){.finance-chart-panel .panel-head{align-items:flex-start;flex-direction:column}.finance-legend{justify-content:flex-start}.finance-chart{overflow-x:auto}.finance-chart svg{min-width:760px}.finance-date-controls label,.finance-date-controls label:first-child select{width:100%}.finance-date-controls input[type="date"],.finance-date-controls select{width:100%}}
