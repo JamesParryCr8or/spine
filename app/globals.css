@@ -606,3 +606,5 @@ button { cursor:pointer; }
 .warehouse-cost-callout strong{display:block;margin-bottom:3px;color:#4535ad;font-size:12px;font-weight:750}
 .warehouse-cost-callout p{margin:0;color:#59647a}
 @media(max-width:760px){.warehouse-cost-copy{padding:0 16px 18px}.warehouse-cost-callout{padding:11px 13px}}
+
+.team-copy{display:inline-flex;align-items:center;gap:6px;flex:none;min-height:36px;padding:0 12px;border:1px solid #d9d1ff;border-radius:9px;background:#f2efff;color:#5949d0;font-size:12px;font-weight:700}.team-copy svg{width:16px;height:16px}

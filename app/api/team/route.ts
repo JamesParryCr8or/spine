@@ -4,6 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { canManageTeam } from "@/lib/workspace/permissions";
 import { requireWorkspace } from "@/lib/workspace/server";
 
+import { createInvitationShareToken } from "@/lib/workspace/invitation-token";
+
 const allowedInviteRoles = new Set(["admin", "analyst", "connector", "viewer"]);
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -39,15 +41,19 @@ export async function GET(request: Request) {
     ...(organizationAdminsResult.data ?? []).map((member) => ({ ...member, scope: "workspace" as const })),
     ...(storeMembersResult.data ?? []).map((member) => ({ ...member, scope: "store" as const })),
   ];
-  let invitations: Array<{ id: string; email: string; role: string; created_at: string; expires_at: string }> = [];
+  let invitations: Array<{ id: string; email: string; role: string; created_at: string; expires_at: string; inviteUrl: string }> = [];
   if (canManageTeam(workspace.membership.role)) {
     const result = await workspace.supabase.from("organization_invitations")
-      .select("id,email,role,created_at,expires_at")
+      .select("id,email,role,created_at,expires_at,token_hash")
       .eq("organization_id", organizationId).eq("store_id", storeId)
       .is("accepted_at", null).is("revoked_at", null).gt("expires_at", new Date().toISOString())
       .order("created_at", { ascending: false });
     if (result.error) return NextResponse.json({ error: result.error.message }, { status: 500 });
-    invitations = result.data ?? [];
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || new URL(request.url).origin;
+    invitations = (result.data ?? []).map(({ token_hash, ...invitation }) => ({
+      ...invitation,
+      inviteUrl: new URL(`/invite/${createInvitationShareToken(token_hash)}`, siteUrl).toString(),
+    }));
   }
   return NextResponse.json({
     role: workspace.membership.role,
@@ -59,7 +65,7 @@ export async function GET(request: Request) {
     roles: rolesResult.data ?? [],
     members,
     invitations,
-  });
+  }, { headers: { "Cache-Control": "private, no-store" } });
 }
 
 export async function POST(request: Request) {
